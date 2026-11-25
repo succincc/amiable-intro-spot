@@ -94,8 +94,25 @@ export function privateTerms(profile, structured = null) {
   }
   for (const e of structured?.education ?? []) add(e.school, 6);
   for (const c of structured?.certifications ?? []) add(c.name, 8);
+  // The town by its own name as well as in full: a form's list of places is
+  // searched by "Springfield", not "Springfield Township".
+  for (const town of [p.city, p.home_city]) {
+    for (const w of String(town ?? "").split(/[\s,]+/)) if (w.length >= 5 && !PLAIN_PLACE.test(w)) add(w, 5);
+  }
+  // The state spelled out. Its two letters are too short to strike safely.
+  for (const st of [p.state, p.home_state]) {
+    const full = STATES[String(st ?? "").trim().toUpperCase()] ?? (String(st ?? "").trim().length > 3 ? String(st).trim() : "");
+    if (full) add(full, 4);
+  }
+  // A line is often cut to a width, and a term cut short is still the term.
+  for (const t of [...out]) for (const n of [34, 30, 28, 26, 24, 22, 20, 18, 16, 14]) if (t.length > n) add(t.slice(0, n).trim(), 12);
   return [...out].sort((a, b) => b.length - a.length);
 }
+
+const PLAIN_PLACE = /^(township|borough|village|north|south|east|west|upper|lower|mount|saint|point|beach|park|city|town|lake|heights|falls|springs|county|new|fort|port)$/i;
+const STATES = { AL: "Alabama", AK: "Alaska", AZ: "Arizona", AR: "Arkansas", CA: "California", CO: "Colorado", CT: "Connecticut", DE: "Delaware", FL: "Florida", GA: "Georgia", HI: "Hawaii", ID: "Idaho", IL: "Illinois", IN: "Indiana", IA: "Iowa", KS: "Kansas", KY: "Kentucky", LA: "Louisiana", ME: "Maine", MD: "Maryland", MA: "Massachusetts", MI: "Michigan", MN: "Minnesota", MS: "Mississippi", MO: "Missouri", MT: "Montana", NE: "Nebraska", NV: "Nevada", NH: "New Hampshire", NJ: "New Jersey", NM: "New Mexico", NY: "New York", NC: "North Carolina", ND: "North Dakota", OH: "Ohio", OK: "Oklahoma", OR: "Oregon", PA: "Pennsylvania", RI: "Rhode Island", SC: "South Carolina", SD: "South Dakota", TN: "Tennessee", TX: "Texas", UT: "Utah", VT: "Vermont", VA: "Virginia", WA: "Washington", WV: "West Virginia", WI: "Wisconsin", WY: "Wyoming" };
+// Words too ordinary to stand for an employer on their own.
+const PLAIN_FIRM = /^(the|american|america|national|international|united|first|general|global|group|health|healthcare|bank|financial|services|service|company|corporation|systems|solutions|technologies|technology|digital|capital|partners|associates|medical|center|university|college|school|state|county|city|north|south|east|west|central|pacific|atlantic|advanced|applied|modern|premier|standard|universal|community|consumer|energy|foods|home|life|management|marketing|network|office|people|public|retail|supply|trust|world)$/i;
 
 /** One line, with whatever is the owner's struck out of it. */
 export function scrub(line, terms, phone = null) {
@@ -129,6 +146,9 @@ export function scrubPlaces(line) {
 // posting's title becomes "a posting". Kept apart from the owner's own
 // details because they are learned one job at a time.
 const SWAPS = new Map();
+// First words of employers, for when a quoted question is cut off partway
+// through one: "have you ever worked for acm".
+const TAILS = new Map();
 const cuts = (t, sizes) => [t, ...sizes.filter((n) => n < t.length && n >= 8).map((n) => t.slice(0, n).trim())];
 export function hideJob(job) {
   const company = String(job?.company ?? "").replace(/\s+/g, " ").trim();
@@ -136,6 +156,14 @@ export function hideJob(job) {
   // Lines are often cut to a width, so the cut forms are known too.
   if (title.length >= 6) for (const t of cuts(title, [70, 60, 52, 44, 40, 34, 30, 28, 24, 20])) SWAPS.set(t, "[a posting]");
   if (company.length >= 3) for (const c of cuts(company, [40, 30, 28, 26, 24, 22, 20, 18])) SWAPS.set(c, aliasFor(company));
+  // The name people actually use is its first word — a form asks "have you
+  // ever worked for Acme", not "for Acme Holdings, Inc." — and its questions
+  // are printed cut short, so the start of that word counts too.
+  const first = company.split(/[\s,.&/-]+/).find((w) => w.length >= 5 && !PLAIN_FIRM.test(w));
+  if (first) {
+    SWAPS.set(first, aliasFor(company));
+    TAILS.set(first.toLowerCase(), aliasFor(company));
+  }
 }
 /** A list of employers, by name, to be printed only as their aliases. */
 export function hideNames(names) {
@@ -157,6 +185,15 @@ export function shape(row) {
 
 function swap(line) {
   let s = String(line);
+  // The start of an employer's name where a quoted text was cut: three or
+  // more of its letters, a space before, the closing quote straight after.
+  if (TAILS.size) {
+    s = s.replace(/(\s)([A-Za-z]{3,})(\s?")/g, (whole, lead, word, close) => {
+      const w = word.toLowerCase();
+      for (const [name, to] of TAILS) if (name.length > w.length && name.startsWith(w)) return `${lead}${to}${close}`;
+      return whole;
+    });
+  }
   for (const [from, to] of [...SWAPS.entries()].sort((a, b) => b[0].length - a[0].length)) {
     // A short name only as a whole word: "Coty" is not the middle of another.
     const body = esc(from).replace(/\\? /g, "\\s+");

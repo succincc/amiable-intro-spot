@@ -282,6 +282,12 @@ Microsoft Power BI`;
   check("quiet: the system's own addresses and file names are left", quiet.scrubPlaces("https://abc.supabase.co/rest/v1/jobs apply.mjs resume.pdf e.message"), "https://abc.supabase.co/rest/v1/jobs apply.mjs resume.pdf e.message");
   check("quiet: the same employer, the same alias", [quiet.aliasFor("Garden State Foods") === quiet.aliasFor("garden state  foods!"), /^employer-[0-9a-f]{5}$/.test(quiet.aliasFor("Garden State Foods"))], [true, true]);
   check("quiet: a record's shape and none of its words", quiet.shape({ Title: "Manager", n: 3, tags: ["a"], x: null }), { Title: "text of 7", n: "number", tags: "list of 1", x: "empty" });
+  {
+    const t2 = quiet.privateTerms({ full_name: "Pat Q. Example", city: "Springfield Township", state: "NJ" }, { experience: [{ company: "Fixture Goods Digital Marketing LLC", title: "Owner and Operator" }] });
+    const say2 = (t) => quiet.scrub(t, t2);
+    check("quiet: the town on its own, and the state spelled out", say2('found options under "Springfield"; picker -> "New Jersey"'), 'found options under "[…]"; picker -> "[…]"');
+    check("quiet: an employer from the resume, cut to a width", say2('wanted "Fixture Goods Digital Ma" -> empty'), 'wanted "[…]" -> empty');
+  }
   check("quiet: a name", say("resume for Pat Q. Example attached"), "resume for […] attached");
   check("quiet: a surname alone, any case", say("hello EXAMPLE"), "hello […]");
   check("quiet: an email address", say("code sent to pat.example@mail.test"), "code sent to […]");
