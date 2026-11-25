@@ -2067,7 +2067,7 @@ async function ensureAccount(page, profile, job) {
     // comes if the account is there.
     if (
       !RESET_TRIED.has(host) &&
-      (signup || /wrong email|incorrect|invalid|locked|does not match/i.test(bodyNow))
+      (signup || existing || /wrong email|incorrect|invalid|locked|does not match/i.test(bodyNow))
     ) {
       RESET_TRIED.add(host);
       const fresh = portalPassword();
@@ -2376,7 +2376,7 @@ async function oracleAddress(page, form, profile) {
     // are rows of the portal's own, not ordinary options.
     const items = async () =>
       listId
-        ? await form.$$(`[id="${listId}"] .cx-select__list-item:not(.cx-select__list-item--loading)`).catch(() => [])
+        ? await form.$$(`[id="${listId}"] .cx-select__list-item:not(.cx-select__list-item--loading), [id="${listId}"] [role=option], [id="${listId}"] li[role=row], [id="${listId}"] [role=gridcell]`).catch(() => [])
         : [];
     let found = [];
     for (let attempt = 0; attempt < 2 && !found.length; attempt++) {
@@ -2841,7 +2841,24 @@ async function oracleEducation(page, form, profile, resume, tileText = "") {
     }
     return null;
   };
-  const school = await visible("educationalEstablishmentId");
+  // A visible box by the words of its own label, for the portals that name
+  // their boxes some other way.
+  const labelled = async (re) => {
+    const h = await form
+      .evaluateHandle((src) => {
+        const want = new RegExp(src, "i");
+        const shown = (e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+        for (const l of Array.from(document.querySelectorAll("label")).filter(shown)) {
+          if (!want.test((l.innerText || "").replace(/\s+/g, " ").trim())) continue;
+          const c = (l.htmlFor && document.getElementById(l.htmlFor)) || l.parentElement?.querySelector("input, [role=combobox]") || l.closest("div")?.parentElement?.querySelector("input, [role=combobox]");
+          if (c && shown(c)) return c;
+        }
+        return null;
+      }, re.source)
+      .catch(() => null);
+    return h?.asElement?.() ?? null;
+  };
+  const school = (await visible("educationalEstablishmentId")) ?? (await visible("educationalEstablishment")) ?? (await labelled(/^(school|institution|college|university)\b/));
   // WHICH of the owner's schools this entry is. A resume with a bachelor's
   // from one and an associate's from another has two entries here, and each
   // must get its own school and its own degree — the highest degree on the
@@ -2980,7 +2997,24 @@ async function oracleEducation(page, form, profile, resume, tileText = "") {
     console.log(`    oracle education: school ${got ? (/^(other|not |unlisted|school not)/i.test(got) ? "not on the list; chose the list's own entry for that" : "chosen from the list") : "could not be chosen"}`);
     if (got) done++;
   }
-  const degree = await visible("contentItemId");
+  const degree = (await visible("contentItemId")) ?? (await visible("degree")) ?? (await labelled(/^degree\b/));
+  if (!degree) {
+    // Asked for and not found: what stands beside the word, by shape.
+    const near = await form
+      .evaluate(() => {
+        const shown = (e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+        const out = [];
+        for (const l of Array.from(document.querySelectorAll("label, span, div")).filter(shown)) {
+          if (!/^degree\b/i.test((l.innerText || "").trim()) || (l.innerText || "").length > 30) continue;
+          const row = l.closest('[class*="row" i], [class*="field" i]') ?? l.parentElement;
+          out.push(Array.from(row?.querySelectorAll("input, button, select, [role]") ?? []).slice(0, 6).map((c) => `${c.tagName}${c.getAttribute("role") ? `[${c.getAttribute("role")}]` : ""}:${String(c.id || c.className || "").replace(/\d+/g, "N").slice(0, 30)}`));
+          if (out.length >= 2) break;
+        }
+        return out;
+      })
+      .catch(() => null);
+    console.log(`    oracle education: no degree box was found; beside the word "Degree": ${JSON.stringify(near).slice(0, 400)}`);
+  }
   // This entry's own degree where it was matched; the resume's highest only
   // when there is a single school.
   const level = ownLevel ?? (entry ? highestDegree(entry.degree) ?? highestDegree(resume) : highestDegree(resume));
@@ -3031,6 +3065,7 @@ async function oracleEducation(page, form, profile, resume, tileText = "") {
 async function oracleRepair(page, form, profile, job, onlyReport = false, lookupSaved = () => null) {
   let fixed = 0;
   let eduDone = false;
+  const comboTried = new Set();
   let shapesShown = 0;
   const report = [];
   const resume = String(job?.tailored_resume || profile?.resume_text || "");
@@ -3072,7 +3107,13 @@ async function oracleRepair(page, form, profile, job, onlyReport = false, lookup
       }
       if (chosenAlready || !picks.length) continue;
       const want = answerQuestion(l, profile) ?? lookupSaved(l) ?? lastResort(l, profile, job);
-      const chosen = want === null || want === undefined || want === "" ? null : bestOption(picks, want, l);
+      let chosen = want === null || want === undefined || want === "" ? null : bestOption(picks, want, l);
+      // How much travel, offered as percentages with nothing on file: the
+      // least on offer, which promises nothing the owner has not agreed to.
+      if (!chosen && /travel/.test(l) && picks.every((x) => /^\d{1,3}\s*%$/.test(x.text))) {
+        chosen = [...picks].sort((x, y) => parseInt(x.text, 10) - parseInt(y.text, 10))[0];
+        console.log(`    oracle question "${about.label.slice(0, 50)}": nothing on file, so the least travel on offer`);
+      }
       if (!chosen) {
         console.log(`    oracle question "${about.label.slice(0, 70)}" has no answer on file; offered ${JSON.stringify(picks.map((x) => x.text).slice(0, 5))}`);
         continue;
@@ -3083,6 +3124,69 @@ async function oracleRepair(page, form, profile, job, onlyReport = false, lookup
       console.log(`    oracle question "${about.label.slice(0, 50)}" -> "${chosen.text.slice(0, 20)}"${on ? "" : " (did not take)"}`);
       if (on) fixed++;
       continue;
+    }
+
+    // The country, or the dialling code beside the phone number, that the
+    // form stops at: typed and not chosen, or never set. Chosen from the
+    // portal's own list here, whatever that list is built from.
+    if (about.role === "combobox" && /^(country|phone number)$/i.test(about.label) && !comboTried.has(about.id)) {
+      comboTried.add(about.id);
+      const code = /phone/i.test(about.label);
+      const listId = String((await el.getAttribute("aria-controls").catch(() => null)) ?? "").replace(/["\\]/g, "");
+      const rows = async () =>
+        listId
+          ? await form.$$(`[id="${listId}"] .cx-select__list-item:not(.cx-select__list-item--loading), [id="${listId}"] [role=option], [id="${listId}"] li, [id="${listId}"] [role=gridcell]`).catch(() => [])
+          : [];
+      let took = false;
+      let seen = 0;
+      for (const typed of ["United States", "United", "US"]) {
+        await el.click({ timeout: 3000 }).catch(() => {});
+        await el.fill("", { timeout: 3000 }).catch(() => {});
+        await el.type(typed, { delay: 80 }).catch(() => {});
+        const list = (await until(async () => { const l = await rows(); return l.length ? l : null; }, 7000, 400)) ?? [];
+        seen = Math.max(seen, list.length);
+        for (const it of list.slice(0, 20)) {
+          const t = ((await it.innerText().catch(() => "")) || "").replace(/\s+/g, " ").trim().toLowerCase();
+          if (code ? /^(\+?1\b.*united states|united states\b.*\+?1\b|united states( of america)?|us \+1|\+1)$/.test(t) : /^united states( of america)?$/.test(t)) {
+            await it.click({ timeout: 3000 }).catch(() => it.click({ timeout: 3000, force: true }).catch(() => {}));
+            took = true;
+            break;
+          }
+        }
+        if (took) break;
+      }
+      if (!took && listId === "") {
+        // No list of its own to read: take the first suggestion by key.
+        await page.keyboard.press("ArrowDown").catch(() => {});
+        await page.keyboard.press("Enter").catch(() => {});
+      }
+      await page.waitForTimeout(code ? 800 : 3000);
+      const bad = (await el.getAttribute("aria-invalid").catch(() => null)) === "true";
+      console.log(`    oracle ${code ? "dialling code" : "country"}: ${took ? "chosen from the list" : `not chosen (the list showed ${seen} row(s)${listId ? "" : ", and names no list"})`}; the form ${bad ? "still marks it" : "does not mark it"}`);
+      if (took && !bad) fixed++;
+      continue;
+    }
+
+    // A question answered in words, left empty. "Please list the names,
+    // relationship and work location of relatives working here" has one
+    // truthful answer for someone who has said they have none.
+    if (!about.role && about.label && !/edit/i.test(about.cls)) {
+      const tag = await el.evaluate((a) => `${a.tagName}:${a.getAttribute("type") ?? ""}`).catch(() => "");
+      if (/^(TEXTAREA:|INPUT:(text)?$)/.test(tag) && !String(await el.inputValue().catch(() => "x")).trim()) {
+        const l = about.label.toLowerCase();
+        let say = null;
+        if (/relative|family member|related to/.test(l) && /list|name|describe|explain|specify|provide/.test(l)) say = "None";
+        else say = lookupSaved(l);
+        if (say) {
+          await el.fill(String(say).slice(0, 400), { timeout: 3000 }).catch(() => {});
+          await page.keyboard.press("Tab").catch(() => {});
+          console.log(`    oracle question in words "${about.label.slice(0, 40)}" answered`);
+          fixed++;
+        } else {
+          console.log(`    oracle question in words "${about.label.slice(0, 60)}" has no answer on file`);
+        }
+        continue;
+      }
     }
 
     // The school or degree box of an education entry that is already open.
@@ -3140,7 +3244,10 @@ async function oracleRepair(page, form, profile, job, onlyReport = false, lookup
         }
         return null;
       };
-      const hasSchool = !!(await shownBox("educationalEstablishmentId"));
+      const hasSchool = !!((await shownBox("educationalEstablishmentId")) ?? (await shownBox("educationalEstablishment")));
+      // "The Degree field is required", said beside an entry whose own boxes
+      // are marked with nothing.
+      const wantsDegree = hasSchool && (await form.evaluate(() => /degree field is required/i.test(document.body.innerText || "")).catch(() => false));
       const hasList = !!(await shownBox("contentItemId"));
       if (hasList && !hasSchool) {
         const did = await oracleCertificate(page, form, profile, resume, tileText, el);
@@ -3151,7 +3258,7 @@ async function oracleRepair(page, form, profile, job, onlyReport = false, lookup
           fixed++;
           continue;
         }
-      } else if (need.some((n) => /^(educationalEstablishmentId|contentItemId)/.test(n))) {
+      } else if (wantsDegree || need.some((n) => /^(educationalEstablishment|contentItemId|degree)/i.test(n))) {
         const n = await oracleEducation(page, form, profile, resume, tileText);
         if (n) {
           done = await oracleSave(page, form);
@@ -6620,6 +6727,7 @@ async function applyToJobOnce(context, job, profile, answers) {
 
     // --- fill, across multiple pages if needed ---
     let retries = 0;
+    let settles = 0;
     let lastRefusal = null;
     // J&J advanced eight times and was still going when the loop ended.
     for (let step = 0; step < 14; step++) {
@@ -7470,7 +7578,19 @@ async function applyToJobOnce(context, job, profile, answers) {
                 // to type. Reading the list was never about clicking it; it
                 // was about learning that this employer says "BMS Website"
                 // where the profile says "Company website".
-                const hit = bestOption(offered, want, label);
+                let hit = bestOption(offered, want, label);
+                // A list with one thing in it, and that thing an
+                // acknowledgement, is a notice to be acknowledged and not a
+                // question: "Note to California residents — Acknowledge".
+                // The answer on file for it is a yes or a no, which matches
+                // nothing, and a finished application stopped over it.
+                if (!hit) {
+                  const real = offered.filter((o) => o.text);
+                  if (real.length === 1 && /^(i\s+)?(acknowledge|acknowledged|understand|understood|agree|accept|confirm)\b/i.test(real[0].text.trim())) {
+                    hit = real[0];
+                    console.log(`    "${label.slice(0, 28)}" is a notice with one answer; acknowledging it`);
+                  }
+                }
                 // What the chosen option is built from, on the question that
                 // keeps selecting nothing. The prompt is shut again by the
                 // time anything else looks, so it is described here, open.
@@ -8176,6 +8296,7 @@ async function applyToJobOnce(context, job, profile, answers) {
 
       if (moved.ok) {
         retries = 0;
+        settles = 0;
         continue;
       }
 
@@ -8190,6 +8311,36 @@ async function applyToJobOnce(context, job, profile, answers) {
       // The same refusal twice is not a reveal. Booz Allen returned "Enter a
       // postal code in the correct format" three times running while this
       // dutifully refilled the screen and asked again.
+      // A click that changed nothing and named nothing, on a screen where
+      // nothing was found to answer, is more often a screen that had not
+      // finished drawing than one that refused: three applications at one
+      // employer stopped at step three with no question read, while a fourth
+      // on the same portal found seven there. Say what is on the screen,
+      // give it a moment, and look once more before calling it a dead end.
+      if (!(moved.rejected ?? []).length && settles < 1) {
+        settles++;
+        const seen = await form
+          .evaluate(() => {
+            const text = (sel) => Array.from(document.querySelectorAll(sel)).map((n) => (n.innerText || "").replace(/\s+/g, " ").trim()).filter(Boolean);
+            const shown = (sel) => Array.from(document.querySelectorAll(sel)).filter((n) => n.offsetParent !== null).length;
+            return {
+              step: text('[data-automation-id="progressBarActiveStep"]').map((t) => t.slice(0, 50))[0] ?? null,
+              headings: text("h2, h3").slice(0, 5).map((t) => t.slice(0, 50)),
+              alerts: text('[role=alert], [data-automation-id="errorBanner"], [data-automation-id*="errorMessage" i]').slice(0, 4).map((t) => t.slice(0, 140)),
+              pickers: shown('button[aria-haspopup="listbox"]'),
+              boxes: shown("input:not([type=hidden]):not([type=checkbox]):not([type=radio]), textarea"),
+              ticks: shown("input[type=checkbox], [role=checkbox]"),
+              radios: shown("input[type=radio], [role=radio]"),
+              busy: shown('[data-automation-id="loadingSpinner"], [aria-busy="true"]'),
+            };
+          })
+          .catch(() => null);
+        console.log(`    step ${step + 1}: nothing moved and nothing was named; the screen holds ${JSON.stringify(seen)}; looking again`);
+        await page.waitForTimeout(4500);
+        step--;
+        continue;
+      }
+
       const why = JSON.stringify(moved.rejected ?? []);
       if (why === lastRefusal) {
         console.log(`    step ${step + 1}: refused for the same reason again, so not retrying`);
