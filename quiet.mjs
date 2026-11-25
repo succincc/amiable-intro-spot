@@ -133,7 +133,7 @@ export function scrubPlaces(line) {
   let s = String(line);
   s = s.replace(/https?:\/\/([A-Za-z0-9.-]+(?::\d+)?)([^\s"'<>)\]]*)/g, (whole, host) => placeOf(host) ?? whole);
   // A bare portal host with no scheme in front of it.
-  s = s.replace(/\b([a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:myworkdayjobs\.com|myworkdaysite\.com|oraclecloud\.com|successfactors\.(?:com|eu)|greenhouse\.io|lever\.co|ashbyhq\.com|icims\.com))\b/gi, (whole, host) => placeOf(host) ?? whole);
+  s = s.replace(/\b([a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:myworkdayjobs\.com|myworkdaysite\.com|oraclecloud\.com|successfactors\.(?:com|eu)|greenhouse\.io|lever\.co|ashbyhq\.com|icims\.com))\b(?:\/[^\s"'<>)\]]*)?/gi, (whole, host) => placeOf(host) ?? whole);
   // Any other host written without its scheme ("the wall at careers.acme.com/apply").
   s = s.replace(/(^|[\s"'(=:])((?:[a-z0-9-]+\.)+(?:com|org|net|io|co|us|eu|jobs|careers|ai|app|edu|gov)(?::\d+)?)(\/[^\s"'<>)\]]*)?(?=$|[\s"'<>),;:\]])/gi, (whole, lead, host) => {
     const to = placeOf(host);
