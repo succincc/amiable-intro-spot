@@ -1,0 +1,195 @@
+name: watch
+
+# The clock for everything else.
+#
+# Ten things run here on a timer — finding jobs, measuring, scoring, writing
+# resumes, applying, reading mail, following up — and GitHub's own timer turns
+# out to start them rarely: over one day "every three hours" ran three times,
+# and across every job in this repository it had fired twenty-two times in
+# all. A run can also die partway. Either way nothing is sent and nothing
+# says why, until somebody opens a log.
+#
+# So this is the timer, and it keeps its own time. Each run looks at every
+# job, starts the ones whose turn has come, waits twenty-five minutes, and
+# starts the next run of itself before it ends. One run hands on to the next,
+# all day, with no outside timer at all.
+#
+# It keeps time here, and not in the panel's database, for a reason that cost
+# an afternoon to learn: the database is billed for the hours it is awake,
+# and a timer inside it — or anything that asks it a question every few
+# minutes — never lets it sleep. A runner in a public repository is free
+# whether it is working or waiting. So the waiting is done here, the jobs are
+# gathered into rounds three hours apart, and the database is woken for a
+# round and left alone between them.
+#
+# If the chain is ever broken — a run killed, GitHub having a bad hour — the
+# next thing that starts this job picks it up: GitHub's own timer below, when
+# it fires, or a run started by hand. A run that finds the chain already
+# alive does nothing and ends.
+#
+# Starting a job here is starting it in its timed form and no other. An
+# application run submits only if autopilot is on in the panel and stops at
+# the daily limit; a follow-up email goes only if follow-ups are switched on;
+# the summary only if the summary is. Nothing here does what a person has not
+# already switched on.
+#
+# Free: a public-repo runner and GitHub's own command line.
+
+on:
+  workflow_dispatch:
+    inputs:
+      link:
+        description: "Set by the run before this one in the chain; leave empty"
+        required: false
+        default: ""
+  # Kept so the panel can still wake it; nothing relies on it.
+  repository_dispatch:
+    types: [tick]
+  # The way back in if the chain breaks: hourly, off the hour, for whenever
+  # GitHub does start it.
+  # Every three hours, with the rounds. Each run costs a minute of the
+  # account's allowance, so it is not run more often than there is a round
+  # to start.
+  schedule:
+    - cron: "44 */3 * * *"
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Look at every job, then hand on
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          LINK: ${{ github.event.inputs.link }}
+          APP_URL: https://applynow.lol
+        run: |
+          set -uo pipefail
+          # One chain, not two. A run started by the timer or by hand while a
+          # chain is alive has nothing to do; the run a chain starts for
+          # itself is the chain, and carries on.
+          if [ "${LINK}" != "true" ]; then
+            others=$(gh api "repos/$REPO/actions/workflows/watch.yml/runs?status=in_progress&per_page=10" \
+              --jq "[.workflow_runs[] | select(.id != ${RUN_ID})] | length" 2>/dev/null || echo 0)
+            if [ "${others:-0}" -gt 0 ]; then
+              echo "the clock is already running (${others} other run); nothing to do."
+              echo "The clock is already running; this run did nothing." >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            echo "no clock was running; this run becomes it."
+          fi
+          now=$(date -u +%s)
+          # workflow file | hours between runs | what to give it when started
+          # here, so that it runs as its timer would have ("-" for nothing) |
+          # optionally, the one hour of the day (UTC) it may be started in.
+          # The summary is a morning email: twelve UTC is seven Eastern.
+          #
+          # The intervals are multiples of three hours on purpose. Jobs that
+          # come due together run together, the database is awake for that
+          # one stretch, and asleep — and unbilled — until the next.
+          jobs_list="
+          measure.yml|3|apply=true
+          sweep.yml|6|-
+          tailor.yml|3|-
+          apply.yml|3|as_scheduled=true,max_jobs=60
+          oracle.yml|6|apply=true
+          feeds.yml|12|apply=true
+          resolve.yml|24|apply=true,max=150
+          outreach.yml|6|mode=send
+          summary.yml|20|dry=false|12
+          "
+          {
+            echo "## Jobs"
+            echo ""
+            echo "| job | last ran | ended | action |"
+            echo "|---|---|---|---|"
+          } >> "$GITHUB_STEP_SUMMARY"
+          restarted=0
+          started=0
+          start() {
+            # $1 workflow, $2 comma-separated name=value pairs or "-"
+            args=""
+            if [ "$2" != "-" ]; then
+              for pair in $(echo "$2" | tr ',' ' '); do args="$args -f $pair"; done
+            fi
+            # shellcheck disable=SC2086
+            gh workflow run "$1" --repo "$REPO" $args >/dev/null 2>&1
+          }
+          for line in $jobs_list; do
+            wf=$(echo "$line" | cut -d'|' -f1); every=$(echo "$line" | cut -d'|' -f2); give=$(echo "$line" | cut -d'|' -f3)
+            only_hour=$(echo "$line" | cut -s -d'|' -f4)
+            if [ -n "$only_hour" ] && [ "$(date -u +%-H)" != "$only_hour" ]; then
+              echo "| $wf | - | - | not its hour |" >> "$GITHUB_STEP_SUMMARY"
+              echo "$wf: not its hour"
+              continue
+            fi
+            # The last run that counts as this job's turn. For applying, only a
+            # timed run counts: a rehearsal of one portal started by hand is
+            # not the round. For everything else, any run is.
+            if [ "$wf" = "apply.yml" ]; then
+              pick='[.workflow_runs[] | select(.event == "schedule" or .display_title == "apply (timed)")][0]'
+            else
+              pick='.workflow_runs[0]'
+            fi
+            last=$(gh api "repos/$REPO/actions/workflows/$wf/runs?per_page=30" \
+              --jq "$pick // empty | [.id, .status, (.conclusion // \"-\"), .run_attempt, .run_started_at] | @tsv" 2>/dev/null || true)
+            id=$(echo "$last" | cut -f1)
+            if [ -z "$id" ]; then
+              if start "$wf" "$give"; then action="never run; started"; started=$((started + 1)); else action="never run; could not be started"; fi
+              echo "| $wf | never | - | $action |" >> "$GITHUB_STEP_SUMMARY"
+              echo "$wf: never run -> $action"
+              continue
+            fi
+            status=$(echo "$last" | cut -f2); how=$(echo "$last" | cut -f3)
+            attempt=$(echo "$last" | cut -f4); at=$(echo "$last" | cut -f5)
+            age_m=$(( (now - $(date -u -d "$at" +%s)) / 60 ))
+            action="not due"
+            if [ "$status" != "completed" ]; then
+              action="running now"
+            elif { [ "$how" = "failure" ] || [ "$how" = "timed_out" ]; } && [ "$attempt" -lt 2 ] && [ "$age_m" -lt 480 ]; then
+              if gh run rerun "$id" --failed --repo "$REPO" >/dev/null 2>&1; then
+                action="failed; started again"
+                restarted=$((restarted + 1))
+              else
+                action="failed; could not be started again"
+              fi
+            # Ten minutes' grace, so a job due on the hour is not left a
+            # whole further round for being fifty-five minutes old.
+            elif [ "$age_m" -ge $(( every * 60 - 10 )) ]; then
+              if start "$wf" "$give"; then
+                action="due; started"
+                started=$((started + 1))
+              else
+                action="due; could not be started"
+              fi
+            fi
+            echo "| $wf | ${age_m} min ago | $how | $action |" >> "$GITHUB_STEP_SUMMARY"
+            echo "$wf: last ran ${age_m} min ago, $status/$how, attempt $attempt -> $action"
+          done
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Started: $started. Started again after failing: $restarted." >> "$GITHUB_STEP_SUMMARY"
+          echo "started: $started; started again: $restarted"
+
+          # The mailbox, once an hour: the panel reads it, drafts what needs
+          # a reply and sends what has been cleared. Asked in the first half
+          # of each hour only, because asking wakes the database and this
+          # run comes round twice an hour.
+          if [ "$(( $(date -u +%-M) / 30 ))" -eq 0 ]; then
+            code=$(curl -sS -o /tmp/tick.json -w '%{http_code}' --max-time 90 \
+              -X POST "${APP_URL}/api/public/cron/tick" \
+              -H "Content-Type: application/json" -d '{}' || echo "000")
+            # Which things were done and a few counts; never the mail.
+            echo "mail: the panel answered ${code} $(head -c 300 /tmp/tick.json 2>/dev/null || true)"
+          fi
+
+          # No waiting here and no handing on. This repository is private, so
+          # every minute a runner spends is counted against the account's
+          # monthly allowance — a run that waited twenty-five minutes to keep
+          # time would have spent the whole month's allowance in a day and a
+          # half. This run looks, starts what is due, and ends.

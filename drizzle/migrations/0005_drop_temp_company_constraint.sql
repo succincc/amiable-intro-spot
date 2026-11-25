@@ -1,0 +1,1 @@
+alter table public.companies drop constraint if exists companies_ats_token_site_key;

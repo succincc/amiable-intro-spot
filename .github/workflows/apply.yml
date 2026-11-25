@@ -1,0 +1,221 @@
+
+name: apply
+# A timed round says so in its name, which is how the watch job tells a round
+# from a rehearsal of one portal started by hand.
+run-name: apply${{ (github.event_name == 'schedule' || github.event.inputs.as_scheduled == 'true') && ' (timed)' || '' }}
+
+# Triggered three ways:
+#   1. From the panel (a button calls the GitHub API) — repository_dispatch
+#   2. On a schedule — every 3 hours
+#   3. By hand from the Actions tab — workflow_dispatch
+#
+# Public repositories get unlimited free runner minutes. Nothing personal
+# lives in this repo: the resume and profile are pulled from Supabase at
+# runtime using a secret, so it is safe to keep public.
+
+on:
+  repository_dispatch:
+    types: [apply]
+  workflow_dispatch:
+    inputs:
+      max_jobs:
+        description: "How many applications to attempt"
+        required: false
+        default: "25"
+      ats:
+        description: "Only this kind of portal (greenhouse, lever, workday, ashby). Blank for any."
+        required: false
+        default: ""
+      radius:
+        description: "Commuting radius in miles for this run only (blank = the panel's setting)"
+        required: false
+        default: ""
+      # Asked as "submit", not "dry run". The safe value is then the one you
+      # get by not deciding, and submitting is something you have to say.
+      submit:
+        description: "Actually submit. Leave unchecked to fill forms and stop."
+        type: boolean
+        required: false
+        default: false
+      # For the watch job, when the timer has skipped a run: the same run the
+      # timer would have started — every portal's lane, and submitting only
+      # if autopilot is on in the panel, under the same daily limit. The
+      # other inputs are ignored.
+      as_scheduled:
+        description: "Run exactly as the timer would (autopilot decides whether it submits)"
+        type: boolean
+        required: false
+        default: false
+  # Scheduled runs submit ONLY if autopilot is switched on in the panel.
+  #
+  # This used to be decided by a YAML default: a scheduled run carries no
+  # inputs, dry_run fell through to 'false', and four real applications went
+  # out before anyone had asked for them. The decision now lives in the
+  # database, where the person responsible can see it and turn it off.
+  #
+  # RESPECT_AUTOPILOT tells the applier to read that setting. With autopilot
+  # off it exits immediately having done nothing.
+  # Not on the hour. GitHub starts timed jobs late or not at all when its
+  # runners are busy, and the top of the hour is when everyone's are: over one
+  # day this "every three hours" ran three times, not eight. Twenty-six
+  # minutes past is quiet. The watch job starts a run the timer still skips.
+  schedule:
+    - cron: "26 */3 * * *"
+
+# One run per portal, rather than one run in the world.
+#
+# A single group meant a Greenhouse run and a Workday run could not happen at
+# once: the Lever run today sat waiting for Greenhouse to finish before it
+# could start, and a Workday failure delayed Greenhouse work that had nothing
+# to do with it. Each portal has its own queue, its own forms and its own
+# failure modes, so each gets its own lane.
+#
+# The scheduled run keeps one shared lane ("all"), deliberately. It reads the
+# daily cap once at the start and takes min(MAX_JOBS, what is left), so two
+# scheduled runs side by side would each believe the whole remainder was
+# theirs and together could send twice the cap. Manual runs are named by
+# portal and parallelise; the unattended one stays single and keeps the cap
+# honest.
+concurrency:
+  group: applypilot-apply-${{ github.event.inputs.ats || github.event.client_payload.ats || 'all' }}
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    # One runner per portal on a scheduled run.
+    #
+    # Workday and Greenhouse hold nearly the whole queue between them and
+    # share nothing: different forms, different sign-in, different failures.
+    # Run as one job they took turns on four workers; run as two they each get
+    # a machine, a Workday wall cannot hold up Greenhouse, and the two logs
+    # are separate. The daily cap is read from the database before every
+    # claim, so two lanes cannot spend it twice.
+    #
+    # A manual run is a single lane and takes its portal from the input.
+    strategy:
+      fail-fast: false
+      matrix:
+        lane: ${{ fromJSON((github.event_name == 'schedule' || github.event.inputs.as_scheduled == 'true') && '["workday","greenhouse","oracle"]' || '[""]') }}
+    # Fifty minutes killed a 25-job run after twelve of them, leaving the
+    # dashboard reading "running" forever and the unfinished jobs still
+    # claimed. The applier now stops itself before this is reached, so this
+    # is a backstop rather than the thing that ends a run.
+    timeout-minutes: 330
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # Installed in a directory of its own, then linked in.
+      #
+      # Running `npm install playwright` in the repo root makes npm reconcile
+      # the whole app dependency tree — 76 packages of React, Vite and
+      # TanStack that the applier never touches — just to add one. On the
+      # runner's npm 10.8.2 that crashed outright:
+      #
+      #   npm error Cannot read properties of null (reading 'edgesOut')
+      #
+      # after 53 seconds, failing every scheduled run before the applier
+      # started. Isolated it resolves 2 packages in under a second, and the
+      # app's dependencies cannot affect it at all.
+      # 270 seconds of every run was spent downloading a browser that does
+      # not change — 37% of the whole job, repeated every few hours forever.
+      # The key pins the Playwright version, so a version bump misses the
+      # cache and reinstalls exactly once.
+      - name: Restore Playwright + Chromium
+        id: pw-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/ms-playwright
+            ~/pw/node_modules
+          key: pw-1.49.0-${{ runner.os }}
+
+      - name: Install Playwright + Chromium
+        run: |
+          set -euo pipefail
+          PW_DIR="$HOME/pw"
+          mkdir -p "$PW_DIR"
+          cd "$PW_DIR"
+          if [ ! -d node_modules/playwright ]; then
+            npm init -y >/dev/null
+            npm install --no-audit --no-fund playwright@1.49.0
+          fi
+          # --with-deps installs system libraries, which live outside the
+          # cached directory and so are needed even on a hit; the browser
+          # download itself is skipped when it is already there.
+          npx playwright install --with-deps chromium
+          # apply.mjs runs from the repo root and imports "playwright", so the
+          # resolver needs to find it there.
+          ln -sfn "$PW_DIR/node_modules" "$GITHUB_WORKSPACE/node_modules"
+
+      # Prove the applier can still finish an application before it is let
+      # near a real one.
+      #
+      # It runs the real applyToJob against two local pages that set the traps
+      # which broke live submissions: a submit button the portal keeps
+      # disabled, a confirmation inside an iframe, an emailed security code,
+      # an alert already on the page, and a confirmation slower than a fixed
+      # wait. Each of those was once found by a real application going wrong.
+      # About a minute, no network beyond the runner, and if it fails the run
+      # stops here having sent nothing.
+      # The rules that decide things without a browser — what goes on a
+      # resume, who a note may be sent to, what counts as fresh. One second.
+      - name: Unit checks
+        run: node unit.mjs
+
+      - name: Self-test
+        run: node selftest.mjs
+
+      - name: Apply
+        env:
+          SUPABASE_URL: https://inqhfkshqndkxyztzita.supabase.co
+          SUPABASE_ANON_KEY: sb_publishable_QK4kidijM8nk46uK6L22Qw_XA0RQu5U
+          APPLYPILOT_EMAIL: ${{ secrets.APPLYPILOT_EMAIL }}
+          APPLYPILOT_PASSWORD: ${{ secrets.APPLYPILOT_PASSWORD }}
+          # Without these the applier still submits, but leaves every
+          # open-ended question ("why do you want to work here") for a human.
+          # answers.mjs reads them and silently writes nothing when absent.
+          # The applier reads no mail itself and holds no Gmail credentials.
+          # It asks the panel for a portal's verification link, over the same
+          # key the sweep workflow uses.
+          APP_URL: ${{ secrets.APP_URL || 'https://applynow.lol' }}
+          ENGINE_API_KEY: ${{ secrets.ENGINE_API_KEY }}
+          ATS_ONLY: ${{ matrix.lane || github.event.inputs.ats || github.event.client_payload.ats || '' }}
+          # A test run may widen or narrow the commuting radius without
+          # touching the saved setting. Empty means use the panel's.
+          RADIUS_MILES: ${{ github.event.inputs.radius || '' }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: ${{ secrets.GEMINI_MODEL || 'gemini-3.8-flash' }}
+          # Per run. Eight scheduled runs a day, so this is also the ceiling
+          # on a day's volume whatever daily_cap says: at 25 the cap could
+          # never exceed 200 and setting it higher in the panel would have
+          # done nothing. 60 puts the ceiling at 480 so the cap is once again
+          # the thing that decides, which is the point of having one.
+          #
+          # The applier takes min(MAX_JOBS, remaining under the cap), so this
+          # cannot overshoot. At four workers and ~65s a job a run of 60 takes
+          # about 16 minutes, against a 330-minute timeout.
+          MAX_JOBS: ${{ github.event.inputs.max_jobs || github.event.client_payload.max_jobs || '60' }}
+          # Submitting must be asked for. Anything else — no inputs, an
+          # unticked box, a payload without the flag — fills forms and stops.
+          #
+          # The previous expression was `inputs.dry_run || client_payload.dry_run
+          # || 'true'`, which cannot tell "absent" from "explicitly false", and
+          # got BOTH triggers wrong in opposite directions. From the Actions
+          # tab the event payload carries the STRING "false", which is truthy,
+          # so an unticked box submitted for real. From the panel it carries
+          # the JSON BOOLEAN false, which is falsy, so RUN APPLY fell through
+          # to 'true' and could never submit at all.
+          #
+          # Testing for the one value that means yes removes the ambiguity: a
+          # missing flag coerces to 0 and never equals 'true'.
+          DRY_RUN: ${{ (github.event.inputs.submit == 'true' || github.event.client_payload.submit == true) && 'false' || 'true' }}
+          # Only a scheduled run defers to the stored autopilot setting. A
+          # button press means a person is present and said what they wanted.
+          RESPECT_AUTOPILOT: ${{ github.event_name == 'schedule' || github.event.inputs.as_scheduled == 'true' }}
+        run: node apply.mjs

@@ -1,0 +1,56 @@
+name: titles
+
+# Widen the target-title list from the resume.
+#
+# 923 of 3029 discovered postings were rejected as "title not relevant to
+# targets" — more than distance, salary and the exclude list put together.
+# This reads the resume and adds every title it supports, so scoring gets to
+# judge jobs the search would otherwise never have been allowed to find.
+
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "Most titles to keep (discovery slows as this grows)"
+        required: false
+        default: "120"
+      apply:
+        description: "Actually save the titles. Leave unchecked to only print them."
+        type: boolean
+        required: false
+        default: false
+  repository_dispatch:
+    types: [titles]
+
+concurrency:
+  group: applypilot-titles
+  cancel-in-progress: false
+
+jobs:
+  titles:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Suggest titles
+        env:
+          # The same public project URL and publishable key apply.yml uses.
+          # Neither is a secret: the anon key is designed to ship in a browser
+          # and every table behind it is protected by row-level security.
+          SUPABASE_URL: https://inqhfkshqndkxyztzita.supabase.co
+          SUPABASE_ANON_KEY: sb_publishable_QK4kidijM8nk46uK6L22Qw_XA0RQu5U
+          APPLYPILOT_EMAIL: ${{ secrets.APPLYPILOT_EMAIL }}
+          APPLYPILOT_PASSWORD: ${{ secrets.APPLYPILOT_PASSWORD }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: ${{ secrets.GEMINI_MODEL || 'gemini-3.8-flash' }}
+          # Asked as "apply", not "dry run", so the safe value is the one you
+          # get by not deciding. The previous expression repeated a bug this
+          # project has already had once: a MISSING client_payload compares
+          # equal to false in a GitHub expression, so "dry_run: true" came out
+          # as a live write.
+          TITLE_LIMIT: ${{ github.event.inputs.limit || github.event.client_payload.limit || '120' }}
+          DRY_RUN: ${{ (github.event.inputs.apply == 'true' || github.event.client_payload.apply == true) && '0' || '1' }}
+        run: node suggest-titles.mjs

@@ -1,0 +1,56 @@
+name: summary
+
+# One email a day to the owner's own mailbox: what was applied to, which
+# replies are worth reading, what is stuck and why.
+#
+# The panel writes and sends it — it holds the mailbox — and does nothing at
+# all unless the summary is switched on in settings. This only asks, once a
+# morning. The reply is counts; the text of the email never appears here.
+#
+# Free: a public-repo runner and one request.
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry:
+        description: "Count and report only; send nothing (true)"
+        required: false
+        default: "true"
+  # 7:07 in the morning, Eastern standard time.
+  schedule:
+    - cron: "7 12 * * *"
+
+concurrency:
+  group: applypilot-summary
+  cancel-in-progress: false
+
+jobs:
+  summary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Ask the panel for the day's summary
+        env:
+          APP_URL: https://applynow.lol
+          ENGINE_API_KEY: ${{ secrets.ENGINE_API_KEY }}
+          DRY: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry || 'false' }}
+        run: |
+          set -uo pipefail
+          if [ -z "${ENGINE_API_KEY}" ]; then
+            echo "ENGINE_API_KEY is not set as a repository secret."
+            exit 1
+          fi
+          code=$(curl -sS -o /tmp/summary.json -w '%{http_code}' --max-time 60 \
+            -X POST "${APP_URL}/api/public/email/summary" \
+            -H "x-engine-key: ${ENGINE_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d "{\"dry\":${DRY}}" || echo "000")
+          echo "the panel answered ${code}"
+          # Counts and a state; nothing of the owner's is in it.
+          head -c 400 /tmp/summary.json 2>/dev/null || true
+          echo
+          case "${code}" in
+            200) exit 0 ;;
+            404) echo "the panel does not have this yet: it needs a publish."; exit 0 ;;
+            *) exit 1 ;;
+          esac

@@ -1,0 +1,55 @@
+name: tailor
+
+# Resumes written ahead of time, a few at a time, all day.
+#
+# The model that writes a resume for its posting is free up to an allowance.
+# Asking for every resume in a burst at the moment of applying used that
+# allowance up while most applications still had none. This spreads the work
+# across the day and stops the moment the model says it has had enough, so
+# the whole free allowance is used — and used on resumes first.
+#
+# Free: a public-repo runner, public feeds, the free Gemini tier.
+
+on:
+  workflow_dispatch:
+    inputs:
+      max:
+        description: "How many resumes to write at most"
+        required: false
+        default: "30"
+      write:
+        description: "Save what is written (true), or only report (false)"
+        required: false
+        default: "true"
+  # With each of the applier's three-hourly rounds, so the database is awake
+  # for one stretch and not woken again in between. The watch job is what
+  # really starts it; this is the fallback.
+  schedule:
+    - cron: "19 */3 * * *"
+
+concurrency:
+  group: applypilot-tailor
+  cancel-in-progress: false
+
+jobs:
+  tailor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Unit checks
+        run: node unit.mjs
+      - name: Write resumes
+        env:
+          SUPABASE_URL: https://inqhfkshqndkxyztzita.supabase.co
+          SUPABASE_ANON_KEY: sb_publishable_QK4kidijM8nk46uK6L22Qw_XA0RQu5U
+          APPLYPILOT_EMAIL: ${{ secrets.APPLYPILOT_EMAIL }}
+          APPLYPILOT_PASSWORD: ${{ secrets.APPLYPILOT_PASSWORD }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: ${{ secrets.GEMINI_MODEL || 'gemini-3.8-flash' }}
+          MAX: ${{ github.event.inputs.max || '30' }}
+          WRITE: ${{ github.event.inputs.write || 'true' }}
+        run: node pretailor.mjs

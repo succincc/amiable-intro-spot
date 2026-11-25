@@ -1,0 +1,134 @@
+name: sweep
+
+# Discovery and scoring, run somewhere that cannot be navigated away from.
+#
+# These used to be server functions called straight from the panel, which
+# meant the browser held the request open for their whole duration. Switching
+# tabs, opening Settings or locking the phone aborted the fetch and killed the
+# run — on a phone, which is where this is used, that is most of the time.
+#
+# The work itself has not moved: it still runs on the panel's server, in
+# /api/public/cron/sweep. What changed is who waits for it. A runner waits
+# patiently; a phone does not.
+
+on:
+  repository_dispatch:
+    types: [sweep]
+  # Keep the queue fresh without anyone asking.
+  #
+  # Discovery and scoring only ever ran when someone pressed a button, so the
+  # queue went stale the moment nobody was watching — and a job board's
+  # postings are gone in days. This finds and scores; it applies to nothing
+  # and sends nothing, so it is safe to run unattended whatever the autopilot
+  # setting says. Off the hour, because everything schedules on the hour and
+  # the runners are busiest then.
+  # Every four hours. Each run now reads every employer rather than a slice,
+  # so this is also how often a new posting can be noticed.
+  schedule:
+    - cron: "37 1,5,9,13,17,21 * * *"
+  workflow_dispatch:
+    inputs:
+      only:
+        description: "Which part to run"
+        type: choice
+        required: false
+        default: "both"
+        options: ["both", "discover", "score"]
+
+concurrency:
+  group: applypilot-sweep
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Run discovery and scoring
+        env:
+          APP_URL: ${{ secrets.APP_URL || 'https://applynow.lol' }}
+          ENGINE_API_KEY: ${{ secrets.ENGINE_API_KEY }}
+          ONLY: ${{ github.event.inputs.only || github.event.client_payload.only || 'both' }}
+        run: |
+          set -euo pipefail
+          if [ -z "${ENGINE_API_KEY}" ]; then
+            echo "ENGINE_API_KEY is not set as a repository secret."
+            echo "Settings -> Secrets and variables -> Actions -> New repository secret."
+            exit 1
+          fi
+          echo "Running: ${ONLY}"
+
+          # One request reads as many employers as fit in its time limit —
+          # a few dozen — and stops, leaving the rest for "the next run". At
+          # two runs a day and a few hundred employers, the next run for most
+          # of them was days away, and a posting is only wanted for fourteen.
+          # So ask again until the server says it reached every employer.
+          call() {
+            # --max-time guards the request: a server that stops answering
+            # should fail this call rather than hold the runner.
+            code=$(curl -sS -o /tmp/sweep.json -w '%{http_code}' \
+              --max-time 300 \
+              -X POST "${APP_URL}/api/public/cron/sweep" \
+              -H "x-engine-key: ${ENGINE_API_KEY}" \
+              -H "Content-Type: application/json" \
+              -d "{\"only\":\"$1\",\"since\":\"${SINCE}\"}" || echo "000")
+            # 1102 is Cloudflare killing the Worker for running too long. It
+            # arrives as a 503 whose body is just "error code: 1102", which on
+            # its own reads like the site being down rather than the run being
+            # too slow — and those need opposite responses.
+            if grep -q "error code: 1102" /tmp/sweep.json 2>/dev/null; then
+              echo "  the panel's host stopped this request for exceeding its time limit"
+            fi
+            [ "${code}" = "200" ] && ! grep -q '"ok":false' /tmp/sweep.json 2>/dev/null
+          }
+
+          good=0
+          bad=0
+          SINCE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+          if [ "${ONLY}" != "score" ]; then
+            for round in $(seq 1 14); do
+              if call discover; then
+                good=$((good + 1))
+                jq -c '{round: '"${round}"', ms, found: .discover.found, kept: .discover.kept, inserted: .discover.inserted, filtered: .discover.filtered, errors: .discover.errors, employers: .discover.employers, not_read_yet: .discover.stale}' /tmp/sweep.json 2>/dev/null || head -c 400 /tmp/sweep.json
+                left=$(jq -r '.discover.stale // "unknown"' /tmp/sweep.json 2>/dev/null || echo unknown)
+                # Every employer read: done. A panel that does not say how
+                # many are left gets four rounds and no more.
+                if [ "${left}" = "0" ]; then break; fi
+                if [ "${left}" = "unknown" ] && [ "${round}" -ge 4 ]; then break; fi
+              else
+                bad=$((bad + 1))
+                echo "discover round ${round}: HTTP ${code}"
+                head -c 600 /tmp/sweep.json 2>/dev/null || true
+                echo
+                # Two failures in a row is the server, not bad luck.
+                if [ "${bad}" -ge 2 ]; then break; fi
+              fi
+              sleep 3
+            done
+          fi
+
+          if [ "${ONLY}" != "discover" ]; then
+            # Scoring is bounded per request too; three requests clear what a
+            # full discovery brings in.
+            for round in $(seq 1 3); do
+              if call score; then
+                good=$((good + 1))
+                jq -c '{score_round: '"${round}"', ms, score}' /tmp/sweep.json 2>/dev/null | head -c 600 || head -c 400 /tmp/sweep.json
+                echo
+              else
+                bad=$((bad + 1))
+                echo "score round ${round}: HTTP ${code}"
+                head -c 600 /tmp/sweep.json 2>/dev/null || true
+                echo
+                break
+              fi
+              sleep 3
+            done
+          fi
+
+          echo "requests that succeeded: ${good}, failed: ${bad}"
+          # The endpoint reports its own failures as 200 with an "error" field,
+          # so a 200 is not automatically a success. A sweep in which nothing
+          # worked is a failed sweep; one bad round among good ones is not.
+          [ "${good}" -gt 0 ]

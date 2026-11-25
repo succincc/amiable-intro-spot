@@ -1,0 +1,1 @@
+DELETE FROM public.emails; DELETE FROM public.questions; DELETE FROM public.jobs; DELETE FROM public.commands; DELETE FROM public.search_presets WHERE name ILIKE 'Smoke Preset%';

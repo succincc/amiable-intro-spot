@@ -1,0 +1,334 @@
+// Employers that are hiring near home right now, from public job feeds.
+//
+// Indeed, LinkedIn and ZipRecruiter mostly list jobs that live somewhere
+// else: the posting says "apply on company site" and the link goes to the
+// employer's own Workday, Greenhouse or Oracle portal — the same portals the
+// applier already completes. What those sites add is knowing WHICH employers
+// have an opening this week. The same knowledge is published, for free and
+// without an account, by feeds that exist to be read by programs.
+//
+// This reads those feeds for the owner's titles around home and hands the
+// employers it finds to the resolver, which opens each one's careers site,
+// finds the application system behind it and checks that system's own feed
+// before anything is saved. Nothing is applied to from here, nothing is
+// signed in to, and no posting is taken from an aggregator: the job is always
+// read from, and applied for on, the employer's own portal.
+//
+// Sources:
+//   Remotive, Jobicy — public, no key. (The Muse's feed is not answering.)
+//   Adzuna   — free key (ADZUNA_APP_ID / ADZUNA_APP_KEY); skipped without one.
+//   Jooble   — free key (JOOBLE_KEY); skipped without one.
+//
+// Free: a public-repo runner and public feeds.
+
+import { guardLogs, hideNames } from "./quiet.mjs";
+// Nothing this prints names an employer, a posting or a place: see quiet.mjs.
+guardLogs();
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const ANON_KEY = process.env.SUPABASE_ANON_KEY;
+const AP_EMAIL = process.env.APPLYPILOT_EMAIL;
+const AP_PASSWORD = process.env.APPLYPILOT_PASSWORD;
+const APPLY = process.env.APPLY === "true"; // off: look and report, write nothing
+const MAX_NEW = Number(process.env.MAX_NEW || 150);
+
+let ACCESS = "";
+let REFRESH = "";
+let EXPIRES = 0;
+async function auth(body, grant) {
+  const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=${grant}`, {
+    method: "POST",
+    headers: { apikey: ANON_KEY, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`Sign-in failed ${res.status}`);
+  const j = await res.json();
+  ACCESS = j.access_token;
+  REFRESH = j.refresh_token;
+  EXPIRES = Date.now() + (j.expires_in - 120) * 1000;
+}
+async function db(path, init = {}) {
+  if (Date.now() > EXPIRES) await auth({ refresh_token: REFRESH }, "refresh_token");
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+    ...init,
+    headers: {
+      apikey: ANON_KEY,
+      Authorization: `Bearer ${ACCESS}`,
+      "Content-Type": "application/json",
+      ...(init.headers || {}),
+    },
+  });
+  if (!res.ok) throw new Error(`DB ${res.status}: ${(await res.text()).slice(0, 160)}`);
+  const text = await res.text();
+  return text ? JSON.parse(text) : null;
+}
+
+async function getJson(url, init = {}) {
+  const res = await fetch(url, {
+    signal: AbortSignal.timeout(25_000),
+    ...init,
+    headers: { "User-Agent": "applypilot-feeds/1.0", Accept: "application/json", ...(init.headers || {}) },
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return await res.json();
+}
+const pause = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** Does this title look like one the owner searches for? */
+export function wanted(title, titles, excludes) {
+  const t = String(title ?? "").toLowerCase();
+  if (!t) return false;
+  if (excludes.some((x) => x && t.includes(String(x).toLowerCase()))) return false;
+  if (!titles.length) return true;
+  return titles.some((want) => {
+    const words = String(want).toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2);
+    return words.length > 0 && words.every((w) => t.includes(w));
+  });
+}
+
+export const flat = (s) =>
+  String(s ?? "")
+    .toLowerCase()
+    .replace(/&/g, "and")
+    .replace(/\b(inc|llc|ltd|corp|corporation|co|company|group|holdings|plc|lp|the)\b\.?/g, " ")
+    .replace(/[^a-z0-9]+/g, "");
+
+/**
+ * The employer's own careers address, guessed from its name. The resolver
+ * treats it as a guess: it follows it to whatever is really there, and adds
+ * nothing if it leads nowhere.
+ */
+export function guessCareersUrl(company) {
+  const slug = flat(company);
+  if (slug.length < 3 || slug.length > 30) return null;
+  return `https://www.${slug}.com/careers`;
+}
+
+// Staffing firms and job boards post other employers' jobs under their own
+// name; there is no portal of theirs to apply on.
+const NOT_AN_EMPLOYER =
+  /staffing|recruit|talent|search group|personnel|solutions inc|consulting group|jobot|cybercoders|robert half|adecco|randstad|kelly services|insight global|aerotek|teksystems|manpower|kforce|apex systems|beacon hill|actalent|motion recruitment|dice|lensa|talentify|jobs via|confidential|careerbuilder|ziprecruiter|indeed|linkedin|monster|glassdoor|upwork|appcast|joveo|vaco|collabera|mindlance|pyramid consulting|artech/i;
+
+const fresh14 = (iso) => {
+  const t = Date.parse(iso ?? "");
+  return Number.isFinite(t) ? Date.now() - t <= 14 * 86_400_000 : true;
+};
+
+/** The Muse: jobs by city, twenty to a page. */
+async function fromMuse(titles, excludes, tally) {
+  const out = [];
+  const places = ["New York, NY", "Jersey City, NJ", "Newark, NJ", "Princeton, NJ", "Edison, NJ", "New Brunswick, NJ", "Trenton, NJ", "Flexible / Remote"];
+  for (const place of places) {
+    for (let page = 1; page <= 12; page++) {
+      let j;
+      try {
+        // Its pages have been numbered from 0 and from 1 at different times.
+        j = await getJson(`https://www.themuse.com/api/public/jobs?location=${encodeURIComponent(place)}&page=${page}`).catch(
+          () => getJson(`https://www.themuse.com/api/public/jobs?page=${page - 1}&location=${encodeURIComponent(place)}`),
+        );
+      } catch (e) {
+        tally.errors.push(`muse ${place} p${page}: ${String(e?.message ?? e).slice(0, 30)}`);
+        break;
+      }
+      const rows = j?.results ?? [];
+      tally.read += rows.length;
+      for (const r of rows) {
+        if (!fresh14(r.publication_date)) continue;
+        if (!wanted(r.name, titles, excludes)) continue;
+        if (r?.company?.name) out.push({ name: r.company.name, source: "muse" });
+      }
+      if (page >= (j?.page_count ?? 1)) break;
+      await pause(350);
+    }
+  }
+  return out;
+}
+
+/** Remotive: remote jobs, searched by title. Public, no key. */
+async function fromRemotive(titles, excludes, tally) {
+  const out = [];
+  for (const title of titles.slice(0, 25)) {
+    let j;
+    try {
+      j = await getJson(`https://remotive.com/api/remote-jobs?search=${encodeURIComponent(title)}&limit=40`);
+    } catch (e) {
+      tally.errors.push(`remotive "${title.slice(0, 16)}": ${String(e?.message ?? e).slice(0, 30)}`);
+      if (out.length === 0 && tally.errors.filter((x) => x.startsWith("remotive")).length >= 3) break;
+      continue;
+    }
+    const rows = j?.jobs ?? [];
+    tally.read += rows.length;
+    for (const r of rows) {
+      if (!fresh14(r.publication_date)) continue;
+      if (!/usa|united states|north america|worldwide|anywhere|americas/i.test(String(r.candidate_required_location ?? ""))) continue;
+      if (!wanted(r.title, titles, excludes)) continue;
+      if (r?.company_name) out.push({ name: r.company_name, source: "remotive" });
+    }
+    await pause(1500);
+  }
+  return out;
+}
+
+/** Jobicy: remote jobs open to the United States. Public, no key. */
+async function fromJobicy(titles, excludes, tally) {
+  const out = [];
+  let j;
+  try {
+    j = await getJson("https://jobicy.com/api/v2/remote-jobs?count=50&geo=usa");
+  } catch (e) {
+    tally.errors.push(`jobicy: ${String(e?.message ?? e).slice(0, 30)}`);
+    return out;
+  }
+  const rows = j?.jobs ?? [];
+  tally.read += rows.length;
+  for (const r of rows) {
+    if (!fresh14(r.pubDate)) continue;
+    if (!wanted(r.jobTitle, titles, excludes)) continue;
+    if (r?.companyName) out.push({ name: r.companyName, source: "jobicy" });
+  }
+  return out;
+}
+
+/** Adzuna: by title, within about forty miles of home, posted in two weeks. */
+async function fromAdzuna(titles, excludes, where, tally) {
+  const id = process.env.ADZUNA_APP_ID;
+  const key = process.env.ADZUNA_APP_KEY;
+  if (!id || !key) return null;
+  const out = [];
+  for (const title of titles.slice(0, 40)) {
+    for (let page = 1; page <= 2; page++) {
+      let j;
+      try {
+        j = await getJson(
+          `https://api.adzuna.com/v1/api/jobs/us/search/${page}?app_id=${id}&app_key=${key}` +
+            `&results_per_page=50&max_days_old=14&distance=65&where=${encodeURIComponent(where)}` +
+            `&what=${encodeURIComponent(title)}&content-type=application/json`,
+        );
+      } catch (e) {
+        tally.errors.push(`adzuna "${title.slice(0, 16)}": ${String(e?.message ?? e).slice(0, 30)}`);
+        break;
+      }
+      const rows = j?.results ?? [];
+      tally.read += rows.length;
+      for (const r of rows) {
+        if (!wanted(r.title, titles, excludes)) continue;
+        if (r?.company?.display_name) out.push({ name: r.company.display_name, source: "adzuna" });
+      }
+      if (rows.length < 50) break;
+      await pause(1200);
+    }
+  }
+  return out;
+}
+
+/** Jooble: by title and place. */
+async function fromJooble(titles, excludes, where, tally) {
+  const key = process.env.JOOBLE_KEY;
+  if (!key) return null;
+  const out = [];
+  for (const title of titles.slice(0, 40)) {
+    let j;
+    try {
+      j = await getJson(`https://jooble.org/api/${key}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ keywords: title, location: where, radius: "40", page: "1" }),
+      });
+    } catch (e) {
+      tally.errors.push(`jooble "${title.slice(0, 16)}": ${String(e?.message ?? e).slice(0, 30)}`);
+      continue;
+    }
+    const rows = j?.jobs ?? [];
+    tally.read += rows.length;
+    for (const r of rows) {
+      if (!fresh14(r.updated)) continue;
+      if (!wanted(r.title, titles, excludes)) continue;
+      if (r?.company) out.push({ name: r.company, source: "jooble" });
+    }
+    await pause(900);
+  }
+  return out;
+}
+
+if (process.env.FEEDS_IMPORT_ONLY !== "1") {
+  if (!SUPABASE_URL || !ANON_KEY || !AP_EMAIL || !AP_PASSWORD) {
+    console.error("Missing SUPABASE_URL, SUPABASE_ANON_KEY, APPLYPILOT_EMAIL or APPLYPILOT_PASSWORD.");
+    process.exit(1);
+  }
+  await auth({ email: AP_EMAIL, password: AP_PASSWORD }, "password");
+
+  const [cfg] = (await db("search_config?id=eq.1&select=titles,exclude_titles")) ?? [{}];
+  const titles = (cfg?.titles ?? []).filter(Boolean);
+  const excludes = (cfg?.exclude_titles ?? []).filter(Boolean);
+  // The town is the owner's; it is used in the request and not printed.
+  const [prof] = (await db("profile?id=eq.1&select=city,state")) ?? [];
+  const where = prof?.city && prof?.state ? `${prof.city}, ${prof.state}` : "New Jersey";
+
+  const tally = { read: 0, errors: [] };
+  const hits = [];
+  const bySource = {};
+  for (const [label, run] of [
+    // The Muse's public feed answered "not found" for every city on two
+    // runs; it is kept in the file and left out of the round until it returns.
+    ["remotive", () => fromRemotive(titles, excludes, tally)],
+    ["jobicy", () => fromJobicy(titles, excludes, tally)],
+    ["adzuna", () => fromAdzuna(titles, excludes, where, tally)],
+    ["jooble", () => fromJooble(titles, excludes, where, tally)],
+  ]) {
+    const got = await run().catch((e) => {
+      tally.errors.push(`${label}: ${String(e?.message ?? e).slice(0, 40)}`);
+      return [];
+    });
+    if (got === null) {
+      console.log(`${label}: no key set, skipped`);
+      continue;
+    }
+    bySource[label] = got.length;
+    hits.push(...got);
+  }
+
+  // One row per employer, most openings first.
+  const count = new Map();
+  for (const h of hits) {
+    const k = flat(h.name);
+    if (!k || NOT_AN_EMPLOYER.test(h.name)) continue;
+    const c = count.get(k) ?? { name: h.name.trim(), n: 0 };
+    c.n++;
+    count.set(k, c);
+  }
+  const ranked = [...count.values()].sort((a, b) => b.n - a.n);
+
+  const known = (await db("company_candidates?select=name,careers_url&limit=5000")) ?? [];
+  const firms = (await db("companies?select=name&limit=5000")) ?? [];
+  const names = new Set([...known, ...firms].map((r) => flat(r.name)));
+  const urls = new Set(known.map((r) => String(r.careers_url ?? "").replace(/\/+$/, "").toLowerCase()));
+
+  const fresh = [];
+  for (const c of ranked) {
+    if (names.has(flat(c.name))) continue;
+    const url = guessCareersUrl(c.name);
+    if (!url || urls.has(url)) continue;
+    urls.add(url);
+    fresh.push({ name: c.name, careers_url: url, status: "pending" });
+    if (fresh.length >= MAX_NEW) break;
+  }
+
+  console.log(
+    `read ${tally.read} posting(s); matching the owner's titles and fresh: ${JSON.stringify(bySource)}; ` +
+      `${ranked.length} employer(s), ${ranked.length - fresh.length} already known or unusable, ${fresh.length} new`,
+  );
+  console.log(`most openings at one employer: ${JSON.stringify(ranked.slice(0, 25).map((c) => c.n))}`);
+  if (tally.errors.length) console.log(`errors: ${JSON.stringify(tally.errors.slice(0, 8))}`);
+
+  if (APPLY && fresh.length) {
+    for (let i = 0; i < fresh.length; i += 50) {
+      await db("company_candidates?on_conflict=careers_url", {
+        method: "POST",
+        headers: { Prefer: "resolution=ignore-duplicates,return=minimal" },
+        body: JSON.stringify(fresh.slice(i, i + 50)),
+      });
+    }
+    console.log(`added ${fresh.length} employer(s) for the resolver to look at.`);
+  } else if (fresh.length) {
+    console.log(`report only: would add ${fresh.length} employer(s)`);
+  }
+}

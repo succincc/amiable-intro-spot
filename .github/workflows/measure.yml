@@ -1,0 +1,44 @@
+name: measure
+
+# Measure how far every waiting job is from home.
+#
+# The applier will only take a job that is remote or measured inside the
+# commuting radius, and discovery measures only about twenty new places a run.
+# This clears the backlog and keeps it clear: every six hours, and on demand.
+#
+# A manual run reports without writing unless asked to apply — the safe value
+# is the one you get by leaving the box alone. The scheduled run writes, which
+# only ever narrows what can be applied to.
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: "Write the distances and skip jobs beyond the radius (true), or only report (false)"
+        required: false
+        default: "false"
+  schedule:
+    # Every two hours: discovery now brings postings in six times a day, and
+    # one that has not been measured cannot be applied to.
+    - cron: "23 */3 * * *"
+
+concurrency:
+  group: applypilot-measure
+  cancel-in-progress: false
+
+jobs:
+  measure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Measure
+        env:
+          SUPABASE_URL: https://inqhfkshqndkxyztzita.supabase.co
+          SUPABASE_ANON_KEY: sb_publishable_QK4kidijM8nk46uK6L22Qw_XA0RQu5U
+          APPLYPILOT_EMAIL: ${{ secrets.APPLYPILOT_EMAIL }}
+          APPLYPILOT_PASSWORD: ${{ secrets.APPLYPILOT_PASSWORD }}
+          APPLY: ${{ github.event_name == 'schedule' || github.event.inputs.apply == 'true' }}
+        run: node measure.mjs

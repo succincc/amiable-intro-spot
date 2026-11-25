@@ -1,0 +1,52 @@
+name: successfactors
+
+# Postings from employers whose careers site runs on SAP SuccessFactors.
+#
+# Reads each employer's own public search page for the owner's state and
+# reports what matches their titles and is fresh. Nothing is signed in to.
+# It reports only: postings are not saved until the applier can complete a
+# SuccessFactors application.
+#
+# Free: a public-repo runner and public pages.
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: "Save postings (true), or only report (false)"
+        required: false
+        default: "false"
+      max:
+        description: "How many employers to read"
+        required: false
+        default: "40"
+      urls:
+        description: "Optional: read these instead — Name|https://…,Name|https://…"
+        required: false
+        default: ""
+
+concurrency:
+  group: applypilot-successfactors
+  cancel-in-progress: false
+
+jobs:
+  successfactors:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Unit checks
+        run: node unit.mjs
+      - name: Read employer sites
+        env:
+          SUPABASE_URL: https://inqhfkshqndkxyztzita.supabase.co
+          SUPABASE_ANON_KEY: sb_publishable_QK4kidijM8nk46uK6L22Qw_XA0RQu5U
+          APPLYPILOT_EMAIL: ${{ secrets.APPLYPILOT_EMAIL }}
+          APPLYPILOT_PASSWORD: ${{ secrets.APPLYPILOT_PASSWORD }}
+          APPLY: ${{ github.event.inputs.apply == 'true' }}
+          MAX_EMPLOYERS: ${{ github.event.inputs.max || '40' }}
+          SF_URLS: ${{ github.event.inputs.urls }}
+        run: node successfactors.mjs

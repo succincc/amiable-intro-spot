@@ -1,0 +1,85 @@
+name: outreach
+
+# A short email to the employer after an application, from the owner's Gmail,
+# with the resume that was sent attached.
+#
+# The address is one the employer publishes on its own website — never a
+# guess, never a named person. The panel is the gate: it sends only when
+# follow-up emails are switched on in settings, once per employer a month,
+# and under a daily limit. With the switch off, a scheduled run does nothing.
+#
+# mode:
+#   report  — say what would happen; nothing is written or sent
+#   preview — send each note to the owner's own mailbox instead
+#   send    — ask the panel to send to the employer
+#
+# Free: a public-repo runner, public pages, the free Gemini tier.
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "report, preview (to your own inbox) or send"
+        required: false
+        default: "report"
+      max:
+        description: "How many employers at most"
+        required: false
+        default: "12"
+  # After the applier's rounds. Does nothing while the switch is off.
+  schedule:
+    - cron: "41 2,8,14,20 * * *"
+
+concurrency:
+  group: applypilot-outreach
+  cancel-in-progress: false
+
+jobs:
+  outreach:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # The same isolated install and cache the applier uses; the browser
+      # prints the resume to the file that is attached.
+      - name: Restore Playwright + Chromium
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/ms-playwright
+            ~/pw/node_modules
+          key: pw-1.49.0-${{ runner.os }}
+
+      - name: Install Playwright + Chromium
+        run: |
+          set -euo pipefail
+          PW_DIR="$HOME/pw"
+          mkdir -p "$PW_DIR"
+          cd "$PW_DIR"
+          if [ ! -d node_modules/playwright ]; then
+            npm init -y >/dev/null
+            npm install --no-audit --no-fund playwright@1.49.0
+          fi
+          npx playwright install --with-deps chromium
+          ln -sfn "$PW_DIR/node_modules" "$GITHUB_WORKSPACE/node_modules"
+
+      - name: Unit checks
+        run: node unit.mjs
+
+      - name: Write to employers
+        env:
+          SUPABASE_URL: https://inqhfkshqndkxyztzita.supabase.co
+          SUPABASE_ANON_KEY: sb_publishable_QK4kidijM8nk46uK6L22Qw_XA0RQu5U
+          APPLYPILOT_EMAIL: ${{ secrets.APPLYPILOT_EMAIL }}
+          APPLYPILOT_PASSWORD: ${{ secrets.APPLYPILOT_PASSWORD }}
+          APP_URL: https://applynow.lol
+          ENGINE_API_KEY: ${{ secrets.ENGINE_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: ${{ secrets.GEMINI_MODEL || 'gemini-3.8-flash' }}
+          MODE: ${{ github.event_name == 'schedule' && 'send' || github.event.inputs.mode }}
+          MAX: ${{ github.event.inputs.max || '12' }}
+        run: node outreach.mjs

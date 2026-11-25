@@ -1,0 +1,94 @@
+name: resolve
+
+# Find the application system behind each employer's careers page, with a
+# real browser.
+#
+# The panel resolves a careers address by fetching it and reading the markup,
+# which works for about a third of large employers. The rest draw their
+# careers site with JavaScript, so the link to their Workday tenant or
+# Greenhouse board only exists once the page has run — or one click further
+# in. This opens each one the way a person would and follows it to the Apply
+# button.
+#
+# Anything it finds is checked against that system's own public job feed
+# before it is saved, and employers on a system the applier cannot use yet are
+# named and counted rather than dropped.
+#
+# Free: a public-repo runner, public pages, nothing signed in to.
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: "Save what is found (true), or only report (false)"
+        required: false
+        default: "false"
+      max:
+        description: "How many employers to look at"
+        required: false
+        default: "400"
+      system:
+        description: "Optional: only employers already found on this system (icims, oracle, successfactors…)"
+        required: false
+        default: ""
+      urls:
+        description: "Optional: try these instead of the list — Name|https://…,Name|https://…"
+        required: false
+        default: ""
+  # Daily, a smaller batch. It was weekly, which meant an employer the feeds
+  # or a job alert found on a Tuesday could not be applied to until the next
+  # Monday — by which time a two-week-old posting is most of the way to
+  # stale. New names are always looked at first; the rest of each batch goes
+  # to whichever employers have waited longest since their last visit, so a
+  # site that refused one week is still tried again the next.
+  schedule:
+    - cron: "17 9 * * *"
+
+concurrency:
+  group: applypilot-resolve
+  cancel-in-progress: false
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # The same isolated install and cache the applier uses.
+      - name: Restore Playwright + Chromium
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/ms-playwright
+            ~/pw/node_modules
+          key: pw-1.49.0-${{ runner.os }}
+
+      - name: Install Playwright + Chromium
+        run: |
+          set -euo pipefail
+          PW_DIR="$HOME/pw"
+          mkdir -p "$PW_DIR"
+          cd "$PW_DIR"
+          if [ ! -d node_modules/playwright ]; then
+            npm init -y >/dev/null
+            npm install --no-audit --no-fund playwright@1.49.0
+          fi
+          npx playwright install --with-deps chromium
+          ln -sfn "$PW_DIR/node_modules" "$GITHUB_WORKSPACE/node_modules"
+
+      - name: Resolve
+        env:
+          SUPABASE_URL: https://inqhfkshqndkxyztzita.supabase.co
+          SUPABASE_ANON_KEY: sb_publishable_QK4kidijM8nk46uK6L22Qw_XA0RQu5U
+          APPLYPILOT_EMAIL: ${{ secrets.APPLYPILOT_EMAIL }}
+          APPLYPILOT_PASSWORD: ${{ secrets.APPLYPILOT_PASSWORD }}
+          APPLY: ${{ github.event_name == 'schedule' || github.event.inputs.apply == 'true' }}
+          MAX_CANDIDATES: ${{ github.event.inputs.max || '150' }}
+          RESOLVE_URLS: ${{ github.event.inputs.urls }}
+          ONLY_SYSTEM: ${{ github.event.inputs.system }}
+        run: node resolve.mjs

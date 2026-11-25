@@ -1,0 +1,50 @@
+name: feeds
+
+# Which employers are hiring near home this week, from public job feeds.
+#
+# Reads feeds that are published for programs to read — no account, nothing
+# signed in to — for the owner's titles, and hands the employers it finds to
+# the resolver. Jobs are still read from, and applied for on, each employer's
+# own careers portal.
+#
+# The Muse needs no key. Adzuna and Jooble are free but want a key; add
+# ADZUNA_APP_ID / ADZUNA_APP_KEY or JOOBLE_KEY as repository secrets and they
+# are used from the next run. Without them those two are skipped.
+#
+# Free: a public-repo runner and public feeds.
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: "Save the employers found (true), or only report (false)"
+        required: false
+        default: "false"
+  # Twice a day, ahead of the resolver's own weekly pass.
+  schedule:
+    - cron: "23 3,15 * * *"
+
+concurrency:
+  group: applypilot-feeds
+  cancel-in-progress: false
+
+jobs:
+  feeds:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Read the feeds
+        env:
+          SUPABASE_URL: https://inqhfkshqndkxyztzita.supabase.co
+          SUPABASE_ANON_KEY: sb_publishable_QK4kidijM8nk46uK6L22Qw_XA0RQu5U
+          APPLYPILOT_EMAIL: ${{ secrets.APPLYPILOT_EMAIL }}
+          APPLYPILOT_PASSWORD: ${{ secrets.APPLYPILOT_PASSWORD }}
+          ADZUNA_APP_ID: ${{ secrets.ADZUNA_APP_ID }}
+          ADZUNA_APP_KEY: ${{ secrets.ADZUNA_APP_KEY }}
+          JOOBLE_KEY: ${{ secrets.JOOBLE_KEY }}
+          APPLY: ${{ github.event_name == 'schedule' || github.event.inputs.apply == 'true' }}
+        run: node feeds.mjs

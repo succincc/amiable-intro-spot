@@ -1,0 +1,195 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1793279134301,
+      "tag": "0000_applypilot_v2_schema",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1795029923228,
+      "tag": "0001_careers_portals_and_distance",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1795029949855,
+      "tag": "0002_inbox",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1795029962478,
+      "tag": "0003_grant_geo_cache_email_sync",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1795030012954,
+      "tag": "0004_companies_unique_nulls_not_distinct",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1795030768247,
+      "tag": "0005_drop_temp_company_constraint",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1795030787350,
+      "tag": "0006_fix_company_upsert_key",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1795033005978,
+      "tag": "0007_strict_radius_default",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1795033466481,
+      "tag": "0008_restrict_tables_to_owner",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1795047462403,
+      "tag": "0009_restrict_remaining_to_owner",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1795048648047,
+      "tag": "0010_score_threshold_bounds",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1795051015243,
+      "tag": "0011_large_employer_candidates",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1795352317548,
+      "tag": "0012_autopilot_and_state_filter",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1795400580215,
+      "tag": "0013_site_accounts",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1795400594745,
+      "tag": "0014_google_tokens",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1795400608521,
+      "tag": "0015_restrict_new_tables_to_owner",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1795400633100,
+      "tag": "0016_grant_owner_secured_gmail_and_site_accounts",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1795527694170,
+      "tag": "0017_answer_options",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1795563497608,
+      "tag": "0018_receipt_promotes_unconfirmed",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1795622613459,
+      "tag": "0019_follow_up_email",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1795622626492,
+      "tag": "0020_secure_outreach_table",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1795623344925,
+      "tag": "0021_experience_bank",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1795623358441,
+      "tag": "0022_secure_experience_table",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1795631577615,
+      "tag": "0023_daily_summary",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1795631593520,
+      "tag": "0024_interview_availability",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1795631631705,
+      "tag": "0025_heartbeat",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1795632382342,
+      "tag": "0026_no_database_timer",
+      "breakpoints": true
+    }
+  ]
+}

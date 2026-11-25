@@ -1,0 +1,47 @@
+name: mail
+
+# Asks the panel "anything due?", by hand or when GitHub's timer fires.
+#
+# The panel answers by reading the mailbox and sending replies that have been
+# cleared, no more often than once in fifty minutes however many times it is
+# asked. The watch job asks every hour as part of its round; this is a second
+# way to ask, and the way to see from here that the answer comes back.
+#
+# Hourly at most, never more: every question wakes the panel's database, and
+# the database is billed for the hours it is awake.
+#
+# The answer is which things were done and a few counts. No mail appears in
+# this log, and no key is needed to ask.
+#
+# Free: a public-repo runner and one request.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 * * * *"
+
+concurrency:
+  group: applypilot-mail
+  cancel-in-progress: false
+
+jobs:
+  mail:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Ask the panel whether anything is due
+        env:
+          APP_URL: https://applynow.lol
+        run: |
+          set -uo pipefail
+          code=$(curl -sS -o /tmp/tick.json -w '%{http_code}' --max-time 90 \
+            -X POST "${APP_URL}/api/public/cron/tick" \
+            -H "Content-Type: application/json" -d '{}' || echo "000")
+          echo "the panel answered ${code}"
+          head -c 500 /tmp/tick.json 2>/dev/null || true
+          echo
+          case "${code}" in
+            200) exit 0 ;;
+            404) echo "the panel does not have this yet: it needs a publish."; exit 0 ;;
+            *) exit 1 ;;
+          esac
