@@ -27,7 +27,7 @@ import { chromium } from "playwright";
 import { chooseOption, generateAnswer, resumeFacts } from "./answers.mjs";
 import { alignToPosting, composeAnswer } from "./ats.mjs";
 import { tailorResume, rolesText, standardResume, arrangedResume, structureResume } from "./tailor.mjs";
-import { guardLogs, hideJob } from "./quiet.mjs";
+import { guardLogs, hideJob, STATES } from "./quiet.mjs";
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const ANON_KEY = process.env.SUPABASE_ANON_KEY;
@@ -5076,6 +5076,25 @@ const DEGREE_OPTION = {
  * abbreviation is tried first — B.A. is not B.S. — then the usual ones for
  * that level.
  */
+/**
+ * A word to open a list with when nothing is on file for its question. Only
+ * for lists whose own options decide the answer; null for everything else,
+ * which is left for the owner as before.
+ */
+function listProbe(label, profile) {
+  const l = String(label ?? "").toLowerCase();
+  if (/^(note|notice)\b|acknowledg/.test(l)) return "Acknowledge";
+  if (/highest (level|degree)|level of education|education level/.test(l)) {
+    const level = highestDegree(profile?.resume_text ?? "");
+    return level ? { doctorate: "Doctorate", master: "Master", bachelor: "Bachelor", associate: "Associate", highschool: "High School" }[level] ?? null : null;
+  }
+  if (/where are you (currently )?(located|based)|current location/.test(l)) {
+    const st = String(profile?.state ?? "").trim();
+    return STATES[st.toUpperCase()] ?? (st || null);
+  }
+  return null;
+}
+
 function degreeOption(options, resume) {
   const level = highestDegree(resume);
   if (!level) return null;
@@ -7194,7 +7213,11 @@ async function applyToJobOnce(context, job, profile, answers) {
             fieldValue(label, profile) ??
             lookupSaved(label) ??
             (await workAnswer(label, profile, job)) ??
-            lastResort(label, profile, job);
+            lastResort(label, profile, job) ??
+            // A list with nothing on file for it is still opened and read:
+            // what it offers often settles it — a notice with one answer,
+            // the levels of education, the places one might be.
+            ((await el.getAttribute("role").catch(() => null)) === "combobox" ? listProbe(label, profile) : null);
           if (want) {
             // A Workday "search" field is a combobox, not a text box.
             //
@@ -7584,6 +7607,25 @@ async function applyToJobOnce(context, job, profile, answers) {
                 // question: "Note to California residents — Acknowledge".
                 // The answer on file for it is a yes or a no, which matches
                 // nothing, and a finished application stopped over it.
+                // Where the applicant is, from a list of places: the state
+                // by name or by its letters, else the country.
+                if (!hit && /where are you (currently )?(located|based)|current location|location you (are|reside)/i.test(label)) {
+                  const st = String(profile?.state ?? "").trim();
+                  const full = STATES[st.toUpperCase()] ?? st;
+                  const real = offered.filter((o) => o.text);
+                  hit =
+                    real.find((o) => full && o.text.trim().toLowerCase() === full.toLowerCase()) ??
+                    real.find((o) => full && new RegExp(`\\b${full}\\b`, "i").test(o.text)) ??
+                    real.find((o) => st.length === 2 && new RegExp(`\\b${st}\\b`).test(o.text)) ??
+                    real.find((o) => /^(united states|usa?|u\.s\.a?\.?)( of america)?$/i.test(o.text.trim())) ??
+                    real.find((o) => /\b(united states|u\.s\.|usa)\b/i.test(o.text) && !/outside|not in|non/i.test(o.text)) ??
+                    null;
+                }
+                if (!hit && /highest (level|degree)|level of education|education level/i.test(label)) {
+                  const texts = offered.map((o) => o.text).filter(Boolean);
+                  const pick = degreeOption(texts, profile?.resume_text ?? "");
+                  if (pick) hit = offered.find((o) => o.text === pick) ?? null;
+                }
                 if (!hit) {
                   const real = offered.filter((o) => o.text);
                   if (real.length === 1 && /^(i\s+)?(acknowledge|acknowledged|understand|understood|agree|accept|confirm)\b/i.test(real[0].text.trim())) {

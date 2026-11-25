@@ -110,7 +110,7 @@ export function privateTerms(profile, structured = null) {
 }
 
 const PLAIN_PLACE = /^(township|borough|village|north|south|east|west|upper|lower|mount|saint|point|beach|park|city|town|lake|heights|falls|springs|county|new|fort|port)$/i;
-const STATES = { AL: "Alabama", AK: "Alaska", AZ: "Arizona", AR: "Arkansas", CA: "California", CO: "Colorado", CT: "Connecticut", DE: "Delaware", FL: "Florida", GA: "Georgia", HI: "Hawaii", ID: "Idaho", IL: "Illinois", IN: "Indiana", IA: "Iowa", KS: "Kansas", KY: "Kentucky", LA: "Louisiana", ME: "Maine", MD: "Maryland", MA: "Massachusetts", MI: "Michigan", MN: "Minnesota", MS: "Mississippi", MO: "Missouri", MT: "Montana", NE: "Nebraska", NV: "Nevada", NH: "New Hampshire", NJ: "New Jersey", NM: "New Mexico", NY: "New York", NC: "North Carolina", ND: "North Dakota", OH: "Ohio", OK: "Oklahoma", OR: "Oregon", PA: "Pennsylvania", RI: "Rhode Island", SC: "South Carolina", SD: "South Dakota", TN: "Tennessee", TX: "Texas", UT: "Utah", VT: "Vermont", VA: "Virginia", WA: "Washington", WV: "West Virginia", WI: "Wisconsin", WY: "Wyoming" };
+export const STATES = { AL: "Alabama", AK: "Alaska", AZ: "Arizona", AR: "Arkansas", CA: "California", CO: "Colorado", CT: "Connecticut", DE: "Delaware", FL: "Florida", GA: "Georgia", HI: "Hawaii", ID: "Idaho", IL: "Illinois", IN: "Indiana", IA: "Iowa", KS: "Kansas", KY: "Kentucky", LA: "Louisiana", ME: "Maine", MD: "Maryland", MA: "Massachusetts", MI: "Michigan", MN: "Minnesota", MS: "Mississippi", MO: "Missouri", MT: "Montana", NE: "Nebraska", NV: "Nevada", NH: "New Hampshire", NJ: "New Jersey", NM: "New Mexico", NY: "New York", NC: "North Carolina", ND: "North Dakota", OH: "Ohio", OK: "Oklahoma", OR: "Oregon", PA: "Pennsylvania", RI: "Rhode Island", SC: "South Carolina", SD: "South Dakota", TN: "Tennessee", TX: "Texas", UT: "Utah", VT: "Vermont", VA: "Virginia", WA: "Washington", WV: "West Virginia", WI: "Wisconsin", WY: "Wyoming" };
 // Words too ordinary to stand for an employer on their own.
 const PLAIN_FIRM = /^(the|american|america|national|international|united|first|general|global|group|health|healthcare|bank|financial|services|service|company|corporation|systems|solutions|technologies|technology|digital|capital|partners|associates|medical|center|university|college|school|state|county|city|north|south|east|west|central|pacific|atlantic|advanced|applied|modern|premier|standard|universal|community|consumer|energy|foods|home|life|management|marketing|network|office|people|public|retail|supply|trust|world)$/i;
 
@@ -196,7 +196,7 @@ function swap(line) {
   }
   for (const [from, to] of [...SWAPS.entries()].sort((a, b) => b[0].length - a[0].length)) {
     // A short name only as a whole word: "Coty" is not the middle of another.
-    const body = esc(from).replace(/\\? /g, "\\s+");
+    const body = esc(from).replace(/\\? /g, "\\s+").replace(/['’]/g, "['’]");
     s = s.replace(new RegExp(from.length < 8 ? `(^|[^A-Za-z0-9])${body}(?![A-Za-z0-9])` : body, "gi"), (m, lead) => (from.length < 8 ? `${lead ?? ""}${to}` : to));
   }
   return s;
