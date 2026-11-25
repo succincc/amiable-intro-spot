@@ -268,7 +268,12 @@ function answerQuestion(label, p) {
                  "legal authorization", "authorization to work", "authorised to work",
                  "eligible to work", "right to work")) return p.work_authorized;
   if (has(label, "sponsorship", "visa", "h-1b", "h1b", "work permit")) return p.needs_sponsorship;
-  if (has(label, "18 years", "over 18", "age of majority", "at least 18")) return p.over_18;
+  // "Are you 18 or over?" has as many wordings as there are forms. Where the
+  // panel holds no answer, a resume that shows a finished college degree
+  // settles it; nothing else is taken as proof.
+  if (has(label, "18 years", "over 18", "age of majority", "at least 18", "18 or over", "18 or older", "18 and over", "18 and older", "18+", "eighteen")) {
+    return p.over_18 ?? (/\b(bachelor|associate|master)('?s)?\b|\bB\.?[AS]\.?\b|\bA\.?[AS]\.?\b/.test(String(p.resume_text ?? "")) ? "Yes" : null);
+  }
   if (has(label, "background check", "drug screen", "drug test")) return p.can_background_check;
   // Commuting is the premise of this whole system — it only ever offers jobs
   // inside the radius the user set — so yes is their own stated position.
