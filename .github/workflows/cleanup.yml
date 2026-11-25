@@ -1,0 +1,30 @@
+name: cleanup
+
+# Removes the logs of earlier runs. The runs themselves are kept, because the
+# watch job reads when each last ran; only what they printed is deleted.
+# Started by hand.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  actions: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Delete the logs of every finished run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -uo pipefail
+          gone=0; kept=0
+          for id in $(gh api --paginate "repos/$REPO/actions/runs?status=completed&per_page=100" --jq '.workflow_runs[].id'); do
+            [ "$id" = "$RUN_ID" ] && continue
+            if gh api -X DELETE "repos/$REPO/actions/runs/$id/logs" >/dev/null 2>&1; then gone=$((gone + 1)); else kept=$((kept + 1)); fi
+          done
+          echo "logs deleted: $gone; already gone or not deletable: $kept"
