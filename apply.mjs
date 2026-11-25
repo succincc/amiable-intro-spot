@@ -2484,7 +2484,13 @@ async function oraclePills(page, form, profile, job, lookupSaved = () => null) {
       if (/^(title|prefix|salutation|suffix)\b/.test(l)) { tally.address++; continue; }
       const texts = [];
       for (const b of pills) texts.push(((await b.innerText().catch(() => "")) || "").replace(/\s+/g, " ").trim());
-      const want = answerQuestion(l, profile) ?? lookupSaved(l) ?? lastResort(l, profile, job);
+      let want = answerQuestion(l, profile) ?? lookupSaved(l) ?? lastResort(l, profile, job);
+      // How much travel, offered as percentages with nothing on file: the
+      // least on offer, which promises nothing the owner has not agreed to.
+      if ((want === null || want === undefined || want === "") && /travel/.test(l) && texts.length > 1 && texts.every((t) => /^\d{1,3}\s*%$/.test(t))) {
+        want = [...texts].sort((x, y) => parseInt(x, 10) - parseInt(y, 10))[0];
+        console.log(`    oracle question "${label.slice(0, 50)}": nothing on file, so the least travel on offer`);
+      }
       if (want === null || want === undefined || want === "") {
         console.log(`    oracle question "${label.slice(0, 70)}" has no answer on file; offered ${JSON.stringify(texts.slice(0, 6))}`);
         continue;
@@ -2520,14 +2526,35 @@ async function oraclePills(page, form, profile, job, lookupSaved = () => null) {
 async function oracleLookup(page, form, box, typed, pick) {
   await box.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
   const listId = String((await box.getAttribute("aria-controls").catch(() => null)) ?? "").replace(/["\\]/g, "");
-  const items = async () =>
-    listId ? await form.$$(`[id="${listId}"] .cx-select__list-item:not(.cx-select__list-item--loading)`).catch(() => []) : [];
+  const ROWS = [".cx-select__list-item:not(.cx-select__list-item--loading)", "[role=option]", "[role=gridcell]"];
+  const items = async () => {
+    const own = listId ? await form.$$(ROWS.map((r) => `[id="${listId}"] ${r}`).join(", ")).catch(() => []) : [];
+    if (own.length) return own;
+    // A list that the box does not name: whichever one is showing.
+    const out = [];
+    for (const it of await form.$$(`[role=listbox] [role=option], .cx-select__list .cx-select__list-item:not(.cx-select__list-item--loading), ul[role=listbox] li`).catch(() => [])) {
+      if (await it.isVisible().catch(() => false)) out.push(it);
+      if (out.length >= 60) break;
+    }
+    return out;
+  };
   let found = [];
   for (let attempt = 0; attempt < 2 && !found.length; attempt++) {
     await box.click({ timeout: 3000 }).catch(() => {});
     await box.fill("", { timeout: 3000 }).catch(() => {});
     await box.type(String(typed), { delay: 60 + attempt * 60 }).catch(() => {});
-    found = (await until(async () => { const l = await items(); return l.length ? l : null; }, 9000, 400)) ?? [];
+    found = (await until(async () => { const l = await items(); return l.length ? l : null; }, attempt ? 6000 : 9000, 400)) ?? [];
+  }
+  if (!found.length) {
+    // A plain list, which typing does not search: opened and read whole.
+    await box.fill("", { timeout: 2000 }).catch(() => {});
+    await box.click({ timeout: 3000 }).catch(() => {});
+    await page.keyboard.press("ArrowDown").catch(() => {});
+    found = (await until(async () => { const l = await items(); return l.length ? l : null; }, 4000, 400)) ?? [];
+    if (!found.length) {
+      const what = await box.evaluate((n) => `${n.tagName}:${n.getAttribute("type") ?? ""}:${n.getAttribute("role") ?? ""}:${n.readOnly ? "readonly" : "typed"}:${n.getAttribute("aria-controls") ? "names a list" : "names no list"}:${String(n.id || "").replace(/\d+/g, "N").slice(0, 30)}`).catch(() => "?");
+      console.log(`    oracle list: nothing was offered by a box that is ${what}`);
+    }
   }
   const texts = [];
   for (const it of found.slice(0, 40)) texts.push(((await it.innerText().catch(() => "")) || "").replace(/\s+/g, " ").trim());
@@ -3132,6 +3159,14 @@ async function oracleRepair(page, form, profile, job, onlyReport = false, lookup
     if (about.role === "combobox" && /^(country|phone number)$/i.test(about.label) && !comboTried.has(about.id)) {
       comboTried.add(about.id);
       const code = /phone/i.test(about.label);
+      // The walk stops at every box in a section that has an issue, right
+      // or wrong. A country that holds a value the form does not mark is
+      // right — and choosing it again redraws the address under it, empty.
+      {
+        const held = String(await el.inputValue().catch(() => "")).trim();
+        const marked = (await el.getAttribute("aria-invalid").catch(() => null)) === "true";
+        if (held && !marked) continue;
+      }
       const listId = String((await el.getAttribute("aria-controls").catch(() => null)) ?? "").replace(/["\\]/g, "");
       const rows = async () =>
         listId
@@ -3147,7 +3182,7 @@ async function oracleRepair(page, form, profile, job, onlyReport = false, lookup
         seen = Math.max(seen, list.length);
         for (const it of list.slice(0, 20)) {
           const t = ((await it.innerText().catch(() => "")) || "").replace(/\s+/g, " ").trim().toLowerCase();
-          if (code ? /^(\+?1\b.*united states|united states\b.*\+?1\b|united states( of america)?|us \+1|\+1)$/.test(t) : /^united states( of america)?$/.test(t)) {
+          if (code ? (/united states/.test(t) && !/minor|virgin|outlying/.test(t)) || /^\+?1$/.test(t) : /^united states( of america)?$/.test(t)) {
             await it.click({ timeout: 3000 }).catch(() => it.click({ timeout: 3000, force: true }).catch(() => {}));
             took = true;
             break;
