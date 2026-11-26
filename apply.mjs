@@ -715,7 +715,9 @@ function fieldValue(label, p) {
   if (has(label, "current title", "current role", "job title", "position title")) return p.target_role;
   if (has(label, "years of experience", "years experience", "how many years")) return p.years_experience;
   if (has(label, "school", "university", "college")) return p.school;
-  if (has(label, "degree", "education level", "highest level")) return p.education_level;
+  // "Have you completed a bachelor's degree?" wants a yes or a no, which the
+  // yes/no rules give; only a question asking WHICH level gets the level.
+  if (has(label, "degree", "education level", "highest level") && !/^\s*(have|has|do|did|are|were) you\b/i.test(String(label))) return p.education_level;
   // "desired BASE salary" is not "desired salary": has() matches whole words
   // in order, so the employer's extra word made the rule miss and the field
   // was left empty on an otherwise complete questionnaire.
@@ -6159,7 +6161,7 @@ function lastResort(label, p, job) {
 
   // "What is your highest level of education?" as a search box. The resume
   // says, and the level's own word finds it in whatever list is offered.
-  if (/highest (level of )?education|highest degree|education level|level of education/i.test(l)) {
+  if (/highest (level of )?education|highest degree|education level|level of education/i.test(l) && !/^\s*(have|has|do|did|are|were) you\b/i.test(l)) {
     const word = { doctorate: "Doctorate", master: "Master", bachelor: "Bachelor", associate: "Associate", highschool: "High School" }[
       highestDegree(job?.tailored_resume || p?.resume_text) ?? ""
     ];
