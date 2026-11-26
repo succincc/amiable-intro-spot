@@ -2371,8 +2371,13 @@ async function oracleChoose(page, form, box, typed, wantRe, what) {
   const chosen = (st) => !!st && st.holds > 0 && st.open !== "true" && st.clear;
   const before = await state();
   if (chosen(before) && before.marked !== "true") {
-    console.log(`    oracle ${what}: already chosen ${JSON.stringify(before)}`);
-    return true;
+    // Chosen, but is it the right one? A dialling code of +93 — the first
+    // row of the list, taken by an earlier pass — is a choice too, and every
+    // American number is invalid under it.
+    const held = String(await box.inputValue().catch(() => "")).replace(/\s+/g, " ").trim().toLowerCase();
+    const right = wantRe.test(held) || (/dialling/.test(what) && /^(\+?1|us|usa)$/.test(held));
+    console.log(`    oracle ${what}: already chosen ${JSON.stringify(before)}, and it is ${right ? "the right one" : "not the one wanted; choosing again"}`);
+    if (right) return true;
   }
   await box.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
   await box.click({ timeout: 3000 }).catch(() => {});
@@ -3341,11 +3346,21 @@ async function oracleRepair(page, form, profile, job, onlyReport = false, lookup
           id: String(a.id || "").replace(/\d+/g, "N").slice(0, 30),
           label: (row?.querySelector("label, legend")?.innerText ?? "").replace(/\s+/g, " ").replace(/\*\s*$/, "").trim(),
           inGroup: !!a.closest("[role=radiogroup]"),
+          // Which part of the form this is in: the nearest heading above it.
+          under: (() => {
+            for (let n = a.parentElement, k = 0; n && k < 14; n = n.parentElement, k++) {
+              const h = n.querySelector(":scope > h2, :scope > h3, :scope > h4, :scope > legend, :scope > header h2, :scope > header h3, :scope > div > h2, :scope > div > h3");
+              const t = (h?.innerText ?? "").replace(/\s+/g, " ").trim();
+              if (t) return t.slice(0, 30);
+            }
+            return "";
+          })(),
+          state: `${String(a.value ?? "").length} char(s), ${a.getAttribute("aria-invalid") === "true" ? "marked" : "not marked"}`,
         };
       })
       .catch(() => null);
     if (!about) continue;
-    report.push(`${about.role ?? "button"}:${about.cls}:${about.id}:${about.label.slice(0, 44)}`);
+    report.push(`${about.role ?? "button"}:${about.cls}:${about.id}:${about.label.slice(0, 44)}${about.under ? ` [under "${about.under}"]` : ""}${about.role === "combobox" ? ` (${about.state})` : ""}`);
     if (onlyReport) continue;
 
     // A question: two or more pills, none chosen.
