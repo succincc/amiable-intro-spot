@@ -9804,6 +9804,7 @@ const main = async () => {
     const deadline = Date.now() + budgetMs;
 
     const BUSY_COMPANIES = new Set();
+    const CLAIMING = new Set();
     const STALLED_COMPANIES = new Set();
     // What a portal's session is made of once it has been verified, by
     // employer: handed to the next application there so that it is not
@@ -9813,8 +9814,11 @@ const main = async () => {
 
     async function worker(slot) {
       const ctx = await browser.newContext(CONTEXT_OPTIONS);
+      let claimedCo = null;
       try {
         while (true) {
+          // A claim that was won and then given up before it was run.
+          if (claimedCo) { CLAIMING.delete(claimedCo); claimedCo = null; }
           if (taken >= limit) break;
           // A job takes minutes; starting one with less than that left only
           // guarantees it is interrupted.
@@ -9887,7 +9891,7 @@ const main = async () => {
               // application it is for. Both went through, which was order of
               // arrival and not design. Taking a different employer's job
               // while one is in flight costs nothing and removes the question.
-              if (BUSY_COMPANIES.has(companyOf(row))) continue;
+              if (BUSY_COMPANIES.has(companyOf(row)) || CLAIMING.has(companyOf(row))) continue;
               // An employer whose form stopped one application in this run
               // will stop the next for the same reason — and a portal that
               // emails a code for every attempt sends the owner one each
@@ -9901,6 +9905,10 @@ const main = async () => {
               if ((SENT_TO.get(companyOf(row)) ?? 0) >= PER_EMPLOYER_DAILY) continue;
               // The status filter is the lock: whichever worker patches the
               // row first gets it, and the others see nothing come back.
+              // Marked before the claim is asked for, not after it comes
+              // back: two workers that looked in the same instant each saw
+              // the employer free, and two codes were emailed for it.
+              CLAIMING.add(companyOf(row));
               const won =
                 (await db(`jobs?id=eq.${row.id}&status=eq.queued`, {
                   method: "PATCH",
@@ -9911,7 +9919,8 @@ const main = async () => {
                     updated_at: new Date().toISOString(),
                   }),
                 }).catch(() => null)) ?? [];
-              if (won.length) { job = { ...row, attempts: (row.attempts ?? 0) + 1 }; break; }
+              if (won.length) { job = { ...row, attempts: (row.attempts ?? 0) + 1 }; claimedCo = companyOf(row); break; }
+              CLAIMING.delete(companyOf(row));
             }
             if (!job) console.log(`No queued ${want} jobs left.`);
           }
@@ -9969,6 +9978,7 @@ const main = async () => {
           }
 
           BUSY_COMPANIES.add(companyOf(job));
+          if (claimedCo) { CLAIMING.delete(claimedCo); claimedCo = null; }
           try {
             await TAG.run(mine, async () => {
               // Known to the log's net before a word about it is printed.
