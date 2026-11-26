@@ -3283,10 +3283,11 @@ async function oracleRepair(page, form, profile, job, onlyReport = false, lookup
       await page.waitForTimeout(code ? 800 : 3000);
       const bad = (await el.getAttribute("aria-invalid").catch(() => null)) === "true";
       console.log(`    oracle ${code ? "dialling code" : "country"}: ${took ? "chosen from the list" : `not chosen (the list showed ${seen} row(s)${listId ? "" : ", and names no list"})`}; the form ${bad ? "still marks it" : "does not mark it"}`);
-      // Nothing more here. The country the form marks at this point is an
-      // entry's own — the country a school or an employer is in — and the
-      // address above it is untouched. Going over the address again retyped
-      // a phone number the form had accepted, and it was refused afterwards.
+      // Choosing the address's country redraws the address under it, empty,
+      // and a run that did not fill it again ended with nine issues where
+      // there had been five. The phone number is safe from this now: ten
+      // digits the form accepts are left as they are.
+      if (took && !code) await oracleAddress(page, form, profile);
       if (took && !bad) fixed++;
       continue;
     }
