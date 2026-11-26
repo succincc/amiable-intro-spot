@@ -2423,7 +2423,20 @@ async function oracleChoose(page, form, box, typed, wantRe, what) {
     return out;
   };
   const list = (await until(async () => { const l = await rows(); return l.length ? l : null; }, 9000, 400)) ?? [];
-  const made = await Promise.all(list.slice(0, 3).map((r) => r.el.evaluate((n) => `${n.tagName}[${n.getAttribute("role") ?? ""}].${(typeof n.className === "string" ? n.className : "").trim().split(/\s+/)[0]}`).catch(() => "?")));
+  // A row that is still being fetched is drawn like a row and takes no
+  // press. Wait for one that is not, for as long as a slow list can take.
+  const settled = async () => {
+    const l = await rows();
+    for (const r of l) {
+      const cls = await r.el.evaluate((n) => (typeof n.className === "string" ? n.className : "")).catch(() => "");
+      if (/cx-select__list-item/.test(cls) && !/loading|disabled|empty|no-results/i.test(cls)) return l;
+    }
+    return null;
+  };
+  const ready = await until(settled, 20_000, 500);
+  if (ready) { list.length = 0; list.push(...ready); }
+  const made = await Promise.all(list.slice(0, 3).map((r) => r.el.evaluate((n) => `${n.tagName}[${n.getAttribute("role") ?? ""}].${(typeof n.className === "string" ? n.className : "").trim().replace(/\s+/g, ".").slice(0, 90)}|${n.getAttribute("aria-disabled") ?? ""}|${n.getAttribute("aria-selected") ?? ""}`).catch(() => "?")));
+  if (!ready) console.log(`    oracle ${what}: no row finished loading in twenty seconds`);
   const hit = list.find((r) => wantRe.test(r.text.toLowerCase()));
   let how = "nothing matched";
   if (hit) {
