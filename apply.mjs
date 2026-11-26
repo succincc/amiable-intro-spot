@@ -3613,8 +3613,52 @@ async function oracleRepair(page, form, profile, job, onlyReport = false, lookup
           await pickDate("year-endDate", role.end_year, new RegExp(`^${role.end_year}$`), "work entry, year ended"),
         ];
       }
-      const saved = await oracleSave(page, form);
-      console.log(`    oracle work history: the most recent job entered by hand ${JSON.stringify(did)}; ${saved ? "saved" : "not saved"}; the entry is made of ${JSON.stringify(asks).slice(0, 900)}`);
+      // The button that keeps a new entry is not always called SAVE. It is
+      // the entry's own: found from the employer's box outwards, and pressed
+      // by whatever name it goes under — and the names of every button the
+      // entry has are printed, so that an unexpected one is seen once and
+      // not guessed at.
+      let saved = await oracleSave(page, form);
+      let buttons = [];
+      if (!saved) {
+        const anchor = await (async () => {
+          for (const c of await form.$$('input[id^="employerName-"]').catch(() => [])) if (await c.isVisible().catch(() => false)) return c;
+          return null;
+        })();
+        const pressed = anchor
+          ? await anchor
+              .evaluate((n) => {
+                const shown = (e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+                const words = (b) => (b.innerText || b.getAttribute("aria-label") || b.getAttribute("title") || "").replace(/\s+/g, " ").trim();
+                const KEEP = /^(save|add|done|ok|apply|confirm|save and close|add work history|add experience|add item)$/i;
+                let box = n.parentElement;
+                let all = [];
+                for (let k = 0; k < 14 && box; k++, box = box.parentElement) {
+                  all = Array.from(box.querySelectorAll("button, [role=button], a.button")).filter(shown);
+                  const keep = all.find((b) => KEEP.test(words(b)));
+                  if (keep) {
+                    keep.scrollIntoView({ block: "center" });
+                    keep.click();
+                    return { pressed: words(keep).slice(0, 24), names: all.map((b) => words(b).slice(0, 24)).filter(Boolean).slice(0, 12) };
+                  }
+                  if (all.length >= 8) break;
+                }
+                return { pressed: null, names: all.map((b) => words(b).slice(0, 24)).filter(Boolean).slice(0, 12) };
+              })
+              .catch(() => null)
+          : null;
+        buttons = pressed?.names ?? [];
+        if (pressed?.pressed) {
+          await page.waitForTimeout(3000);
+          // Kept, when the employer's box is no longer on the screen.
+          let still = false;
+          for (const c of await form.$$('input[id^="employerName-"]').catch(() => [])) if (await c.isVisible().catch(() => false)) still = true;
+          saved = !still;
+          did.pressed = pressed.pressed;
+        }
+      }
+      console.log(`    oracle work history: the most recent job entered by hand ${JSON.stringify(did)}; ${saved ? "saved" : "not saved"}${buttons.length ? `; its buttons: ${JSON.stringify(buttons)}` : ""}`);
+      if (!saved) console.log(`    oracle work history: the entry is made of ${JSON.stringify(asks).slice(0, 700)}`);
       if (saved) fixed++;
       continue;
     }
