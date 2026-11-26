@@ -328,6 +328,32 @@ function readAddresses(urls) {
  * for them that turned out to be dead: careers. and jobs. under its own
  * name, and /careers and /jobs on its main site.
  */
+/** Systems whose postings are read by a job of their own, from the resolver's note. */
+export const READ_SYSTEMS = ["oracle", "successfactors", "icims", "bamboohr", "jazzhr", "recruitee", "pinpoint", "teamtailor", "eightfold"];
+
+/**
+ * Every employer on the list, counted by where it stands and why. Counts
+ * only: which employers they are is not said.
+ */
+export function census(rows) {
+  const out = { total: rows.length, found: {}, waiting: 0, not_found: {} };
+  const add = (bag, k) => (bag[k] = (bag[k] ?? 0) + 1);
+  for (const r of rows) {
+    const note = String(r.note ?? "");
+    const on = (note.match(/runs on ([a-z0-9]+)/i) ?? [])[1]?.toLowerCase();
+    if (r.status === "ok") add(out.found, r.ats ?? on ?? "other");
+    else if (r.status === "pending") out.waiting++;
+    else if (on) add(out.not_found, `on ${on}, no reader`);
+    else if (/refused the visit/i.test(note)) add(out.not_found, `refused (${(note.match(/\((?:HTTP )?([^)]{1,24})\)/) ?? [])[1] ?? "?"})`);
+    else if (/no application system recognised/i.test(note)) add(out.not_found, "site read, no system recognised");
+    else if (/did not finish loading/i.test(note)) add(out.not_found, "site too slow");
+    else if (/returned nothing/i.test(note)) add(out.not_found, "board seen, its list empty");
+    else if (/does not look like/i.test(note)) add(out.not_found, "board seen, not this employer's");
+    else add(out.not_found, note ? "older note" : "no note");
+  }
+  return out;
+}
+
 export function otherAddresses(careersUrl) {
   let host = "";
   try {
@@ -571,6 +597,26 @@ if (process.env.RESOLVE_IMPORT_ONLY !== "1") {
         console.log(`could not add the local employers: ${String(e?.message ?? e).slice(0, 120)}`);
       }
     }
+    // An employer on a system that has a reader of its own is found, not
+    // failed. Ones marked before that was the rule are put right here, in
+    // one statement each, rather than waiting weeks to be looked at again.
+    if (APPLY) {
+      for (const sys of READ_SYSTEMS) {
+        await db(`company_candidates?status=eq.failed&note=ilike.*runs%20on%20${sys}%20at*`, {
+          method: "PATCH",
+          headers: { Prefer: "return=minimal" },
+          body: JSON.stringify({ status: "ok" }),
+        }).catch(() => {});
+      }
+    }
+    // Where every employer stands, by kind and count: what the panel's
+    // "resolved" and "failed" are made of.
+    try {
+      const all = (await db("company_candidates?select=status,ats,note&limit=5000")) ?? [];
+      console.log(`census: ${JSON.stringify(census(all))}`);
+    } catch (e) {
+      console.log(`census: could not be read (${String(e.message).slice(0, 60)})`);
+    }
     // Longest-unchecked first, so successive runs work through the whole list.
     list =
       (await db(
@@ -714,7 +760,7 @@ if (process.env.RESOLVE_IMPORT_ONLY !== "1") {
         lines.push(`  -  ${c.name} — runs on ${top}${at ? ` (${at})` : ""}`);
         // A system with a reader of its own is an employer found, not one
         // failed: its postings are pulled by that reader from this note.
-        const READ = /^(oracle|successfactors|icims|bamboohr|jazzhr|recruitee|pinpoint|teamtailor|eightfold)$/.test(top);
+        const READ = READ_SYSTEMS.includes(top);
         await save(c, {
           status: READ ? "ok" : "failed", resolved_url: seen.final,
           note: `browser: runs on ${top}${at ? ` at ${at}` : ""}${READ ? ", read by its own job" : ", which the applier does not handle yet"}`,
