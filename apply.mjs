@@ -2940,6 +2940,60 @@ async function placeGroups(form, profile) {
   return done;
 }
 
+async function workFromBoxes(page, form, profile) {
+  let done = 0;
+  const st = String(profile.state ?? "").trim().toUpperCase();
+  const tries = [profile.city && STATE_NAMES[st] ? `${profile.city}, ${STATE_NAMES[st]}` : "", profile.city && st ? `${profile.city}, ${st}` : "", STATE_NAMES[st] ?? "", "United States"].filter(Boolean);
+  for (const el of await form.$$('input[role=combobox]').catch(() => [])) {
+    try {
+      if (!(await el.isVisible().catch(() => false))) continue;
+      const label = String((await el.evaluate(readLabel).catch(() => "")) || "").toLowerCase();
+      if (!/where (do|will|would) you (plan to |intend to |want to )?(work|be based|be located)|where are you (located|based)\b/.test(label)) continue;
+      if (String(await el.inputValue().catch(() => "")).trim()) continue;
+      const held = await el
+        .evaluate((n) => {
+          let box = n.parentElement;
+          for (let d = 0; box && d < 4; d++, box = box.parentElement) {
+            if (box.querySelector('[class*="singleValue" i], [class*="single-value" i], [class*="multiValue" i], [class*="multi-value" i]')) return true;
+          }
+          return false;
+        })
+        .catch(() => false);
+      if (held) continue;
+      let said = "nothing offered";
+      for (const typed of tries) {
+        await el.click({ timeout: 3000 }).catch(() => {});
+        await el.fill("", { timeout: 2000 }).catch(() => {});
+        await el.type(typed, { delay: 35 }).catch(() => {});
+        await page.waitForTimeout(1100);
+        const options = [];
+        for (const o of await form.$$("[role=option]").catch(() => [])) {
+          if (await o.isVisible().catch(() => false)) options.push(o);
+          if (options.length >= 40) break;
+        }
+        const need = typed.toLowerCase().split(",")[0];
+        let hit = null;
+        for (const o of options) {
+          const text = ((await o.innerText().catch(() => "")) || "").toLowerCase();
+          if (text.includes(need) && !/no (options|results)/.test(text)) { hit = o; break; }
+        }
+        said = `${options.length} option(s) under the ${typed === "United States" ? "country" : typed.includes(",") ? "town" : "state"}`;
+        if (!hit) continue;
+        await hit.click({ timeout: 3000 }).catch(() => hit.click({ force: true, timeout: 3000 }).catch(() => {}));
+        await page.waitForTimeout(500);
+        done++;
+        said += "; chosen";
+        break;
+      }
+      if (!/chosen$/.test(said)) await page.keyboard.press("Escape").catch(() => {});
+      console.log(`    where to work from: ${said}`);
+    } catch {
+      /* one box failing is not the form failing */
+    }
+  }
+  return done;
+}
+
 /** Which self-identification a set of boxes is asking for, or null. */
 export function selfIdTopic(text) {
   const t = String(text ?? "").toLowerCase();
@@ -5794,6 +5848,9 @@ function defaultYesNo(label, p) {
   if (/your own business|work for another (company|employer|organi[sz]ation)|another job|other (job|employer)s?\b|outside of [a-z0-9&' .-]{2,30} while/.test(l)) {
     return /\b(owner|founder|co-founder|self-employed|freelance|proprietor)\b[^\n]{0,80}\b(present|current)\b/.test(resume) ? "Yes" : "No";
   }
+  // An opt-in to a messaging app the owner may not use is not consent
+  // anyone gave: no, and the application goes on by email and phone.
+  if (/opt[- ]?in\b[^?]{0,40}\b(whatsapp|telegram|wechat|viber|line)\b|\b(whatsapp|telegram|wechat)\b[^?]{0,30}\b(messages|updates|communication)/.test(l)) return "No";
   // "May we text your mobile phone?" About the application; being reachable
   // is the point of having applied.
   if (/\b(may|can) we (text|sms|message|contact you (by|via) text)|receive (text|sms) messages|text message[^?]{0,40}(about|regarding)[^?]{0,30}(application|interview|job|opportunit)/.test(l)) {
@@ -9823,6 +9880,12 @@ async function applyToJobOnce(context, job, profile, answers) {
       filled += await listsBehindDrawnOnes(form, profile, lookupSaved).catch(() => 0);
       filled += await phoneCodeBoxes(page, form).catch(() => 0);
       filled += await placeGroups(form, profile).catch(() => 0);
+    }
+    // Where the owner would work from, asked as a search-and-pick box whose
+    // list may be towns, states or countries: the narrowest of those that
+    // the list has. On every portal but the two with their own handling.
+    if (!/myworkdayjobs\.com|myworkdaysite\.com|oraclecloud\.com/i.test(hostOf(page.url()) ?? "")) {
+      filled += await workFromBoxes(page, form, profile).catch(() => 0);
     }
 
     // Is the form actually complete before anything is clicked?
