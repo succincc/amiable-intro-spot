@@ -2728,6 +2728,82 @@ async function oracleProbe(form, when) {
  * never "Female"; where nothing is saved, the list's own way of declining.
  * Never a guess.
  */
+/**
+ * Which of a list's options is the answer on file, or -1. A state on file
+ * as its two letters is its name in a list of names; nothing looser than a
+ * whole-word match is taken.
+ */
+export function optionFor(options, answer) {
+  const flat = (v) => String(v ?? "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const wants = [answer, STATE_NAMES[String(answer ?? "").trim().toUpperCase()]].map(flat).filter(Boolean);
+  for (const w of wants) {
+    const exact = options.findIndex((o) => flat(o) === w);
+    if (exact >= 0) return exact;
+  }
+  for (const w of wants) {
+    if (w.length < 4) continue;
+    // Part of an option only when it is part of exactly one: "college" in
+    // a list with two kinds of college is not an answer.
+    const hits = options.map((o, i) => (new RegExp(`(^| )${w.replace(/ /g, " +")}( |$)`).test(flat(o)) ? i : -1)).filter((i) => i >= 0);
+    if (hits.length === 1) return hits[0];
+  }
+  return -1;
+}
+
+/**
+ * Lists a form draws for itself over a real one it hides. The drawn list is
+ * what a person presses; the real one underneath is what the form reads, and
+ * takes an answer directly. Only where the list is empty and the answer on
+ * file is one of its own options.
+ */
+async function listsBehindDrawnOnes(form, profile, lookupSaved) {
+  let done = 0;
+  for (const el of await form.$$("select").catch(() => [])) {
+    try {
+      if (await el.isVisible().catch(() => false)) continue;
+      const about = await el
+        .evaluate((n, read) => {
+          // On the page: some frame around it is drawn, though it is not.
+          let box = n.parentElement;
+          let drawn = false;
+          for (let d = 0; box && d < 4 && !drawn; d++, box = box.parentElement) {
+            const r = box.getBoundingClientRect();
+            drawn = r.width > 0 && r.height > 0;
+          }
+          if (!drawn || n.disabled) return null;
+          const chosen = n.selectedIndex >= 0 ? n.options[n.selectedIndex] : null;
+          const empty = !chosen || !String(chosen.value ?? "").trim() || /^(-|–|—|\s)*(please )?(select|choose)/i.test(chosen.text ?? "");
+          if (!empty) return null;
+          const label = (n.id && document.querySelector(`label[for="${CSS.escape(n.id)}"]`)?.innerText) || n.getAttribute("aria-label") || n.closest("fieldset, [class*=field i], [class*=Field]")?.querySelector("label, legend")?.innerText || n.name || "";
+          return { label: String(label).replace(/\s+/g, " ").replace(/\*/g, "").trim().slice(0, 120), options: Array.from(n.options).map((o) => (o.text ?? "").replace(/\s+/g, " ").trim()), values: Array.from(n.options).map((o) => o.value) };
+        })
+        .catch(() => null);
+      if (!about || !about.label || about.options.length < 2) continue;
+      if (/captcha/i.test(about.label)) continue;
+      const answer = String(lookupSaved(about.label) ?? answerQuestion(about.label, profile) ?? "").trim();
+      let i = answer ? optionFor(about.options, answer) : -1;
+      // Where to be based, asked as a list of the employer's places: the
+      // one in the owner's state, else the remote one.
+      if (i < 0 && /\b(where|which)\b.{0,40}\b(based|located|location|office|work from)\b|preferred (work )?location/i.test(about.label)) {
+        const st = String(profile.state ?? "").trim().toUpperCase();
+        i = st.length === 2 ? about.options.findIndex((o) => new RegExp(`,\\s*${st}\\b`).test(o)) : -1;
+        if (i < 0) i = about.options.findIndex((o) => /\bremote\b/i.test(o));
+      }
+      if (i < 0 || !String(about.values[i] ?? "").trim()) {
+        console.log(`    a list behind a drawn one, "${about.label.slice(0, 34)}": ${about.options.length} option(s), ${answer ? "the answer on file is not among them" : "no answer on file"}`);
+        continue;
+      }
+      await el.selectOption({ index: i }, { force: true, timeout: 3000 });
+      const held = await el.evaluate((n) => n.selectedIndex).catch(() => -1);
+      console.log(`    a list behind a drawn one, "${about.label.slice(0, 34)}": answered -> ${held === i ? "held" : "did not hold"}`);
+      if (held === i) done++;
+    } catch {
+      /* one list failing is not the form failing */
+    }
+  }
+  return done;
+}
+
 /** Which self-identification a set of boxes is asking for, or null. */
 export function selfIdTopic(text) {
   const t = String(text ?? "").toLowerCase();
@@ -9597,6 +9673,7 @@ async function applyToJobOnce(context, job, profile, answers) {
     // ticked; where it offers none, it is left and the form says so.
     if (!/myworkdayjobs\.com|myworkdaysite\.com|oraclecloud\.com|greenhouse\.io/i.test(hostOf(page.url()) ?? "")) {
       filled += await selfIdGroups(form, profile, lookupSaved).catch(() => 0);
+      filled += await listsBehindDrawnOnes(form, profile, lookupSaved).catch(() => 0);
     }
 
     // Is the form actually complete before anything is clicked?
