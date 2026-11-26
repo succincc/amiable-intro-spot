@@ -208,6 +208,7 @@ Microsoft Power BI`;
 // Employers from the public feeds
 // ---------------------------------------------------------------------------
 {
+  check("feeds: a posting's own board, where it names one", [feeds.boardLink("https://boards.greenhouse.io/acme/jobs/123?gh_src=x"), feeds.boardLink("https://jobs.lever.co/acme/abc-def/apply"), feeds.boardLink("https://jobs.ashbyhq.com/Acme/1b2c"), feeds.boardLink("https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/NY/Role_R1"), feeds.boardLink("https://remoteok.com/l/123")], ["https://boards.greenhouse.io/acme", "https://jobs.lever.co/acme", "https://jobs.ashbyhq.com/Acme", "https://acme.wd5.myworkdayjobs.com/en-US/Careers", null]);
   check("feeds: a company's own site, guessed from its name", feeds.guessCareersUrl("Northwell Health, Inc."), "https://www.northwellhealth.com/careers");
   check("feeds: too short a name gives no guess", feeds.guessCareersUrl("AB"), null);
   check("feeds: titles", [feeds.wanted("Senior Account Manager", ["account manager"], ["intern"]), feeds.wanted("Account Manager Intern", ["account manager"], ["intern"])], [true, false]);

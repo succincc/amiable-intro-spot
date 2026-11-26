@@ -197,6 +197,32 @@ function showShape(label, row) {
   SHAPES_SHOWN.add(label);
   console.log(`${label}: a record is made of ${JSON.stringify(shape(row)).slice(0, 500)}`);
 }
+/**
+ * A posting's own "apply here" address, when it is on a job board this
+ * system reads: the board is then known for certain, and nothing has to be
+ * guessed from the employer's name. Returns the board's address, or null.
+ */
+const BOARD_LINK = [
+  ["greenhouse", /^https?:\/\/(?:boards|job-boards)(?:\.eu)?\.greenhouse\.io\/([a-z0-9_-]+)/i, (m) => `https://boards.greenhouse.io/${m[1]}`],
+  ["lever", /^https?:\/\/jobs(?:\.eu)?\.lever\.co\/([a-z0-9_.-]+)/i, (m) => `https://jobs.lever.co/${m[1]}`],
+  ["ashby", /^https?:\/\/jobs\.ashbyhq\.com\/([a-z0-9_.%-]+)/i, (m) => `https://jobs.ashbyhq.com/${m[1]}`],
+  ["smartrecruiters", /^https?:\/\/(?:jobs|careers)\.smartrecruiters\.com\/([a-z0-9_-]+)/i, (m) => `https://jobs.smartrecruiters.com/${m[1]}`],
+  ["workday", /^https?:\/\/([a-z0-9-]+\.wd\d+\.myworkdayjobs\.com\/(?:[a-z]{2}-[A-Z]{2}\/)?[A-Za-z0-9_-]+)/i, (m) => `https://${m[1]}`],
+];
+const LINKS = {};
+export function boardLink(url) {
+  const u = String(url ?? "").trim();
+  for (const [name, re, make] of BOARD_LINK) {
+    const m = u.match(re);
+    if (m && !/^(embed|search|jobs|careers)$/i.test(m[1])) {
+      LINKS[name] = (LINKS[name] ?? 0) + 1;
+      return make(m);
+    }
+  }
+  if (u) LINKS.other = (LINKS.other ?? 0) + 1;
+  return null;
+}
+
 const US_OR_ANYWHERE = /\b(usa?|u\.s\.a?\.?|united states|america|north america|americas|worldwide|anywhere|global|remote)\b/i;
 
 /** Remote OK: every remote job it lists, in one request. Public, no key. */
@@ -218,7 +244,7 @@ async function fromRemoteOk(titles, excludes, tally) {
     const where = String(r.location ?? "");
     if (where && !US_OR_ANYWHERE.test(where)) continue;
     if (!wanted(r.position ?? r.title, titles, excludes)) continue;
-    if (r.company) out.push({ name: r.company, source: "remoteok" });
+    if (r.company) out.push({ name: r.company, source: "remoteok", link: boardLink(r.apply_url) ?? boardLink(r.url) });
   }
   return out;
 }
@@ -245,7 +271,7 @@ async function fromHimalayas(titles, excludes, tally) {
       const places = Array.isArray(r.locationRestrictions) ? r.locationRestrictions.join(" ") : String(r.locationRestrictions ?? "");
       if (places && !US_OR_ANYWHERE.test(places)) continue;
       if (!wanted(r.title, titles, excludes)) continue;
-      if (r.companyName) out.push({ name: r.companyName, source: "himalayas" });
+      if (r.companyName) out.push({ name: r.companyName, source: "himalayas", link: boardLink(r.applicationLink) });
     }
     // Newest first: a page that is all older than two weeks ends it.
     if (old === rows.length) break;
@@ -420,8 +446,9 @@ if (process.env.FEEDS_IMPORT_ONLY !== "1") {
   for (const h of hits) {
     const k = flat(h.name);
     if (!k || NOT_AN_EMPLOYER.test(h.name)) continue;
-    const c = count.get(k) ?? { name: h.name.trim(), n: 0 };
+    const c = count.get(k) ?? { name: h.name.trim(), n: 0, link: null };
     c.n++;
+    c.link ??= h.link ?? null;
     count.set(k, c);
   }
   const ranked = [...count.values()].sort((a, b) => b.n - a.n);
@@ -434,8 +461,10 @@ if (process.env.FEEDS_IMPORT_ONLY !== "1") {
   const fresh = [];
   for (const c of ranked) {
     if (names.has(flat(c.name))) continue;
-    const url = guessCareersUrl(c.name);
-    if (!url || urls.has(url)) continue;
+    // The board the posting itself pointed at, where there was one; the
+    // guess from the name otherwise.
+    const url = c.link ?? guessCareersUrl(c.name);
+    if (!url || urls.has(url.toLowerCase())) continue;
     urls.add(url);
     fresh.push({ name: c.name, careers_url: url, status: "pending" });
     if (fresh.length >= MAX_NEW) break;
@@ -445,6 +474,7 @@ if (process.env.FEEDS_IMPORT_ONLY !== "1") {
     `read ${tally.read} posting(s); matching the owner's titles and fresh: ${JSON.stringify(bySource)}; ` +
       `${ranked.length} employer(s), ${ranked.length - fresh.length} already known or unusable, ${fresh.length} new`,
   );
+  console.log(`"apply here" addresses, by the system they are on: ${JSON.stringify(LINKS)}`);
   console.log(`most openings at one employer: ${JSON.stringify(ranked.slice(0, 25).map((c) => c.n))}`);
   if (tally.errors.length) console.log(`errors: ${JSON.stringify(tally.errors.slice(0, 8))}`);
 
