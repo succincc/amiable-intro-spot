@@ -149,6 +149,7 @@ const SWAPS = new Map();
 // First words of employers, for when a quoted question is cut off partway
 // through one: "have you ever worked for acm".
 const TAILS = new Map();
+const SHORT = new Map();
 const cuts = (t, sizes) => [t, ...sizes.filter((n) => n < t.length && n >= 8).map((n) => t.slice(0, n).trim())];
 export function hideJob(job) {
   const company = String(job?.company ?? "").replace(/\s+/g, " ").trim();
@@ -156,6 +157,9 @@ export function hideJob(job) {
   // Lines are often cut to a width, so the cut forms are known too.
   if (title.length >= 6) for (const t of cuts(title, [70, 60, 52, 44, 40, 34, 30, 28, 24, 20])) SWAPS.set(t, "[a posting]");
   if (company.length >= 3) for (const c of cuts(company, [40, 30, 28, 26, 24, 22, 20, 18])) SWAPS.set(c, aliasFor(company));
+  // A name of two capitals or digits is too short to look for in any case,
+  // but exactly as written, standing alone, it is still the employer.
+  else if (/^[A-Z0-9]{2}$/.test(company)) SHORT.set(company, aliasFor(company));
   // The name people actually use is its first word — a form asks "have you
   // ever worked for Acme", not "for Acme Holdings, Inc." — and its questions
   // are printed cut short, so the start of that word counts too.
@@ -199,8 +203,11 @@ function swap(line) {
     const body = esc(from).replace(/\\? /g, "\\s+").replace(/['’]/g, "['’]");
     s = s.replace(new RegExp(from.length < 8 ? `(^|[^A-Za-z0-9])${body}(?![A-Za-z0-9])` : body, "gi"), (m, lead) => (from.length < 8 ? `${lead ?? ""}${to}` : to));
   }
+  for (const [from, to] of SHORT) s = s.replace(new RegExp(`(^|[^A-Za-z0-9])${esc(from)}(?![A-Za-z0-9])`, "g"), (m, lead) => `${lead ?? ""}${to}`);
   return s;
 }
+/** A line as it would be printed, for the checks. */
+export const asPrinted = (line) => swap(line);
 
 let ACTIVE = false;
 /**

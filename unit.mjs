@@ -314,7 +314,9 @@ Microsoft Power BI`;
   check("quiet: an address becomes the kind of portal", /^form: \[workday [0-9a-f]{5}\] done$/.test(quiet.scrubPlaces("form: https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/Trenton/Manager_R1?x=1 done")), true);
   check("quiet: a bare host too", /^the wall at \[site [0-9a-f]{5}\]/.test(quiet.scrubPlaces("the wall at careers.acme.com/apply/1: {}")), true);
   check("quiet: the system's own addresses and file names are left", quiet.scrubPlaces("https://abc.supabase.co/rest/v1/jobs apply.mjs resume.pdf e.message"), "https://abc.supabase.co/rest/v1/jobs apply.mjs resume.pdf e.message");
-  check("quiet: the same employer, the same alias", [quiet.aliasFor("Garden State Foods") === quiet.aliasFor("garden state  foods!"), /^employer-[0-9a-f]{5}$/.test(quiet.aliasFor("Garden State Foods"))], [true, true]);
+quiet.hideJob({ company: "ZQ" });
+  check("quiet: a two-letter employer is hidden as written, and only standing alone", [/^ok employer-[0-9a-f]{5} read$/.test(quiet.asPrinted("ok ZQ read")), quiet.asPrinted("the zq and AZQ1")], [true, "the zq and AZQ1"]);
+    check("quiet: the same employer, the same alias", [quiet.aliasFor("Garden State Foods") === quiet.aliasFor("garden state  foods!"), /^employer-[0-9a-f]{5}$/.test(quiet.aliasFor("Garden State Foods"))], [true, true]);
   check("quiet: a record's shape and none of its words", quiet.shape({ Title: "Manager", n: 3, tags: ["a"], x: null }), { Title: "text of 7", n: "number", tags: "list of 1", x: "empty" });
   {
     const t2 = quiet.privateTerms({ full_name: "Pat Q. Example", city: "Springfield Township", state: "NJ" }, { experience: [{ company: "Fixture Goods Digital Marketing LLC", title: "Owner and Operator" }] });

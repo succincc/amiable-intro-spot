@@ -1,9 +1,7 @@
 // Postings from employers whose careers site runs on SAP SuccessFactors.
 //
 // Of the first 150 employers the resolver looked at in one sitting, 36 run on
-// it — more than every other system the applier cannot use yet put together.
-// Colgate-Palmolive, Wyndham, Cintas, EY, Moody's and XPO among them, all
-// with offices inside the radius.
+// it — more than every other system without a lane of its own put together.
 //
 // A SuccessFactors careers site is the employer's own address ("jobs.…com")
 // in front of a standard search page: /search/?q=…&locationsearch=…, rows of
@@ -12,9 +10,8 @@
 // way a visitor's browser does, for postings in the owner's state, and keeps
 // what matches their titles and is fresh. Nothing is signed in to.
 //
-// Reading comes first and is all this does so far. Until the applier can
-// complete a SuccessFactors application, postings are counted and reported,
-// not saved: a job in the queue that nothing can apply to is only noise.
+// With APPLY set the postings kept are saved for the applier, which has its
+// own lane for this system; without it they are counted and reported only.
 //
 // Free: a public-repo runner and public pages.
 
@@ -29,7 +26,7 @@ const APPLY = process.env.APPLY === "true"; // off: look and report, write nothi
 const MAX = Number(process.env.MAX_EMPLOYERS || 40);
 const BUDGET_MS = Number(process.env.BUDGET_MINUTES || 20) * 60_000;
 // For trying it against a handful of addresses without the list:
-//   SF_URLS="Colgate|https://jobs.colgate.com,Cintas|https://careers.cintas.com"
+//   SF_URLS="Example|https://jobs.example.com,Other|https://careers.other.example"
 const LOCAL = String(process.env.SF_URLS || "").trim();
 // The site's own place search is loose — asked for New Jersey, some return
 // everything they have. Postings are kept only where the owner could work:
