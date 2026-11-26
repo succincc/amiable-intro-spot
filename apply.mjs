@@ -4579,7 +4579,7 @@ async function advanceStep(page, form, stepNo) {
           tag: n.tagName,
           id: n.getAttribute("data-automation-id") ?? n.id ?? null,
           role: n.getAttribute("role") ?? n.getAttribute("aria-haspopup") ?? null,
-          shows: (n.innerText ?? "").replace(/\s+/g, " ").trim().slice(0, n.id === "errorHeading" ? 160 : 40),
+          shows: (n.innerText ?? "").replace(/\s+/g, " ").trim().slice(0, (n.getAttribute("data-automation-id") ?? n.id) === "errorHeading" ? 200 : 40),
           // What is INSIDE it. A pass written for role="radio" found nothing
           // in the group this portal keeps rejecting and could not say what
           // it had instead, so describe the children rather than guess a
@@ -8067,6 +8067,26 @@ async function applyToJobOnce(context, job, profile, answers) {
           // "Male", pressed the first row offered and got "Female" — caught
           // and emptied, but it stopped the application all the same.
           if (/\.oraclecloud\.com$/i.test(hostOf(page.url()) ?? "") && /^(US-STANDARD-ORA_|country-\d+$|country-codes-dropdown)/i.test(String((await el.getAttribute("id").catch(() => "")) ?? ""))) continue;
+
+          // Workday's "Would you be willing to share your Facebook profile
+          // with us?" is a box for a web address, not a yes or a no: a word
+          // typed into it is refused as an address, and the whole step with
+          // it. A LinkedIn address on file is entered; the others are left
+          // empty, and anything already typed into them is taken out.
+          {
+            const sid = String((await el.getAttribute("id").catch(() => "")) ?? "");
+            const soc = sid.match(/^socialNetworkAccounts--(\w+?)Account$/i);
+            if (soc || /willing to share your \w+ profile/i.test(String(label))) {
+              const which = String(soc?.[1] ?? String(label).match(/share your (\w+) profile/i)?.[1] ?? "").toLowerCase();
+              const addr = which === "linkedin" && /^https?:\/\//i.test(String(profile.linkedin_url ?? "")) ? String(profile.linkedin_url) : "";
+              const held = String(await el.inputValue().catch(() => "")).trim();
+              if (held !== addr) {
+                await el.fill(addr, { timeout: 3000 }).catch(() => {});
+                if (addr) filled++;
+              }
+              continue;
+            }
+          }
 
           // text-ish
           const existing = await el.inputValue().catch(() => "");
