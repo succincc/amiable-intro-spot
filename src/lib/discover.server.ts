@@ -813,7 +813,9 @@ export async function runDiscover(supabase: any, opts: { since?: string | undefi
           row.lon = point.lon;
           row.distance_miles = miles;
 
-          if (miles > radius) {
+          // Three miles of give: a posting a mile past the line is not a
+          // different commute.
+          if (miles > radius + 3) {
             stats.filtered++;
             bump(`over ${radius} mi`);
             continue;
@@ -978,7 +980,7 @@ export async function runDiscover(supabase: any, opts: { since?: string | undefi
               .in("id", ids.slice(i, i + 200));
           }
           stats.backfilled += ids.length;
-          if (miles > radius) await park(ids, `${miles} mi away (limit ${radius})`);
+          if (miles > radius + 3) await park(ids, `${miles} mi away (limit ${radius})`);
         }
 
         if (netLookups >= MAX_NET_LOOKUPS || Date.now() > geocodeDeadline) {

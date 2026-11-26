@@ -302,8 +302,13 @@ function livesInListedState(label, p) {
     ? mine.toUpperCase()
     : Object.keys(STATE_NAMES).find((k) => STATE_NAMES[k].toLowerCase() === mine.toLowerCase());
   if (!code) return null;
+  // A list written small — "az, fl, ga, id" — is still a list of codes when
+  // nearly every word in it is one.
+  const words = tail.split(/[^A-Za-z]+/).filter(Boolean);
+  const codes = words.filter((w) => w.length === 2 && STATE_NAMES[w.toUpperCase()]).map((w) => w.toUpperCase());
+  const codeList = codes.length >= 3 && codes.length >= words.length * 0.7;
   const listed = Object.keys(STATE_NAMES).filter(
-    (k) => new RegExp(`\\b${k}\\b`).test(tail) || new RegExp(`\\b${STATE_NAMES[k]}\\b`, "i").test(tail),
+    (k) => new RegExp(`\\b${k}\\b`).test(tail) || (codeList && codes.includes(k)) || new RegExp(`\\b${STATE_NAMES[k]}\\b`, "i").test(tail),
   );
   return listed.length ? (listed.includes(code) ? "Yes" : "No") : null;
 }
@@ -334,6 +339,9 @@ function answerQuestion(label, p) {
     const lives = livesInListedState(label, p);
     if (lives) return lives;
   }
+  // "Please indicate the best way to reach you": by email, which is where
+  // this whole system reads and answers.
+  if (/best (way|method) to (reach|contact) you|preferred (method|way|means) of contact|how (should|may|can) we (reach|contact) you/i.test(String(label))) return "Email";
   // Sharing a personal social profile with an employer is nobody's default.
   if (/willing to share your (facebook|twitter|instagram|tiktok|x|social)/i.test(String(label))) return "No";
   if (has(label, "background check", "drug screen", "drug test")) return p.can_background_check;
@@ -10531,7 +10539,10 @@ const main = async () => {
     // How many, never which: the log is read by people who are not the owner.
     console.log(`employers at the ${PER_EMPLOYER_DAILY}-a-day limit: ${busy.length}`);
   }
-  const RADIUS = Number(process.env.RADIUS_MILES || 0) || Number(cfgRow?.radius_miles ?? 0);
+  // The owner's radius with three miles of give: a posting a mile past the
+  // line is not a different commute.
+  const RADIUS_SET = Number(process.env.RADIUS_MILES || 0) || Number(cfgRow?.radius_miles ?? 0);
+  const RADIUS = RADIUS_SET > 0 ? RADIUS_SET + 3 : 0;
   const withinReach = (j) =>
     !(RADIUS > 0) || j?.remote === true || (j?.distance_miles != null && Number(j.distance_miles) <= RADIUS);
   const dailyCap = Number(cfgRow?.daily_cap ?? 50);
