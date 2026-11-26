@@ -1215,7 +1215,14 @@ async function successFactorsAccount(page, profile, job) {
   };
 
   let at = await where();
-  if (existing) {
+  // An account known to be unconfirmed is not signed in to at all: the
+  // sign-in is refused, and after a refusal neither the page's own link nor
+  // the sign-in address will open the registration form. It is registered
+  // afresh from the untouched sign-in page, which is the one route that has
+  // been seen to work.
+  const pending = existing?.status === "pending_verification";
+  if (pending) console.log("    successfactors: the saved account was never confirmed; registering afresh");
+  if (existing && !pending) {
     if (at === "register") {
       await pressNamed(/^(please sign in|sign in|already (a user|registered|have an account).*)$/i);
       await page.waitForTimeout(2500);
@@ -1237,20 +1244,11 @@ async function successFactorsAccount(page, profile, job) {
       WALLED_HOSTS.add(key);
       return { ok: false, reason: why };
     }
-    console.log("    successfactors: the saved account was never confirmed; registering again");
-    // From the sign-in page as it first was: after a refused sign-in the
-    // page's own link to the registration form did not open it.
-    await page.goto(startedAt, { waitUntil: "domcontentloaded", timeout: 45000 }).catch(() => {});
-    await page.waitForTimeout(3000);
-    await dismissBanners(page).catch(() => {});
-    at = await where();
-    // The sign-in address answering with a signed-in page: the sign-in had
-    // gone through after all, and the portal was only slow to show it.
-    if (at === "other" && (await signedIn())) {
-      await saveAccount(key, email, password, "active", job.id, "signed in on SuccessFactors");
-      console.log("    successfactors: the saved account is signed in after all");
-      return { ok: true };
-    }
+    // Marked for what it is, so the next attempt — the next posting in this
+    // run, or this one half an hour on — registers instead of signing in.
+    await saveAccount(key, email, password, "pending_verification", job.id, "SuccessFactors: the saved sign-in was refused; the account was never confirmed");
+    console.log("    successfactors: the saved account was never confirmed; it will be registered afresh on the next attempt");
+    return { ok: false, reason: "email_verification" };
   }
 
   if (at === "signin") {
