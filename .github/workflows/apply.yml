@@ -96,7 +96,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        lane: ${{ fromJSON((github.event_name == 'schedule' || github.event.inputs.as_scheduled == 'true') && '["workday","greenhouse","oracle","successfactors","ashby","lever","none"]' || '[""]') }}
+        lane: ${{ fromJSON((github.event_name == 'schedule' || github.event.inputs.as_scheduled == 'true') && '["workday","greenhouse","oracle","successfactors","ashby","lever","other","none"]' || '[""]') }}
     # Fifty minutes killed a 25-job run after twelve of them, leaving the
     # dashboard reading "running" forever and the unfinished jobs still
     # claimed. The applier now stops itself before this is reached, so this

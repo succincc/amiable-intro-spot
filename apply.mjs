@@ -10968,7 +10968,17 @@ const main = async () => {
               (await db(
                 // "none": the jobs with no portal named — an employer's own
                 // website — which the general form-filler takes.
-                `jobs?status=eq.queued&${want === "none" ? "ats=is.null" : `ats=eq.${encodeURIComponent(want)}`}` +
+                // "other": every system without a lane of its own — iCIMS,
+                // Workable, SmartRecruiters, BambooHR, JazzHR, Recruitee and
+                // whatever is read next — whose forms the general
+                // form-filler takes as it finds them.
+                `jobs?status=eq.queued&${
+                  want === "none"
+                    ? "ats=is.null"
+                    : want === "other"
+                      ? "ats=not.in.(workday,greenhouse,oracle,successfactors,ashby,lever)&ats=not.is.null"
+                      : `ats=eq.${encodeURIComponent(want)}`
+                }` +
                   (RADIUS > 0 ? `&and=(or(remote.is.true,distance_miles.lte.${RADIUS}))` : "") +
                   // Fresh postings only, and not a setting: posted inside the
                   // last fourteen days. A posting with no date cannot be shown

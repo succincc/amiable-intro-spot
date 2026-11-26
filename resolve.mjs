@@ -712,9 +712,12 @@ if (process.env.RESOLVE_IMPORT_ONLY !== "1") {
         (otherNames[top] ??= []).push(c.name);
         const at = seen.hosts?.get(top) ?? "";
         lines.push(`  -  ${c.name} — runs on ${top}${at ? ` (${at})` : ""}`);
+        // A system with a reader of its own is an employer found, not one
+        // failed: its postings are pulled by that reader from this note.
+        const READ = /^(oracle|successfactors|icims|bamboohr|jazzhr|recruitee|pinpoint|teamtailor)$/.test(top);
         await save(c, {
-          status: "failed", resolved_url: seen.final,
-          note: `browser: runs on ${top}${at ? ` at ${at}` : ""}${/^(oracle|successfactors|icims)$/.test(top) ? ", read by its own job" : ", which the applier does not handle yet"}`,
+          status: READ ? "ok" : "failed", resolved_url: seen.final,
+          note: `browser: runs on ${top}${at ? ` at ${at}` : ""}${READ ? ", read by its own job" : ", which the applier does not handle yet"}`,
         });
         continue;
       }

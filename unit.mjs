@@ -21,6 +21,8 @@ const feeds = await import("./feeds.mjs");
 const pretailor = await import("./pretailor.mjs");
 const sf = await import("./successfactors.mjs");
 const quiet = await import("./quiet.mjs");
+process.env.BOARDS_IMPORT_ONLY = "1";
+const boards = await import("./boards.mjs");
 process.env.MEASURE_IMPORT_ONLY = "1";
 const measure = await import("./measure.mjs");
 
@@ -35,6 +37,23 @@ function check(name, got, want) {
   }
 }
 const truthy = (name, got) => check(name, Boolean(got), true);
+
+// ---------------------------------------------------------------------------
+// The smaller hiring systems' public lists
+// ---------------------------------------------------------------------------
+{
+  check("boards: a board's host is told from a system's own pages", [boards.boardOf("acme.bamboohr.com")?.ats, boards.boardOf("https://acme.applytojob.com/apply")?.ats, boards.boardOf("www.bamboohr.com"), boards.boardOf("example.com")], ["bamboohr", "jazzhr", null, null]);
+  check("boards: BambooHR's list", boards.readBamboo({ result: [{ id: 41, jobOpeningName: "Store Manager", location: { city: "Exampleton", state: "New Jersey" }, isRemote: false }, { id: 0, jobOpeningName: "" }] }, "acme.bamboohr.com"),
+    [{ id: "41", url: "https://acme.bamboohr.com/careers/41", title: "Store Manager", location: "Exampleton, New Jersey", remote: false, posted_at: null }]);
+  const rec = boards.readRecruitee({ offers: [{ id: 7, title: "Operations Lead", careers_url: "https://acme.recruitee.com/o/operations-lead", city: "Exampleton", state_code: "NJ", country_code: "us", remote: true, published_at: "2026-11-20 10:00:00 UTC", description: "<p>Run the <b>floor</b>.</p>", status: "published" }, { id: 8, title: "Closed", careers_url: "x", status: "archived" }] });
+  check("boards: Recruitee's offers, published ones only, text without its markup", [rec.length, rec[0].location, rec[0].country, rec[0].remote, rec[0].description], [1, "Exampleton, NJ", "US", true, "Run the floor ."]);
+  const jazz = boards.readJazz('<li><a href="/apply/AbC123/Assistant-Manager">Assistant Manager</a><ul><li>Exampleton, NJ</li></ul></li><li><a href="https://acme.applytojob.com/apply/Zz9/Driver">Driver</a> Remote</li><a href="/apply/AbC123/Assistant-Manager">Apply</a>', "acme.applytojob.com");
+  check("boards: JazzHR's page of links, each once", jazz.map((j) => [j.id, j.url, j.title, j.location, j.remote]), [["AbC123", "https://acme.applytojob.com/apply/AbC123/Assistant-Manager", "Assistant Manager", "Exampleton, NJ", false], ["Zz9", "https://acme.applytojob.com/apply/Zz9/Driver", "Driver", null, true]]);
+  const tt = boards.readTeamtailor("<rss><channel><item><title><![CDATA[Shift Lead]]></title><link>https://acme.teamtailor.com/jobs/1-shift-lead</link><pubDate>Fri, 20 Nov 2026 10:00:00 +0000</pubDate><description><![CDATA[<p>Lead a shift.</p>]]></description></item></channel></rss>");
+  check("boards: Teamtailor's feed", [tt[0].title, tt[0].url, tt[0].posted_at, tt[0].description], ["Shift Lead", "https://acme.teamtailor.com/jobs/1-shift-lead", "2026-11-20T10:00:00.000Z", "Lead a shift."]);
+  check("boards: a posting's words from its JobPosting data", boards.describeFrom('<html><script type="application/ld+json">{"@type":"JobPosting","description":"<p>Count the till.</p>","datePosted":"2026-11-21"}</script><body>x</body></html>'), { description: "Count the till.", posted_at: "2026-11-21T00:00:00.000Z" });
+  check("boards: a wanted title needs half the words of one the owner searches", [boards.wanted("Assistant Store Manager", ["store manager"], []), boards.wanted("Software Engineer", ["store manager"], []), boards.wanted("Store Manager Intern", ["store manager"], ["intern"])], [true, false, false]);
+}
 
 // ---------------------------------------------------------------------------
 // A place the geocoder cannot find as written, said more plainly
