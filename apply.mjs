@@ -9818,7 +9818,10 @@ const main = async () => {
                   (want === "workday"
                     ? `&or=(posted_at.gte.${FRESH_SINCE},posted_at.is.null)`
                     : `&posted_at=gte.${encodeURIComponent(FRESH_SINCE)}`) +
-                  `&attempts=lt.3&order=score.desc.nullslast&limit=30&select=*`,
+                  // The newest first, and the better match among those of
+                  // a day: an application in the first days of a posting is
+                  // read; one in its second week often is not.
+                  `&attempts=lt.3&order=posted_at.desc.nullslast,score.desc.nullslast&limit=30&select=*`,
               ).catch(() => null)) ?? [];
             for (const row of rows) {
               // One application per employer at a time.
