@@ -328,6 +328,91 @@ function readAddresses(urls) {
  * for them that turned out to be dead: careers. and jobs. under its own
  * name, and /careers and /jobs on its main site.
  */
+/** The employer's own name as its web address has it: "careers.acme.com" is "acme" at "acme.com". */
+export function ownDomain(careersUrl) {
+  try {
+    const host = new URL(careersUrl).hostname.toLowerCase().replace(/^(www|careers?|jobs?|work|join|apply|hire|talent)\./, "");
+    const labels = host.split(".");
+    if (labels.length < 2) return null;
+    const two = /^(co|com|org|net|ac)$/.test(labels.at(-2)) && labels.length >= 3;
+    const base = labels.slice(two ? -3 : -2).join(".");
+    return { base, label: base.split(".")[0] };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The places to try after a refusal. A refusal is honoured where it was
+ * given: nothing more is asked of the host that said no. Only the employer's
+ * other public addresses are tried — a jobs site is often a different
+ * server from the marketing site in front of it. For an address that was
+ * simply dead, every usual place is tried.
+ */
+export function afterRefusal(careersUrl, blocked) {
+  const all = otherAddresses(careersUrl);
+  if (/HTTP 404|HTTP 410|NAME_NOT_RESOLVED|CERT_|SSL_/.test(String(blocked ?? ""))) return all;
+  let refused = "";
+  try {
+    refused = new URL(careersUrl).hostname.toLowerCase();
+  } catch {
+    return [];
+  }
+  return all.filter((u) => new URL(u).hostname.toLowerCase() !== refused);
+}
+
+/**
+ * Asking two hiring systems directly whether the employer is on them, by
+ * the name in its own web address. Each is that system's public page for
+ * that employer. An answer counts only when the page names the employer's
+ * own domain, so that a namesake is not taken for it.
+ */
+async function askByName(careersUrl) {
+  const own = ownDomain(careersUrl);
+  if (!own || own.label.length < 3) return null;
+  const text = async (url) => {
+    try {
+      const res = await fetch(url, { headers: { "User-Agent": UA, Accept: "text/html" }, signal: AbortSignal.timeout(15_000), redirect: "follow" });
+      return res.ok ? { body: (await res.text()).slice(0, 600_000), final: res.url } : null;
+    } catch {
+      return null;
+    }
+  };
+  const ef = await text(`https://${own.label}.eightfold.ai/careers`);
+  if (ef && new RegExp(`["']domain["']\\s*:\\s*["']${own.base.replace(/\./g, "\\.")}["']`, "i").test(ef.body)) {
+    return { system: "eightfold", host: `${own.label}.eightfold.ai` };
+  }
+  for (const host of [`careers-${own.label}.icims.com`, `${own.label}.icims.com`]) {
+    const ic = await text(`https://${host}/jobs/search?ss=1`);
+    if (ic && /icims/i.test(ic.body) && ic.body.toLowerCase().includes(own.base)) return { system: "icims", host: new URL(ic.final).hostname.toLowerCase() };
+  }
+  return null;
+}
+
+/** Why a board's list could not be confirmed: the answer its address gave. */
+async function listAnswer(t) {
+  const url =
+    t.ats === "workday" ? `https://${t.token}.${t.pod}.myworkdayjobs.com/wday/cxs/${t.token}/${t.site}/jobs`
+    : t.ats === "greenhouse" ? `https://boards-api.greenhouse.io/v1/boards/${encodeURIComponent(t.token)}/jobs`
+    : t.ats === "lever" ? `https://api.lever.co/v0/postings/${encodeURIComponent(t.token)}?mode=json&limit=1`
+    : null;
+  if (!url) return "not asked";
+  try {
+    const res = await fetch(url, {
+      method: t.ats === "workday" ? "POST" : "GET",
+      headers: { "User-Agent": UA, Accept: "application/json", ...(t.ats === "workday" ? { "Content-Type": "application/json" } : {}) },
+      ...(t.ats === "workday" ? { body: JSON.stringify({ appliedFacets: {}, limit: 1, offset: 0, searchText: "" }) } : {}),
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!res.ok) return `HTTP ${res.status}`;
+    const j = await res.json().catch(() => null);
+    const n = t.ats === "workday" ? j?.total : Array.isArray(j?.jobs) ? j.jobs.length : Array.isArray(j) ? j.length : null;
+    return `answered, ${n ?? "no count"} listed`;
+  } catch (e) {
+    return String(e?.message ?? e).slice(0, 40);
+  }
+}
+
 /** Systems whose postings are read by a job of their own, from the resolver's note. */
 export const READ_SYSTEMS = ["oracle", "successfactors", "icims", "bamboohr", "jazzhr", "recruitee", "pinpoint", "teamtailor", "eightfold"];
 
@@ -344,7 +429,7 @@ export function census(rows) {
     if (r.status === "ok") add(out.found, r.ats ?? on ?? "other");
     else if (r.status === "pending") out.waiting++;
     else if (on) add(out.not_found, `on ${on}, no reader`);
-    else if (/refused the visit/i.test(note)) add(out.not_found, `refused (${(note.match(/\((?:HTTP )?([^)]{1,24})\)/) ?? [])[1] ?? "?"})`);
+    else if (/refused the visit/i.test(note)) add(out.not_found, `refused (${(note.match(/HTTP (\d{3})/) ?? note.match(/(ERR_[A-Z0-9_]+)/) ?? note.match(/(timeout)/i) ?? [])[1] ?? "other"})`);
     else if (/no application system recognised/i.test(note)) add(out.not_found, "site read, no system recognised");
     else if (/did not finish loading/i.test(note)) add(out.not_found, "site too slow");
     else if (/returned nothing/i.test(note)) add(out.not_found, "board seen, its list empty");
@@ -673,8 +758,8 @@ if (process.env.RESOLVE_IMPORT_ONLY !== "1") {
       // wrong guess at the address, not an employer without jobs. The usual
       // places are tried before giving up: careers and jobs under the
       // employer's own name, and the pages of those names on its main site.
-      if (seen && !seen.feeds.length && !seen.others.size && /HTTP 404|HTTP 410|NAME_NOT_RESOLVED|CERT_|SSL_/.test(String(seen.blocked ?? ""))) {
-        for (const other of otherAddresses(c.careers_url)) {
+      if (seen && !seen.feeds.length && !seen.others.size && seen.blocked) {
+        for (const other of afterRefusal(c.careers_url, seen.blocked)) {
           if (Date.now() - started > BUDGET_MS) break;
           let again = null;
           try {
@@ -737,7 +822,8 @@ if (process.env.RESOLVE_IMPORT_ONLY !== "1") {
         tally.unverified++;
         const f = seen.feeds.find((x) => plausible(c.name, x)) ?? seen.feeds[0];
         const why = plausible(c.name, f) ? "its job feed returned nothing" : "the board does not look like this employer's";
-        lines.push(`  ~  ${c.name} — ${f.ats} ${f.token}${f.site ? "/" + f.site : ""} seen, but ${why}`);
+        const said = await listAnswer(f).catch(() => "?");
+        lines.push(`  ~  ${c.name} — ${f.ats} ${f.token}${f.site ? "/" + f.site : ""} seen, but ${why} [${f.ats}${f.pod ? " " + f.pod : ""}: ${said}; ${seen.feeds.length} address(es) seen]`);
         // Still worth knowing what else the site runs on.
         const also = seen.others.size ? ` Also reaches ${[...seen.others.keys()].slice(0, 3).join(", ")}.` : "";
         await save(c, {
@@ -765,6 +851,17 @@ if (process.env.RESOLVE_IMPORT_ONLY !== "1") {
           status: READ ? "ok" : "failed", resolved_url: seen.final,
           note: `browser: runs on ${top}${at ? ` at ${at}` : ""}${READ ? ", read by its own job" : ", which the applier does not handle yet"}`,
         });
+        continue;
+      }
+
+      // Last, the two systems that can be asked directly by the employer's
+      // own name.
+      const named2 = await askByName(c.careers_url).catch(() => null);
+      if (named2) {
+        tally.asked = (tally.asked ?? 0) + 1;
+        byOther[named2.system] = (byOther[named2.system] ?? 0) + 1;
+        lines.push(`  ok ${c.name} — on ${named2.system}, found by asking it`);
+        await save(c, { status: "ok", resolved_url: seen.final, note: `asked: runs on ${named2.system} at ${named2.host}, read by its own job` });
         continue;
       }
 
