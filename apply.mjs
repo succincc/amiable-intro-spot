@@ -68,6 +68,10 @@ export function originOf(outcome) {
   if (why === "login" || why === "email_verification" || why === "registered") return "signing in to the portal";
   if (/http 4(0[13]|29)|refused|access denied|blocked/.test(note)) return "the provider refused";
   if (why === "unknown_question") return "a question nothing on file answers";
+  // What a form said it still wanted, by name: a required box with nothing
+  // on file to put in it is the owner's fact to give, once.
+  if (/linkedin url|portfolio url|website url|cover letter/.test(note) && /\*/.test(note)) return "a fact only the owner has";
+  if (why === "error" && /please select an option|\* \||\*$/.test(note)) return "a required answer nothing on file gives";
   if (why === "dry_run") return "a rehearsal";
   if (outcome?.status === "skipped") return "passed over by a rule";
   return "this program's to fix";

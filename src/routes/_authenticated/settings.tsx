@@ -388,7 +388,7 @@ function SearchBlock({ initial, profile }: { initial: SearchConfig; profile: Pro
       <Field label="locations"><Tags value={locs} onChange={(v) => set("locations", v)} placeholder="e.g. Princeton, NJ · Remote" /></Field>
       <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={s.remote_ok ?? true} onChange={(e) => set("remote_ok", e.target.checked)} /> remote ok</label>
       <div className="grid gap-3 sm:grid-cols-2">
-        <Field label="salary floor"><input type="number" className={inputCls} value={s.salary_floor ?? 0} onChange={(e) => set("salary_floor", Number(e.target.value))} /></Field>
+        <Field label={`salary floor${Number(s.salary_floor) > 0 ? ` (about $${(Number(s.salary_floor) / 2080).toFixed(2)} an hour)` : ""}`}><input type="number" className={inputCls} value={s.salary_floor ?? 0} onChange={(e) => set("salary_floor", Number(e.target.value))} /></Field>
         <Field label="daily cap"><input type="number" min={1} max={1000} className={inputCls} value={s.daily_cap ?? 50} onChange={(e) => set("daily_cap", Number(e.target.value))} /></Field>
         <Field label={`apply automatically at this match or better: ${autoPct}% match`}>
           <input type="range" min={10} max={100} step={10} className="w-full accent-primary" value={autoPct} onChange={(e) => set("auto_apply_score", percentToScore(Number(e.target.value)))} />
