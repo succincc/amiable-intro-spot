@@ -375,14 +375,22 @@ if (process.env.ICIMS_IMPORT_ONLY !== "1") {
       for (const origin of origins.slice(0, 4)) {
         try {
           const got = [];
+          // Asked the full way first, then plainly: some sites answer an
+          // order or a filter they do not know with an empty list.
+          let extra = "&sortBy=posted_date&descending=true&internal=false";
           for (let pageNo = 1; pageNo <= 3; pageNo++) {
-            const res = await fetch(`${origin}/api/jobs?page=${pageNo}&limit=100&sortBy=posted_date&descending=true&internal=false`, {
+            const res = await fetch(`${origin}/api/jobs?page=${pageNo}&limit=100${extra}`, {
               headers: { "User-Agent": UA, Accept: "application/json" }, redirect: "follow", signal: AbortSignal.timeout(20_000),
             });
             if (!res.ok) { ownSaid = `HTTP ${res.status}`; break; }
             const j = await res.json().catch(() => null);
+            if (pageNo === 1 && extra && !(j?.jobs ?? []).length) {
+              extra = "";
+              pageNo = 0;
+              continue;
+            }
             const these = rowsFromSiteData(j, origin);
-            ownSaid = `answered, ${(j?.jobs ?? []).length} on page ${pageNo}`;
+            ownSaid = `answered, ${(j?.jobs ?? []).length} on page ${pageNo}${j && !Array.isArray(j.jobs) ? ` (it holds ${Object.keys(j).slice(0, 5).join(", ")})` : ""}`;
             got.push(...these);
             if ((j?.jobs ?? []).length < 100) break;
           }
