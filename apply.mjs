@@ -3090,6 +3090,39 @@ async function oracleEducation(page, form, profile, resume, tileText = "") {
       })
       .catch(() => null);
     console.log(`    oracle education: the open entry is made of ${JSON.stringify(made).slice(0, 1500)}`);
+    // Some portals offer the degree as a row of buttons under the word, one
+    // to be pressed: "Associate's Degree", "Bachelor's Degree (16 years)".
+    const want = ownLevel ?? (entry ? highestDegree(entry.degree) ?? highestDegree(resume) : highestDegree(resume));
+    const re = want ? DEGREE_OPTION[want] : null;
+    if (re) {
+      const pills = [];
+      for (const b of await form.$$("button[role=radio]").catch(() => [])) {
+        if (!(await b.isVisible().catch(() => false))) continue;
+        const underDegree = await b
+          .evaluate((n) => {
+            const row = n.closest(".input-row") ?? n.parentElement?.parentElement;
+            const label = row?.querySelector("label, legend");
+            return /^degree\b/i.test((label?.innerText ?? "").trim());
+          })
+          .catch(() => false);
+        if (!underDegree) continue;
+        pills.push({ el: b, text: ((await b.innerText().catch(() => "")) || "").replace(/\s+/g, " ").trim() });
+      }
+      const pick = pills.find((x) => re.test(x.text) && !/post[- ]?(graduate|bachelor|bacc)|some college|no degree|not complete|incomplete|non-degree/i.test(x.text));
+      if (pick) {
+        const on = async () => (await pick.el.getAttribute("aria-checked").catch(() => null)) === "true";
+        if (!(await on())) {
+          await pick.el.scrollIntoViewIfNeeded({ timeout: 2500 }).catch(() => {});
+          await pick.el.click({ timeout: 3000 }).catch(() => pick.el.click({ timeout: 3000, force: true }).catch(() => {}));
+          await page.waitForTimeout(500);
+        }
+        const took = await on();
+        console.log(`    oracle education: ${want} degree pressed among ${pills.length} button(s)${took ? "" : " (did not take)"}`);
+        if (took) done++;
+      } else {
+        console.log(`    oracle education: no ${want} button among ${pills.length} under the word "Degree"`);
+      }
+    }
   }
   // This entry's own degree where it was matched; the resume's highest only
   // when there is a single school.
@@ -3212,9 +3245,11 @@ async function oracleRepair(page, form, profile, job, onlyReport = false, lookup
       // or wrong. A country that holds a value the form does not mark is
       // right — and choosing it again redraws the address under it, empty.
       {
-        const held = String(await el.inputValue().catch(() => "")).trim();
+        // Marked by the form, or nothing: a run in which the form marked
+        // neither had both chosen again all the same, and the phone number
+        // that had been accepted was refused afterwards.
         const marked = (await el.getAttribute("aria-invalid").catch(() => null)) === "true";
-        if (held && !marked) continue;
+        if (!marked) continue;
       }
       const listId = String((await el.getAttribute("aria-controls").catch(() => null)) ?? "").replace(/["\\]/g, "");
       const rows = async () =>
