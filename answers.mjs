@@ -126,6 +126,10 @@ async function gemini(prompt, apiKey, maxTokens = 600, attempt = 0, temperature 
         contents: [{ parts: [{ text: prompt }] }],
         generationConfig: { temperature, maxOutputTokens: maxTokens },
       }),
+      // Without a limit a request that never answers is held for five
+      // minutes by the runtime's own default, and one such request took five
+      // of the twelve minutes an application is allowed.
+      signal: AbortSignal.timeout(90_000),
     },
   );
   if (res.status === 429) {

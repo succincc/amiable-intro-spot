@@ -271,8 +271,30 @@ function answerQuestion(label, p) {
   // "Are you 18 or over?" has as many wordings as there are forms. Where the
   // panel holds no answer, a resume that shows a finished college degree
   // settles it; nothing else is taken as proof.
-  if (has(label, "18 years", "over 18", "age of majority", "at least 18", "18 or over", "18 or older", "18 and over", "18 and older", "18+", "eighteen")) {
-    return p.over_18 ?? (/\b(bachelor|associate|master)('?s)?\b|\bB\.?[AS]\.?\b|\bA\.?[AS]\.?\b/.test(String(p.resume_text ?? "")) ? "Yes" : null);
+  if (has(label, "18 years", "over 18", "age of majority", "at least 18", "18 or over", "18 or older", "18 and over", "18 and older", "18+", "eighteen",
+                 "age of 18", "18 or above", "18 and above", "under 18", "legal working age")) {
+    const over = p.over_18 ?? (/\b(bachelor|associate|master)('?s)?\b|\bB\.?[AS]\.?\b|\bA\.?[AS]\.?\b/.test(String(p.resume_text ?? "")) ? "Yes" : null);
+    // "Are you under the age of 18?" is the same question turned round.
+    if (over != null && /\b(under|younger than|below|less than)\b[^.?]{0,24}\b(18|eighteen)\b/i.test(String(label))) {
+      return /^(y|true)/i.test(String(over)) ? "No" : "Yes";
+    }
+    return over;
+  }
+  // "Do you live in any of the following states: …" — the form's own list
+  // against the state on file. Answered only when the list is in the
+  // question and the state on file is one this can name.
+  if (/\b(live|reside|residing|resident|located)\b[^?]{0,40}\bfollowing (states|locations)\b/i.test(String(label))) {
+    const tail = String(label).split(/following (?:states|locations)/i)[1] ?? "";
+    const mine = String(p.state ?? "").trim();
+    const code = STATE_NAMES[mine.toUpperCase()]
+      ? mine.toUpperCase()
+      : Object.keys(STATE_NAMES).find((k) => STATE_NAMES[k].toLowerCase() === mine.toLowerCase());
+    if (code) {
+      const listed = Object.keys(STATE_NAMES).filter(
+        (k) => new RegExp(`\\b${k}\\b`).test(tail) || new RegExp(`\\b${STATE_NAMES[k]}\\b`, "i").test(tail),
+      );
+      if (listed.length) return listed.includes(code) ? "Yes" : "No";
+    }
   }
   if (has(label, "background check", "drug screen", "drug test")) return p.can_background_check;
   // Commuting is the premise of this whole system — it only ever offers jobs
@@ -349,7 +371,9 @@ function answerQuestion(label, p) {
                  "currently or have you ever worked", "current or previous",
                  "current or former", "ever been, employed", "ever been employed",
                  "currently, or have you ever been", "previously employed",
-                 "do you currently work for", "currently work for")) {
+                 "do you currently work for", "currently work for",
+                 "currently working for", "currently working at", "currently employed by",
+                 "currently employed at", "currently employed with", "current employee of")) {
     return "No";
   }
 
@@ -2512,10 +2536,24 @@ async function oracleSelfId(page, form, profile, lookupSaved) {
     if (!what) continue;
     const saved = String(answerQuestion(what, profile) ?? lookupSaved(what) ?? "").trim();
     const esc = (t) => t.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const want = saved
-      ? new RegExp(`^${esc(saved)}\\b`)
-      : /prefer not|decline|don'?t wish|do not wish|choose not|not to answer|rather not|not disclose|not specified|undisclosed/;
-    if (await oracleChoose(page, form, box, saved ? saved.slice(0, 12) : "", want, `${what} (${saved ? "the saved answer" : "nothing is saved, so declining"})`)) done++;
+    const DECLINE = /prefer not|decline|don'?t wish|do not wish|choose not|not to answer|rather not|not disclose|not specified|undisclosed/;
+    // The saved answer in the list's own words. "I am not a veteran" and
+    // "Not a Protected Veteran" are one answer; held to the letter, the
+    // second was emptied to make room for the first, which the list does
+    // not have, and the question went out blank.
+    let want = DECLINE;
+    let typed = "";
+    if (saved && DECLINE.test(saved.toLowerCase())) {
+      want = DECLINE;
+    } else if (saved && what === "veteran status" && /\b(not|no|non|never)\b/i.test(saved)) {
+      want = /\bnot (a |an )?(protected |u\.?s\.? )?veteran\b|^i am not\b|^no\b|^non-?veteran|never served/;
+    } else if (saved && what === "disability" && /^no\b|\b(do not|don'?t) have\b|\bnot have\b/i.test(saved)) {
+      want = /^no\b|do not have|don'?t have|not have a disab/;
+    } else if (saved) {
+      want = new RegExp(`^${esc(saved)}\\b`);
+      typed = saved.slice(0, 12);
+    }
+    if (await oracleChoose(page, form, box, typed, want, `${what} (${saved ? "the saved answer" : "nothing is saved, so declining"})`)) done++;
   }
   return done;
 }
@@ -4865,7 +4903,7 @@ async function workdayStudyPrompt(form, page, label, want) {
  *
  * Returns how many values the widget holds at the end.
  */
-async function workdaySourcePrompt(form, page, label, want) {
+async function workdaySourcePrompt(form, page, label, want, company = "") {
   const trace = [];
   const { mark, held, input, options } = workdayWidget(form, label, "source--source");
   const names = (o) => o.map((x) => x.text).filter(Boolean);
@@ -4953,7 +4991,7 @@ async function workdaySourcePrompt(form, page, label, want) {
       trace.push("that is the phone-code list; not choosing from it");
       break;
     }
-    const hit = chooseSource(offered, want, label);
+    const hit = chooseSource(offered, want, label, company);
     if (!hit) {
       trace.push(`nothing true to choose in ${JSON.stringify(names(offered).slice(0, 6))}`);
       break;
@@ -5031,7 +5069,7 @@ async function workdaySourcePrompt(form, page, label, want) {
     const found = await options(true);
     trace.push(`results:${JSON.stringify(names(found).slice(0, 5))}`);
     if (found.length) {
-      const pick = chooseSource(found, want, label);
+      const pick = chooseSource(found, want, label, company);
       if (!pick) return finish(held(await mark()));
       const inner = (await pick.el.$('[data-automation-id="promptOption"]').catch(() => null)) ?? pick.el;
       await inner.click({ timeout: 3000 }).catch(() => inner.click({ force: true, timeout: 3000 }).catch(() => {}));
@@ -5107,7 +5145,7 @@ const SOURCE_OURS =
  * on "Recruiting Agency" and "Source", and the first of those leads to a
  * directory of agencies.
  */
-function chooseSource(offered, want, label) {
+function chooseSource(offered, want, label, company = "") {
   const ok = offered.filter((o) => !NEVER_SOURCE.test(o.text));
   if (!ok.length) return null;
   const hit = bestOption(ok, want, label);
@@ -5115,6 +5153,18 @@ function chooseSource(offered, want, label) {
   // A folder that only holds the real list.
   const folder = ok.find((o) => /^(sources?|other sources?|general|all sources?)$/i.test(o.text.trim()));
   if (folder) return folder;
+  // The employer's own name, offered beside "Advertising" and "Job Fair":
+  // that is the folder for its own careers site, which is where this
+  // posting was found.
+  const plain = (t) => String(t ?? "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const co = plain(company).replace(/\b(inc|llc|corp|corporation|company|co|ltd|group|holdings|the)\b/g, " ").replace(/\s+/g, " ").trim();
+  if (co.length >= 3) {
+    const own = ok.find((o) => {
+      const t = plain(o.text);
+      return t.length >= 3 && (t === co || `${co} `.startsWith(`${t} `) || `${t} `.startsWith(`${co} `));
+    });
+    if (own) return own;
+  }
   // One thing left that is not ruled out: under "Company Web Site" the only
   // entry is the site's own address, whatever it is called.
   return ok.length === 1 ? ok[0] : null;
@@ -7908,7 +7958,7 @@ async function applyToJobOnce(context, job, profile, answers) {
             }
 
             if (combo && /hear about|source/i.test(label)) {
-              const got = await workdaySourcePrompt(form, page, label, want);
+              const got = await workdaySourcePrompt(form, page, label, want, job?.company ?? "");
               if (got !== null) {
                 console.log(`    combo "${label.slice(0, 34)}" wanted "${String(want).slice(0, 24)}" -> ${got} selected`);
                 if (got > 0) filled++;
@@ -9474,7 +9524,10 @@ async function applyToJobOnce(context, job, profile, answers) {
     const saidBefore = new Set(before.filter(Boolean));
     const invalidBefore = await form.$$('[aria-invalid="true"]').then((e) => e.length).catch(() => 0);
     // Never an error, whenever it appears.
-    const BENIGN = /successfully uploaded|upload(ed)? (complete|success)|\.(pdf|docx?)\b/i;
+    // Nor is a portal saying what it is doing with a form it has accepted:
+    // "You're all set! Saving candidate info…" was read as a refusal, and an
+    // application that had gone through was filed as one that had not.
+    const BENIGN = /successfully uploaded|upload(ed)? (complete|success)|\.(pdf|docx?)\b|^saving\b|^submitting\b|you.{0,2}re all set/i;
     const freshNotices = async () =>
       (await noticeTexts()).filter((t) => t && t.length < 200 && !saidBefore.has(t) && !BENIGN.test(t));
 
@@ -9511,7 +9564,10 @@ async function applyToJobOnce(context, job, profile, answers) {
       // as unconfirmed because the thank-you was not one of four spellings.
       /thank you|thanks for (taking the time|applying|your (application|interest|submission)|submitting)|thanks,? we|application (has been )?(received|submitted|sent|complete)|we('ve| have) (received|got)|successfully (applied|submitted)|your application (is|was|has been) (in|received|submitted|sent)|submitted your application|application confirmation|we('ll| will) (be in touch|review your application)|while we review your application/.test(
         t,
-      );
+      ) ||
+      // Oracle's own screen once a form is accepted, shown while it saves.
+      (ON_ORACLE && /you.{0,2}re all set/.test(t));
+    const ON_ORACLE = /\.oraclecloud\.com$/i.test(hostOf(page.url()) ?? "");
 
     // Poll instead of sleeping once. The old code waited exactly 5s and read
     // the page a single time, so a confirmation that rendered at 6s was
