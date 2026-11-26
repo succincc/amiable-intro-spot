@@ -337,6 +337,7 @@ quiet.hideJob({ company: "ZQ" });
   check("near: every border is kept from both sides", Object.entries(near.BORDERS).flatMap(([a, list]) => list.filter((b) => !near.BORDERS[b]?.includes(a)).map((b) => `${a}-${b}`)), []);
   check("near: with no state known, nothing is thrown away", [near.nearPattern(null).test("Austin, TX"), near.stateCode("nj"), near.stateName("NJ"), near.stateCode("Narnia")], [true, "NJ", "New Jersey", null]);
   check("quiet: a town with its state is not printed, nor a firm's other names", [quiet.asPrinted("based? Remote US Lincoln, NE (Hybrid) New Brunswick, NJ ok"), quiet.asPrinted("worked for employer-1a2b3 or any of acmef; next")], ["based? Remote US [a place] (Hybrid) [a place] ok", "worked for employer-1a2b3 or any of [its companies]; next"]);
+  check("quiet: the owner's state is not printed in a reason", quiet.asPrinted('{"workday / outside NJ":33,"greenhouse / CA is far beyond 29 mi":51}'), '{"workday / outside the state":33,"greenhouse / another state, far beyond the radius":51}');
     check("quiet: the same employer, the same alias", [quiet.aliasFor("Garden State Foods") === quiet.aliasFor("garden state  foods!"), /^employer-[0-9a-f]{5}$/.test(quiet.aliasFor("Garden State Foods"))], [true, true]);
   check("quiet: a record's shape and none of its words", quiet.shape({ Title: "Manager", n: 3, tags: ["a"], x: null }), { Title: "text of 7", n: "number", tags: "list of 1", x: "empty" });
   {
