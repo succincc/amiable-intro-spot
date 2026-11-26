@@ -95,6 +95,57 @@ export function placesIn(raw) {
   return [...new Set(out)];
 }
 
+const STATE_NAME_TO_CODE = {
+  alabama: "AL", alaska: "AK", arizona: "AZ", arkansas: "AR", california: "CA", colorado: "CO", connecticut: "CT",
+  delaware: "DE", florida: "FL", georgia: "GA", hawaii: "HI", idaho: "ID", illinois: "IL", indiana: "IN", iowa: "IA",
+  kansas: "KS", kentucky: "KY", louisiana: "LA", maine: "ME", maryland: "MD", massachusetts: "MA", michigan: "MI",
+  minnesota: "MN", mississippi: "MS", missouri: "MO", montana: "MT", nebraska: "NE", nevada: "NV", "new hampshire": "NH",
+  "new jersey": "NJ", "new mexico": "NM", "new york": "NY", "north carolina": "NC", "north dakota": "ND", ohio: "OH",
+  oklahoma: "OK", oregon: "OR", pennsylvania: "PA", "rhode island": "RI", "south carolina": "SC", "south dakota": "SD",
+  tennessee: "TN", texas: "TX", utah: "UT", vermont: "VT", virginia: "VA", washington: "WA", "west virginia": "WV",
+  wisconsin: "WI", wyoming: "WY", "district of columbia": "DC",
+};
+const STATE_CODES = new Set(Object.values(STATE_NAME_TO_CODE));
+
+/**
+ * Plainer ways of saying the same place, for when the geocoder cannot find
+ * it as an employer wrote it. Workday writes "NJ - Florham Park - 100 Park
+ * Ave" and "Edison NJ Distribution Center": the town and the state are in
+ * there, with a street or a building's name around them.
+ *
+ * Only ever a town WITH its state. A town's name alone is a dozen towns, and
+ * the wrong one within the radius is an application sent a state away.
+ */
+export function simplerPlaces(place) {
+  const FACILITY =
+    /\s*\b(?:(?:distribution|fulfil+ment|service|support|call|contact|data|tech(?:nology)?|corporate|regional|sales|customer|operations|innovation|research|medical|health)\s+)*(?:center|centre|offices?|campus|plant|store|warehouse|facility|site|building|bldg|hub|depot|terminal|branch|hq|headquarters|hospital|clinic|lab(?:orator(?:y|ies))?)\b.*$/i;
+  let state = null;
+  const towns = [];
+  for (let b of String(place).split(",").map((x) => x.trim()).filter(Boolean)) {
+    const whole = b.length === 2 && STATE_CODES.has(b.toUpperCase()) ? b.toUpperCase() : STATE_NAME_TO_CODE[b.toLowerCase()];
+    if (whole) { state ??= whole; continue; }
+    if (/^(us|usa|united states( of america)?)$/i.test(b)) continue;
+    if (/^\d/.test(b)) continue; // a street address, a store number
+    // "Edison NJ Distribution Center": the state inside the same piece.
+    const inside = b.match(/^(.*?\S)\s+([A-Z]{2})\b(.*)$/);
+    if (inside && STATE_CODES.has(inside[2])) { state ??= inside[2]; b = inside[1]; }
+    b = b.replace(FACILITY, "").replace(/\s*#?\d+\s*$/, "").trim();
+    if (b.length >= 3 && !/^\d/.test(b)) towns.push(b);
+  }
+  if (!state) return [];
+  const same = (p) => p.trim().toLowerCase().replace(/\s+/g, " ");
+  return [...new Set(towns.map((t) => `${t}, ${state}`))].filter((p) => same(p) !== same(place)).slice(0, 3);
+}
+
+/** A location by its shape only: letters, digits and where a state code sits. */
+const shapeOfPlace = (s) =>
+  String(s ?? "")
+    .replace(/\b[A-Z]{2}\b/g, (m) => (STATE_CODES.has(m) ? "§" : m))
+    .replace(/[A-Za-z]+/g, "a")
+    .replace(/\d+/g, "9")
+    .replace(/§/g, "ST")
+    .slice(0, 44);
+
 export function milesBetween(aLat, aLon, bLat, bLon) {
   const rad = (d) => (d * Math.PI) / 180;
   const dLat = rad(bLat - aLat);
@@ -210,8 +261,17 @@ if (process.env.MEASURE_IMPORT_ONLY !== "1") {
     let best = null;
     let deferred = false;
     for (const place of places.slice(0, 6)) {
-      const point = await locate(place);
+      let point = await locate(place);
       if (point === undefined) { deferred = true; continue; }
+      if (!point) {
+        // Not found as written: the town and its state, without the street
+        // or the building around them.
+        for (const plainer of simplerPlaces(place)) {
+          const again = await locate(plainer);
+          if (again === undefined) { deferred = true; break; }
+          if (again) { point = again; tally.foundPlainer = (tally.foundPlainer ?? 0) + 1; break; }
+        }
+      }
       if (!point) continue;
       const miles = Math.round(milesBetween(home.lat, home.lon, point.lat, point.lon));
       if (!best || miles < best.miles) best = { miles, ...point };
@@ -219,7 +279,7 @@ if (process.env.MEASURE_IMPORT_ONLY !== "1") {
     if (!best) {
       if (deferred) tally.deferred++; else tally.notFound++;
       bucket.unknown++;
-      const shape = String(job.location ?? "").replace(/\d+/g, "N").slice(0, 44);
+      const shape = shapeOfPlace(job.location);
       unfound.set(shape, (unfound.get(shape) ?? 0) + 1);
       continue;
     }
@@ -248,7 +308,8 @@ if (process.env.MEASURE_IMPORT_ONLY !== "1") {
   console.log(`by portal: ${JSON.stringify(byAts)}`);
   console.log(`on-site jobs within N miles: ${JSON.stringify(bands)} (plus ${tally.remote} remote at any radius)`);
   const lost = [...unfound.entries()].sort((a, b) => b[1] - a[1]).slice(0, 14);
-  if (lost.length) console.log(`locations the geocoder could not find: ${unfound.size} distinct, the commonest on ${JSON.stringify(lost.map(([, n]) => n))} job(s)`);
+  // By shape — "a a, ST, a 9 a" — never by name.
+  if (lost.length) console.log(`locations the geocoder could not find: ${unfound.size} distinct shape(s); the commonest ${JSON.stringify(lost.map(([s, n]) => `${s} x${n}`))}`);
   const top = [...unreadable.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12);
   if (top.length) console.log(`locations that name no place: ${unreadable.size} distinct, the commonest on ${JSON.stringify(top.map(([, n]) => n))} job(s)`);
   if (APPLY) console.log(`wrote ${written} job(s).`);

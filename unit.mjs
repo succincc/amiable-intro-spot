@@ -21,6 +21,19 @@ const feeds = await import("./feeds.mjs");
 const pretailor = await import("./pretailor.mjs");
 const sf = await import("./successfactors.mjs");
 const quiet = await import("./quiet.mjs");
+process.env.MEASURE_IMPORT_ONLY = "1";
+const measure = await import("./measure.mjs");
+
+// ---------------------------------------------------------------------------
+// A place the geocoder cannot find as written, said more plainly
+// ---------------------------------------------------------------------------
+{
+  check("measure: a street after the town is dropped", measure.simplerPlaces("NJ, Exampleton, 100 Park Ave"), ["Exampleton, NJ"]);
+  check("measure: a building's name is dropped", measure.simplerPlaces("Exampleton NJ Distribution Center"), ["Exampleton, NJ"]);
+  check("measure: a state spelt out", measure.simplerPlaces("Exampleton Corporate Office, New Jersey, United States of America"), ["Exampleton, NJ"]);
+  check("measure: a town with no state is never guessed", measure.simplerPlaces("Exampleton Main Office"), []);
+  check("measure: nothing plainer than what was asked", measure.simplerPlaces("Exampleton, NJ"), []);
+}
 
 let failed = 0;
 let passed = 0;
