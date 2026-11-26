@@ -288,6 +288,26 @@ const readGroupQuestion = (n) => {
   return null;
 };
 
+/**
+ * "Do you live in any of the following states: …" — the form's own list
+ * against the state on file. Answered only when the list is in the text
+ * given and the state on file is one this can name. State codes count only
+ * as capitals, so the text is wanted as the form wrote it.
+ */
+function livesInListedState(label, p) {
+  if (!/\b(live|reside|residing|resident|located)\b[^?]{0,40}\bfollowing (states|locations)\b/i.test(String(label))) return null;
+  const tail = String(label).split(/following (?:states|locations)/i)[1] ?? "";
+  const mine = String(p?.state ?? "").trim();
+  const code = STATE_NAMES[mine.toUpperCase()]
+    ? mine.toUpperCase()
+    : Object.keys(STATE_NAMES).find((k) => STATE_NAMES[k].toLowerCase() === mine.toLowerCase());
+  if (!code) return null;
+  const listed = Object.keys(STATE_NAMES).filter(
+    (k) => new RegExp(`\\b${k}\\b`).test(tail) || new RegExp(`\\b${STATE_NAMES[k]}\\b`, "i").test(tail),
+  );
+  return listed.length ? (listed.includes(code) ? "Yes" : "No") : null;
+}
+
 /** Questions the form is ASKING. Checked before field-name matching. */
 function answerQuestion(label, p) {
   if (has(label, "authorized to work", "legally authorized", "work authorization",
@@ -306,22 +326,12 @@ function answerQuestion(label, p) {
     }
     return over;
   }
-  // "Do you live in any of the following states: …" — the form's own list
-  // against the state on file. Answered only when the list is in the
-  // question and the state on file is one this can name.
-  if (/\b(live|reside|residing|resident|located)\b[^?]{0,40}\bfollowing (states|locations)\b/i.test(String(label))) {
-    const tail = String(label).split(/following (?:states|locations)/i)[1] ?? "";
-    const mine = String(p.state ?? "").trim();
-    const code = STATE_NAMES[mine.toUpperCase()]
-      ? mine.toUpperCase()
-      : Object.keys(STATE_NAMES).find((k) => STATE_NAMES[k].toLowerCase() === mine.toLowerCase());
-    if (code) {
-      const listed = Object.keys(STATE_NAMES).filter(
-        (k) => new RegExp(`\\b${k}\\b`).test(tail) || new RegExp(`\\b${STATE_NAMES[k]}\\b`, "i").test(tail),
-      );
-      if (listed.length) return listed.includes(code) ? "Yes" : "No";
-    }
+  {
+    const lives = livesInListedState(label, p);
+    if (lives) return lives;
   }
+  // Sharing a personal social profile with an employer is nobody's default.
+  if (/willing to share your (facebook|twitter|instagram|tiktok|x|social)/i.test(String(label))) return "No";
   if (has(label, "background check", "drug screen", "drug test")) return p.can_background_check;
   // Commuting is the premise of this whole system — it only ever offers jobs
   // inside the radius the user set — so yes is their own stated position.
@@ -2765,7 +2775,22 @@ async function oraclePills(page, form, profile, job, lookupSaved = () => null) {
           .evaluate((g) => {
             const row = g.closest(".input-row");
             const l = row?.querySelector("label");
-            return (l?.innerText ?? g.getAttribute("aria-label") ?? "").replace(/\s+/g, " ").replace(/\*\s*$/, "").trim();
+            const own = (l?.innerText ?? g.getAttribute("aria-label") ?? "").replace(/\s+/g, " ").replace(/\*\s*$/, "").trim();
+            // A question that ends on a colon keeps its list under it, in
+            // the same row or the block the row sits in.
+            if (!/:\s*$/.test(own)) return own;
+            const tidy = (t) =>
+              String(t ?? "")
+                .replace(/\s+/g, " ")
+                .replace(/this info is required\.?/gi, " ")
+                .replace(/\(\d+ out of \d+ issues?\)/gi, " ")
+                .replace(/\s+(yes|no)(\s+(yes|no))?\s*$/i, "")
+                .trim();
+            for (const scope of [row, row?.parentElement]) {
+              const t = tidy(scope?.innerText);
+              if (t.length > own.length + 3 && t.length < 700 && t.includes(own.slice(0, 20))) return t.slice(t.indexOf(own.slice(0, 20)));
+            }
+            return own;
           })
           .catch(() => "")) || "",
       );
@@ -2774,7 +2799,7 @@ async function oraclePills(page, form, profile, job, lookupSaved = () => null) {
       if (/^(title|prefix|salutation|suffix)\b/.test(l)) { tally.address++; continue; }
       const texts = [];
       for (const b of pills) texts.push(((await b.innerText().catch(() => "")) || "").replace(/\s+/g, " ").trim());
-      let want = answerQuestion(l, profile) ?? lookupSaved(l) ?? lastResort(l, profile, job);
+      let want = answerQuestion(l, profile) ?? livesInListedState(label, profile) ?? lookupSaved(l) ?? lastResort(l, profile, job);
       // How much travel, offered as percentages with nothing on file: the
       // least on offer, which promises nothing the owner has not agreed to.
       if ((want === null || want === undefined || want === "") && /travel/.test(l) && texts.length > 1 && texts.every((t) => /^\d{1,3}\s*%$/.test(t))) {
@@ -2782,7 +2807,7 @@ async function oraclePills(page, form, profile, job, lookupSaved = () => null) {
         console.log(`    oracle question "${label.slice(0, 50)}": nothing on file, so the least travel on offer`);
       }
       if (want === null || want === undefined || want === "") {
-        console.log(`    oracle question "${label.slice(0, 70)}" has no answer on file; offered ${JSON.stringify(texts.slice(0, 6))}`);
+        console.log(`    oracle question "${label.slice(0, 220)}" has no answer on file; offered ${JSON.stringify(texts.slice(0, 6))}`);
         continue;
       }
       const picks = texts.map((t, k) => ({ el: pills[k], text: t }));
@@ -7290,8 +7315,24 @@ async function applyToJobOnce(context, job, profile, answers) {
         } catch { /* nothing to say */ }
       }
       if (m) {
-        await page.goto(`${m[1]}/talentcommunity/apply/${m[2]}/?locale=en_US`, { waitUntil: "domcontentloaded", timeout: 45000 }).catch(() => {});
+        const sfResp = await page.goto(`${m[1]}/talentcommunity/apply/${m[2]}/?locale=en_US`, { waitUntil: "domcontentloaded", timeout: 45000 }).catch(() => null);
         await page.waitForTimeout(3000);
+        // Every hop that address was sent through: which kind of host, the
+        // shape of the path, the names (never the values) of what was passed.
+        const sfHop = (addr, status) => {
+          try {
+            const u = new URL(addr);
+            const kind = /successfactors\.|sapsf\./i.test(u.host) ? "portal" : u.host === new URL(here).host ? "site" : "elsewhere";
+            return `${kind}${u.pathname.replace(/[A-Za-z]+/g, "a").replace(/\d+/g, "9").slice(0, 40)}${u.search ? `?${Array.from(u.searchParams.keys()).slice(0, 6).join("&")}` : ""}${status ? ` ${status}` : ""}`;
+          } catch {
+            return "?";
+          }
+        };
+        const sfTrail = [];
+        for (let r = sfResp?.request?.() ?? null; r && sfTrail.length < 8; r = r.redirectedFrom()) {
+          const res = await r.response().catch(() => null);
+          sfTrail.unshift(sfHop(r.url(), res?.status?.()));
+        }
         const landed = hostOf(page.url()) ?? "";
         const there = /successfactors\.|sapsf\./i.test(landed) || (await page.$("#username, #fbclc_userName, input[type=password]").catch(() => null));
         console.log(`    successfactors: went to the posting's own apply address; ${there ? "the portal's sign-in is up" : "it did not lead to the portal, going back to the posting"}`);
@@ -7331,8 +7372,35 @@ async function applyToJobOnce(context, job, profile, answers) {
               m[2],
             )
             .catch(() => []);
-          console.log(`    successfactors: that address led to ${ledTo}; the posting is at ${shapeOf(back)}${gone ? " — taken down" : ""}; ways to apply on it: ${JSON.stringify(routes)}`);
+          console.log(`    successfactors: that address led to ${ledTo} by way of ${JSON.stringify(sfTrail)}; the posting is at ${shapeOf(back)}${gone ? " — taken down" : ""}; ways to apply on it: ${JSON.stringify(routes)}`);
           if (gone) return { status: "skipped", skip_reason: "the posting is no longer on the employer's careers site" };
+          // The page's own link for this job, pressed as a person would
+          // press it — with the cookie banner out of the way first, since a
+          // site may hold the application back until that is answered.
+          await dismissBanners(page).catch(() => {});
+          const own = await page.$(`a[href*="/apply/${m[2]}"], a[href*="${m[2]}"][href*="apply" i]`).catch(() => null);
+          if (own) {
+            const [tab] = await Promise.all([
+              page.context().waitForEvent("page", { timeout: 7000 }).catch(() => null),
+              own.click({ timeout: 4000 }).catch(() => own.evaluate((a) => a.click()).catch(() => {})),
+            ]);
+            const on = tab ?? page;
+            await on.waitForLoadState("domcontentloaded", { timeout: 20000 }).catch(() => {});
+            await on.waitForTimeout(4000);
+            const got = await on
+              .evaluate(() => ({
+                heads: Array.from(document.querySelectorAll("h1, h2")).map((h) => (h.innerText || "").replace(/\s+/g, " ").trim().slice(0, 40)).filter(Boolean).slice(0, 4),
+                password: !!document.querySelector("input[type=password]"),
+                boxes: document.querySelectorAll("input:not([type=hidden]), select, textarea").length,
+                frames: document.querySelectorAll("iframe").length,
+              }))
+              .catch(() => null);
+            console.log(`    successfactors: pressing the posting's own link ${tab ? "opened a new tab" : "stayed in this tab"} at ${sfHop(on.url())}; it shows ${JSON.stringify(got)}`);
+            if (tab) {
+              if (got?.password || /successfactors\.|sapsf\./i.test(hostOf(on.url()) ?? "")) page = tab;
+              else await tab.close().catch(() => {});
+            }
+          }
         }
       }
     }
@@ -10165,7 +10233,15 @@ async function saveGeneratedAnswer(question, answer, fieldType) {
   }).catch(() => {});
 }
 
-async function recordUnknowns(unknowns) {
+async function recordUnknowns(all) {
+  // Never asked, because never answered by this system: any part of a social
+  // security number, a date of birth. Nor the honorific and the name suffix,
+  // which are left alone on every form.
+  const unknowns = (all ?? []).filter(
+    (u) =>
+      !/social security|\bssn\b|date of birth|birth ?date|birthday|\bdob\b/i.test(String(u?.question ?? "")) &&
+      !/^(prefix|suffix|title|salutation)\b/i.test(String(u?.question ?? "").trim()),
+  );
   // Say what is being handed to the panel.
   //
   // Every employer adds its own questions — "please select all the languages
