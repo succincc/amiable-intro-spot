@@ -3029,7 +3029,13 @@ async function oracleEducation(page, form, profile, resume, tileText = "") {
     console.log(`    oracle education: school ${got ? (/^(other|not |unlisted|school not)/i.test(got) ? "not on the list; chose the list's own entry for that" : "chosen from the list") : "could not be chosen"}`);
     if (got) done++;
   }
-  const degree = (await visible("contentItemId")) ?? (await visible("degree")) ?? (await labelled(/^degree\b/));
+  let degree = (await visible("contentItemId")) ?? (await visible("degree")) ?? (await labelled(/^degree\b/));
+  // The label's neighbour is not the label's box: the first try at this
+  // found the box for the subject studied and typed a degree into it.
+  if (degree) {
+    const id = String((await degree.getAttribute("id").catch(() => "")) ?? "");
+    if (/^(major|educationalEstablishment|minor|gpa|startDate|endDate|city|country)/i.test(id)) degree = null;
+  }
   if (!degree) {
     // Asked for and not found: what stands beside the word, by shape.
     const near = await form
@@ -3039,7 +3045,7 @@ async function oracleEducation(page, form, profile, resume, tileText = "") {
         for (const l of Array.from(document.querySelectorAll("label, span, div")).filter(shown)) {
           if (!/^degree\b/i.test((l.innerText || "").trim()) || (l.innerText || "").length > 30) continue;
           const row = l.closest('[class*="row" i], [class*="field" i]') ?? l.parentElement;
-          out.push(Array.from(row?.querySelectorAll("input, button, select, [role]") ?? []).slice(0, 6).map((c) => `${c.tagName}${c.getAttribute("role") ? `[${c.getAttribute("role")}]` : ""}:${String(c.id || c.className || "").replace(/\d+/g, "N").slice(0, 30)}`));
+          out.push(Array.from((row?.parentElement ?? row)?.querySelectorAll("input, button, select, [role], [class*='select' i]") ?? []).slice(0, 10).map((c) => `${c.tagName}${c.getAttribute("role") ? `[${c.getAttribute("role")}]` : ""}:${String(c.id || c.className || "").replace(/\d+/g, "N").slice(0, 30)}`));
           if (out.length >= 2) break;
         }
         return out;
@@ -3203,6 +3209,8 @@ async function oracleRepair(page, form, profile, job, onlyReport = false, lookup
       await page.waitForTimeout(code ? 800 : 3000);
       const bad = (await el.getAttribute("aria-invalid").catch(() => null)) === "true";
       console.log(`    oracle ${code ? "dialling code" : "country"}: ${took ? "chosen from the list" : `not chosen (the list showed ${seen} row(s)${listId ? "" : ", and names no list"})`}; the form ${bad ? "still marks it" : "does not mark it"}`);
+      // Choosing a country redraws the address under it, empty.
+      if (took && !code) await oracleAddress(page, form, profile);
       if (took && !bad) fixed++;
       continue;
     }
@@ -9875,7 +9883,9 @@ const main = async () => {
     // in 114 — and a worker stuck on a form that will not complete is a
     // worker not applying to anything. Six minutes is roughly three times
     // the longest application that has ever actually succeeded.
-    const JOB_BUDGET_MS = Math.max(60, Number(process.env.JOB_BUDGET_SEC ?? 420)) * 1000;
+    // Oracle's are the longest forms there are — a code by email, an
+    // address looked up box by box, every imported entry opened and saved.
+    const JOB_BUDGET_MS = Math.max(60, Number(process.env.JOB_BUDGET_SEC ?? (process.env.ATS_ONLY === "oracle" ? 720 : 420))) * 1000;
 
     async function runOne(ctx, job, mine) {
       let outcome;
