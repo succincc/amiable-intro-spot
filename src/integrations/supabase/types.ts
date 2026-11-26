@@ -252,6 +252,8 @@ export type Database = {
           is_read: boolean | null
           job_id: string | null
           message_id: string
+          notified_at: string | null
+          moment: string | null
           received_at: string | null
           replied_at: string | null
           reply_draft: string | null
@@ -274,6 +276,8 @@ export type Database = {
           is_read?: boolean | null
           job_id?: string | null
           message_id: string
+          notified_at?: string | null
+          moment?: string | null
           received_at?: string | null
           replied_at?: string | null
           reply_draft?: string | null
@@ -296,6 +300,8 @@ export type Database = {
           is_read?: boolean | null
           job_id?: string | null
           message_id?: string
+          notified_at?: string | null
+          moment?: string | null
           received_at?: string | null
           replied_at?: string | null
           reply_draft?: string | null
@@ -625,6 +631,9 @@ export type Database = {
           home_state: string | null
           id: number
           interview_holds: Json
+          notify_moments: boolean
+          health_state: string | null
+          health_notified_at: string | null
           linkedin_url: string | null
           needs_sponsorship: string | null
           over_18: string | null
@@ -676,6 +685,9 @@ export type Database = {
           home_state?: string | null
           id?: number
           interview_holds?: Json
+          notify_moments?: boolean
+          health_state?: string | null
+          health_notified_at?: string | null
           linkedin_url?: string | null
           needs_sponsorship?: string | null
           over_18?: string | null
@@ -727,6 +739,9 @@ export type Database = {
           home_state?: string | null
           id?: number
           interview_holds?: Json
+          notify_moments?: boolean
+          health_state?: string | null
+          health_notified_at?: string | null
           linkedin_url?: string | null
           needs_sponsorship?: string | null
           over_18?: string | null

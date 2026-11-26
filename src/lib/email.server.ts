@@ -21,6 +21,7 @@ import {
   replyPolicy,
   draftReply,
 } from "@/lib/classify.server";
+import { momentOf } from "@/lib/moments";
 
 export type InboundMessage = {
   message_id: string;
@@ -59,6 +60,8 @@ export async function ingestMessages(supabase: any, messages: InboundMessage[]) 
     const apiKey = process.env["GEMINI_API_KEY"] ?? "";
     const autoReply = profile?.auto_reply === true;
     const ownAddress = String(profile?.email ?? "").trim().toLowerCase();
+    const zone = String(profile?.timezone ?? "").trim() || "America/New_York";
+    const startedNow = new Date(startedAt);
 
     // What do we already have? Every sync re-reads the same few days, so
     // without this the same messages are re-drafted on every run — minutes of
@@ -106,6 +109,15 @@ export async function ingestMessages(supabase: any, messages: InboundMessage[]) 
       const sender = String(m.from_addr ?? "").trim().toLowerCase();
       const recipient = String(m.to_addr ?? "").trim().toLowerCase();
       const selfSent = Boolean(sender) && (sender === ownAddress || sender === recipient);
+
+      // What this system sends the owner — the summary, an interview brief,
+      // a health notice — arrives in the same inbox it reads. It is not mail
+      // from an employer and is not filed as any.
+      if (selfSent && /^\s*applypilot:/i.test(String(m.subject ?? ""))) {
+        stats.skipped++;
+        if (prior.has(m.message_id)) dropped.push(m.message_id);
+        continue;
+      }
 
       const jobId = selfSent ? null : matchJob(m, jobs ?? []);
 
@@ -156,7 +168,11 @@ export async function ingestMessages(supabase: any, messages: InboundMessage[]) 
         // to say to, would otherwise be drafted again on every one of them —
         // a discarded reply coming back like a weed, and the day's free
         // allowance spent asking the same question a hundred times.
-        reply_state === "none" && !seen?.reply_error;
+        reply_state === "none" && !seen?.reply_error &&
+        // A link to pick a time is answered by picking one, and a time
+        // already settled is not answered by offering others. Both go to
+        // the owner instead (moments.server.ts).
+        !(verdict.category === "interview" && momentOf({ category: "interview", subject: m.subject, body: m.body }, zone, startedNow));
 
       const { error } = await supabase.from("emails").upsert(
         {

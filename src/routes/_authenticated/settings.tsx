@@ -161,7 +161,7 @@ function ProfileBlock({ initial }: { initial: Profile }) {
       </div>
       <SaveLine onSave={async () => {
         // Fields owned by other sections are left out so a stale copy here never overwrites them.
-        const { id: _id, updated_at: _u, resume_text: _r, home_city: _hc, home_lat: _hl, home_lon: _ho, home_state: _hs, auto_reply: _ar, autopilot: _ap, follow_up: _fu, daily_summary: _ds, availability: _av, availability_slots: _as, interview_holds: _ih,
+        const { id: _id, updated_at: _u, resume_text: _r, home_city: _hc, home_lat: _hl, home_lon: _ho, home_state: _hs, auto_reply: _ar, autopilot: _ap, follow_up: _fu, daily_summary: _ds, availability: _av, availability_slots: _as, interview_holds: _ih, notify_moments: _nm, health_state: _hst, health_notified_at: _hn,
           resume_file_path: _fp, resume_file_name: _fn, resume_word_count: _wc, resume_error: _re, ...rest } = p;
         const { error } = await supabase.from("profile").update(rest).eq("id", 1);
         if (error) throw error;
@@ -755,6 +755,7 @@ function EmailBlock({ initial, open }: { initial: Profile; open: boolean }) {
   const [autoReply, setAutoReply] = useState(initial.auto_reply ?? false);
   const [followUp, setFollowUp] = useState(initial.follow_up ?? false);
   const [dailySummary, setDailySummary] = useState(initial.daily_summary ?? false);
+  const [notify, setNotify] = useState((initial as Profile & { notify_moments?: boolean | null }).notify_moments !== false);
   const [availability, setAvailability] = useState(initial.availability ?? "");
   const [availabilitySaved, setAvailabilitySaved] = useState(false);
   const [saveErr, setSaveErr] = useState<string | null>(null);
@@ -769,7 +770,8 @@ function EmailBlock({ initial, open }: { initial: Profile; open: boolean }) {
     },
   });
   const last = sync.data?.last_run_at;
-  const fresh = !!last && Date.now() - new Date(last).getTime() < 15 * 60_000;
+  // The mailbox is read once an hour.
+  const fresh = !!last && Date.now() - new Date(last).getTime() < 100 * 60_000;
 
   return (
     <Block title="email" open={open}>
@@ -839,6 +841,20 @@ function EmailBlock({ initial, open }: { initial: Profile; open: boolean }) {
           email me a summary of each day
         </label>
         <p className="text-xs text-muted-foreground">off: nothing is sent. on: one email each morning to your own gmail — what was applied to in the last 24 hours, which replies are worth reading, what is stuck and why, and how much is waiting.</p>
+      </div>
+
+      <div className="space-y-1">
+        <label className="flex items-center gap-2 text-xs">
+          <input type="checkbox" checked={notify} onChange={async (e) => {
+            const v = e.target.checked;
+            setNotify(v); setSaveErr(null);
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const { error } = await (supabase.from("profile") as any).update({ notify_moments: v }).eq("id", 1);
+            if (error) { setNotify(!v); setSaveErr(error.message); } else void qc.invalidateQueries({ queryKey: ["settings"] });
+          }} />
+          email me when an interview is booked, an assessment arrives, or an offer comes
+        </label>
+        <p className="text-xs text-muted-foreground">on: one email to your own gmail for each. an interview comes with its time, how to join, a calendar file, and what the posting asks for beside your resume; a link to pick a time, an assessment and an offer are passed on as they are. also one if the system itself stops working. off: interviews are still marked on your calendar of windows, quietly.</p>
       </div>
 
       <div className="space-y-1 border border-border p-2 text-xs">

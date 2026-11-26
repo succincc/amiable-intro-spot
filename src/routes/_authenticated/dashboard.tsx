@@ -4,6 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 
 import { Btn, Cursor, Empty, ErrorLine, Section, inputCls } from "@/components/mission-control/async-state";
+import { StartCard } from "@/components/mission-control/start-card";
 import { supabase } from "@/integrations/supabase/client";
 import {
   relTime, clockTime,
@@ -101,6 +102,8 @@ function Dashboard() {
         </p>
       ) : null}
 
+      <StartCard />
+
       <AutopilotCard />
 
       <Section title="pipeline">
@@ -149,7 +152,7 @@ function Dashboard() {
           </div>
         ) : null}
         <p className="text-xs text-muted-foreground">
-          discovery finds jobs. scoring rates them and tailors your resume for the good ones. start applying runs a real browser in the cloud (every 3h too) — or use the chrome extension.
+          discovery finds jobs. scoring rates them and tailors your resume for the good ones. start applying runs a real browser in the cloud (every hour too) — or use the chrome extension.
         </p>
       </Section>
 
@@ -309,7 +312,7 @@ function AutopilotCard() {
                 onChange={(e) => void toggleAutopilot(e.target.checked)}
                 className="h-4 w-4 accent-primary"
               />
-              <span className={on ? "text-warning" : "text-foreground"}>apply automatically every 3 hours</span>
+              <span className={on ? "text-warning" : "text-foreground"}>apply automatically every hour</span>
             </label>
             {on ? (
               <p className="text-xs text-warning">

@@ -13,6 +13,9 @@ import { createFileRoute } from "@tanstack/react-router";
  *          a reply, and send the replies that have been cleared to go.
  *   watch  at most every half hour: wake the job on GitHub that starts
  *          whatever else has come round, in case its own chain has broken.
+ *   health at most once in fifty minutes: is the mailbox being read, are
+ *          rounds running, is anything going out. The owner is emailed
+ *          when the answer changes.
  *
  * No key is asked for, on purpose: a key the database had to hold would have
  * to be written into a migration in a public repository. It is safe without
@@ -45,7 +48,7 @@ async function claim(supabase: any, name: string, everyMin: number): Promise<boo
 }
 
 async function tick() {
-  const out: { ok: boolean; mail: string; watch: string; counts?: { read: number; stored?: number; drafted?: number; sent?: number; failed?: number } } = {
+  const out: { ok: boolean; mail: string; watch: string; health?: string; counts?: { read: number; stored?: number; drafted?: number; sent?: number; failed?: number; told?: number; booked?: number } } = {
     ok: true,
     mail: "not due",
     watch: "not due",
@@ -92,7 +95,7 @@ async function tick() {
       const { fetchMessages } = await import("@/lib/gmail.server");
       const { ingestMessages, sendApprovedReplies } = await import("@/lib/email.server");
       const messages = await fetchMessages(supabase, "in:inbox newer_than:6h", 30);
-      const counts: { read: number; stored?: number; drafted?: number; sent?: number; failed?: number } = { read: messages.length };
+      const counts: { read: number; stored?: number; drafted?: number; sent?: number; failed?: number; told?: number; booked?: number } = { read: messages.length };
       if (messages.length) {
         const r: any = await ingestMessages(supabase, messages);
         counts.stored = r?.stored ?? 0;
@@ -132,11 +135,33 @@ async function tick() {
       const replies = await sendApprovedReplies(supabase);
       counts.sent = replies.sent;
       counts.failed = replies.failed;
+      // The few messages the owner has to know about: an interview with a
+      // time on it, a link to pick one, an assessment, an offer.
+      try {
+        const { tellOwner } = await import("@/lib/moments.server");
+        const told = await tellOwner(supabase);
+        counts.told = told.told;
+        counts.booked = told.booked;
+      } catch {
+        /* telling the owner never stops the mail; it is tried again next hour */
+      }
       out.mail = "done";
       out.counts = counts;
     }
   } catch (e) {
     out.mail = `failed: ${String((e as Error)?.message ?? e).slice(0, 80)}`;
+  }
+
+  // Its own turn, so that a mailbox that cannot be read — the commonest
+  // thing to go wrong — does not also silence the check that would say so.
+  try {
+    if (await claim(supabase, "health", MAIL_EVERY_MIN)) {
+      const { healthCheck } = await import("@/lib/moments.server");
+      const h = await healthCheck(supabase);
+      out.health = h.problems ? `${h.problems} to look at${h.emailed ? ", owner told" : ""}` : "well";
+    }
+  } catch (e) {
+    out.health = `failed: ${String((e as Error)?.message ?? e).slice(0, 80)}`;
   }
   return out;
 }

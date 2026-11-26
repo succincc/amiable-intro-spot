@@ -16,7 +16,7 @@ Three rules sit above everything else:
 
 ## How it runs
 
-Every three hours, on free GitHub Actions runners, in a chain that starts
+Every hour, on free GitHub Actions runners, in a chain that starts
 itself: **find** postings → **measure** how far each is → **apply**, one lane
 per application system. Each lane runs its unit checks and two fixture
 applications first; if either fails, nothing is sent.
@@ -52,6 +52,18 @@ applications first; if either fails, nothing is sent.
 - Daily summary, interview-request replies and follow-up notes to addresses
   an employer publishes: built, each behind the owner's switch, off by
   default.
+- The owner's side of an interview: windows marked on a month calendar by
+  kind (in person, phone, video); times offered from them and held so no two
+  employers get the same hour; a confirmed time read from the reply, marked
+  booked, the other held times let go, and the owner emailed a brief with a
+  calendar file. A link to pick a time, an assessment and an offer are each
+  passed to the owner once. A rejection frees what was held.
+- A health check each hour (is the mailbox read, are rounds running, is
+  anything going out), emailed to the owner only when the answer changes.
+- One Start button on the dashboard, behind a short list of what the system
+  cannot work without.
+- Five more hiring systems read from their public posting lists, and a lane
+  for every system without one of its own.
 - Logs that say what happened by shape and count only.
 
 ## Next
@@ -63,8 +75,7 @@ applications first; if either fails, nothing is sent.
    from the big boards read through the inbox, more feed keys, more
    employers resolved.
 3. **Ashby and Lever** on real postings as their queues fill.
-4. **First run fourteen days back, then only what is new**; checking more
-   often than every three hours, once the database is off its metered plan.
+4. **First run fourteen days back, then only what is new.**
 5. **Several users** (thirty at most, no technical setup, still zero cost):
    per-user tables and rules, and the database moved off the metered plan.
 
