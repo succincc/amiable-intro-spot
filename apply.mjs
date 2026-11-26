@@ -2431,6 +2431,29 @@ async function oracleChoose(page, form, box, typed, wantRe, what) {
   return chosen(after);
 }
 
+/**
+ * Oracle's self-identification lists — gender, veteran status and the rest.
+ * The owner's saved answer, matched from its first word so that "Male" is
+ * never "Female"; where nothing is saved, the list's own way of declining.
+ * Never a guess.
+ */
+async function oracleSelfId(page, form, profile, lookupSaved) {
+  let done = 0;
+  for (const box of await form.$$('input[id^="US-STANDARD-ORA_" i]').catch(() => [])) {
+    if (!(await box.isVisible().catch(() => false))) continue;
+    const id = String((await box.getAttribute("id").catch(() => "")) ?? "");
+    const what = /GENDER/i.test(id) ? "gender" : /VETERAN/i.test(id) ? "veteran status" : /DISAB/i.test(id) ? "disability" : /ETHNIC|RACE/i.test(id) ? "race or ethnicity" : null;
+    if (!what) continue;
+    const saved = String(answerQuestion(what, profile) ?? lookupSaved(what) ?? "").trim();
+    const esc = (t) => t.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const want = saved
+      ? new RegExp(`^${esc(saved)}\\b`)
+      : /prefer not|decline|don'?t wish|do not wish|choose not|not to answer|rather not|not disclose|not specified|undisclosed/;
+    if (await oracleChoose(page, form, box, saved ? saved.slice(0, 12) : "", want, `${what} (${saved ? "the saved answer" : "nothing is saved, so declining"})`)) done++;
+  }
+  return done;
+}
+
 async function oracleAddress(page, form, profile) {
   let done = 0;
   // The country leads: the zip and street suggestions are looked up within
@@ -7536,6 +7559,12 @@ async function applyToJobOnce(context, job, profile, answers) {
             continue;
           }
 
+          // Oracle's self-identification lists are chosen from by the
+          // routine written for Oracle's lists. The general way typed
+          // "Male", pressed the first row offered and got "Female" — caught
+          // and emptied, but it stopped the application all the same.
+          if (/\.oraclecloud\.com$/i.test(hostOf(page.url()) ?? "") && /^US-STANDARD-ORA_/i.test(String((await el.getAttribute("id").catch(() => "")) ?? ""))) continue;
+
           // text-ish
           const existing = await el.inputValue().catch(() => "");
           if (existing && existing.trim()) { skips.prefilled++; continue; }
@@ -8657,6 +8686,7 @@ async function applyToJobOnce(context, job, profile, answers) {
       if (/\.oraclecloud\.com$/i.test(hostOf(page.url()) ?? "")) {
         filled += await oracleAddress(page, form, profile);
         filled += await oraclePills(page, form, profile, job, lookupSaved);
+        filled += await oracleSelfId(page, form, profile, lookupSaved);
       }
       const moved = await advanceStep(page, form, step + 1);
       if (moved.ok) await page.waitForTimeout(2500);
@@ -8750,6 +8780,7 @@ async function applyToJobOnce(context, job, profile, answers) {
     if (/\.oraclecloud\.com$/i.test(hostOf(page.url()) ?? "")) {
       filled += await oracleAddress(page, form, profile);
       filled += await oraclePills(page, form, profile, job, lookupSaved);
+      filled += await oracleSelfId(page, form, profile, lookupSaved);
       await oracleOpenItems(form);
     }
 
