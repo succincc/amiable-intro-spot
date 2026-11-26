@@ -3027,6 +3027,13 @@ async function oracleCertificate(page, form, profile, resume, tileText, tileButt
       if (!(await b.isVisible().catch(() => false))) continue;
       const t = `${(await b.innerText().catch(() => "")) || ""} ${(await b.getAttribute("aria-label").catch(() => "")) || ""} ${(await b.getAttribute("title").catch(() => "")) || ""}`.replace(/\s+/g, " ").trim();
       const cls = String((await b.getAttribute("class").catch(() => "")) || "");
+      // "Remove value for the Country" is the little cross that empties a
+      // box, and it is the first button on the form whose name begins with
+      // "remove". Looking for a way to delete an entry, this pressed it —
+      // and then the one beside the dialling code, and then the delete on
+      // the work history that had just been added. Twenty rounds of a
+      // country that would not stay chosen were this line.
+      if (/remove value|clear value|^clear\b/i.test(t) || /icon-clear|clear-button/i.test(cls)) continue;
       if (!re.test(t) && !(re === REMOVE && /delete|remove|trash/i.test(cls))) continue;
       await b.click({ timeout: 3000 }).catch(() => b.evaluate((n) => n.click()).catch(() => {}));
       return true;
@@ -3034,7 +3041,20 @@ async function oracleCertificate(page, form, profile, resume, tileText, tileButt
     return false;
   };
   const REMOVE = /^(delete|remove)\b|\b(delete|remove) (entry|item|this)\b/i;
-  let removed = await press(form, REMOVE);
+  // Inside the entry that is open, and nowhere else: the part of the page
+  // that holds this box together with the entry's own CANCEL or SAVE.
+  const entry =
+    (await box
+      .evaluateHandle((n) => {
+        const shown = (e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+        for (let e = n.parentElement, k = 0; e && k < 12; e = e.parentElement, k++) {
+          const own = Array.from(e.querySelectorAll("button")).filter(shown).some((b) => /^(cancel|save)$/i.test((b.innerText || "").trim()));
+          if (own) return e;
+        }
+        return null;
+      })
+      .catch(() => null))?.asElement?.() ?? null;
+  let removed = entry ? await press(entry, REMOVE) : false;
   if (!removed) {
     // The delete control is on the closed entry, beside its edit button.
     for (const c of await form.$$("button").catch(() => [])) {
