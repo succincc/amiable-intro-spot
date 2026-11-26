@@ -9960,7 +9960,7 @@ async function applyToJobOnce(context, job, profile, answers) {
     // Nor is a portal saying what it is doing with a form it has accepted:
     // "You're all set! Saving candidate info…" was read as a refusal, and an
     // application that had gone through was filed as one that had not.
-    const BENIGN = /successfully uploaded|upload(ed)? (complete|success)|\.(pdf|docx?)\b|^saving\b|^submitting\b|you.{0,2}re all set/i;
+    const BENIGN = /successfully uploaded|upload(ed)? (complete|success)|\.(pdf|docx?)\b|^saving\b|^submitting\b|^loading\b|^please wait\b|^processing\b|^uploading\b|you.{0,2}re all set/i;
     const freshNotices = async () =>
       (await noticeTexts()).filter((t) => t && t.length < 200 && !saidBefore.has(t) && !BENIGN.test(t));
 
