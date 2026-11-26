@@ -17,7 +17,8 @@ Three rules sit above everything else:
 ## How it runs
 
 Every hour, on free GitHub Actions runners, in a chain that starts
-itself: **find** postings → **measure** how far each is → **apply**, one lane
+itself (the scheduler is given six chances an hour because it keeps only
+some; a run with nothing due does nothing): **find** postings → **measure** how far each is → **apply**, one lane
 per application system. Each lane runs its unit checks and two fixture
 applications first; if either fails, nothing is sent.
 
