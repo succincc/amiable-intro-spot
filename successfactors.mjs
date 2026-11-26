@@ -301,7 +301,25 @@ if (process.env.SF_IMPORT_ONLY !== "1") {
   for (const e of employers) {
     if (Date.now() - started > BUDGET_MS) break;
     tally.employers++;
-    const seen = await read(e.origin, state).catch((err) => ({ how: null, rows: [], notes: [String(err?.message ?? err).slice(0, 60)] }));
+    let seen = await read(e.origin, state).catch((err) => ({ how: null, rows: [], notes: [String(err?.message ?? err).slice(0, 60)] }));
+    // The address on record is often the employer's main site, and the
+    // search page lives on its jobs site beside it: the usual two names for
+    // that are tried before saying nothing was read.
+    if (!seen.rows.length) {
+      const host = new URL(e.origin).hostname.toLowerCase();
+      const base = host.replace(/^(www|careers?|jobs?|work|join|apply|hire|talent)\./, "");
+      for (const other of [`https://jobs.${base}`, `https://careers.${base}`, `https://career.${base}`]) {
+        if (!base.includes(".") || new URL(other).hostname === host) continue;
+        const again = await read(other, state).catch(() => null);
+        if (again?.rows.length) {
+          seen = again;
+          e.origin = other;
+          tally.elsewhere = (tally.elsewhere ?? 0) + 1;
+          break;
+        }
+        await pause(300);
+      }
+    }
     if (!seen.rows.length) {
       console.log(`  ?  ${e.name} (${new URL(e.origin).hostname}) — nothing read; ${seen.notes.join("; ").slice(0, 300)}`);
       await mark(e, false);
