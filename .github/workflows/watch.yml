@@ -51,7 +51,11 @@ on:
   # minutes cost nothing; and a month of three-hourly rounds used under half
   # of the database credits the plan already includes.
   schedule:
-    - cron: "44 * * * *"
+    # Six chances an hour, because the scheduler keeps only some of them:
+    # with one slot an hour, rounds came three to seven hours apart. A run
+    # that finds nothing due starts nothing, touches no database and ends in
+    # seconds, so the spare chances cost nothing.
+    - cron: "4,14,24,34,44,54 * * * *"
 
 permissions:
   actions: write
@@ -121,6 +125,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           restarted=0
           started=0
+          round=0
           start() {
             # $1 workflow, $2 comma-separated name=value pairs or "-"
             args=""
@@ -174,6 +179,7 @@ jobs:
               if start "$wf" "$give"; then
                 action="due; started"
                 started=$((started + 1))
+                if [ "$wf" = "sweep.yml" ]; then round=1; fi
               else
                 action="due; could not be started"
               fi
@@ -185,11 +191,13 @@ jobs:
           echo "Started: $started. Started again after failing: $restarted." >> "$GITHUB_STEP_SUMMARY"
           echo "started: $started; started again: $restarted"
 
-          # The mailbox, once an hour: the panel reads it, drafts what needs
-          # a reply and sends what has been cleared. Asked in the first half
-          # of each hour only, because asking wakes the database and this
-          # run comes round twice an hour.
-          if [ "$(( $(date -u +%-M) / 30 ))" -eq 0 ]; then
+          # The mailbox, once a round: the panel reads it, drafts what needs
+          # a reply, sends what has been cleared, tells the owner what needs
+          # them and checks its own health. Asked only by the run that starts
+          # a round, because asking wakes the database and the round is about
+          # to wake it anyway. (It used to be asked "in the first half of each
+          # hour", by a run timed for the second half: it was hardly asked.)
+          if [ "$round" -eq 1 ]; then
             code=$(curl -sS -o /tmp/tick.json -w '%{http_code}' --max-time 90 \
               -X POST "${APP_URL}/api/public/cron/tick" \
               -H "Content-Type: application/json" -d '{}' || echo "000")
@@ -197,8 +205,6 @@ jobs:
             echo "mail: the panel answered ${code} $(head -c 300 /tmp/tick.json 2>/dev/null || true)"
           fi
 
-          # No waiting here and no handing on. This repository is private, so
-          # every minute a runner spends is counted against the account's
-          # monthly allowance — a run that waited twenty-five minutes to keep
-          # time would have spent the whole month's allowance in a day and a
-          # half. This run looks, starts what is due, and ends.
+          # No waiting here and no handing on: a runner held asleep to keep
+          # time is a runner taken from somebody else. This run looks, starts
+          # what is due, and ends.
