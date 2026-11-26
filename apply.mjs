@@ -7296,8 +7296,43 @@ async function applyToJobOnce(context, job, profile, answers) {
         const there = /successfactors\.|sapsf\./i.test(landed) || (await page.$("#username, #fbclc_userName, input[type=password]").catch(() => null));
         console.log(`    successfactors: went to the posting's own apply address; ${there ? "the portal's sign-in is up" : "it did not lead to the portal, going back to the posting"}`);
         if (!there) {
+          // Where that address led instead, by shape: letters as "a", digits
+          // as "9". Then back to the posting.
+          const shapeOf = (addr) => {
+            try {
+              const u = new URL(addr);
+              return `${u.pathname.replace(/[A-Za-z]+/g, "a").replace(/\d+/g, "9").slice(0, 70)}${u.search ? "?…" : ""}`;
+            } catch {
+              return "?";
+            }
+          };
+          const ledTo = shapeOf(page.url());
           await page.goto(here, { waitUntil: "domcontentloaded", timeout: 45000 }).catch(() => {});
           await page.waitForTimeout(2000);
+          // A posting that has been taken down sends its address to the
+          // search page, where "Apply now" belongs to some other job.
+          const back = page.url();
+          const gone =
+            !back.includes(`/${m[2]}`) ||
+            /no longer (available|accepting|open|posted)|has been (filled|closed|removed)|position (is|has been) closed|job (has )?expired|could not be found|page not found/i.test(
+              ((await page.innerText("body").catch(() => "")) || "").slice(0, 6000),
+            );
+          const routes = await page
+            .evaluate((id) =>
+              Array.from(document.querySelectorAll("a[href], button"))
+                .filter((a) => /apply/i.test((a.innerText || "").trim()) && (a.innerText || "").trim().length < 40)
+                .slice(0, 6)
+                .map((a) => {
+                  const href = a.getAttribute("href") || "";
+                  let path = "";
+                  try { path = new URL(href, location.href).pathname; } catch { path = ""; }
+                  return `${a.tagName.toLowerCase()}:${(a.innerText || "").trim().slice(0, 16)}:${path.replace(/[A-Za-z]+/g, "a").replace(/\d+/g, "9").slice(0, 50)}${href.includes(id) ? " (this job)" : ""}`;
+                }),
+              m[2],
+            )
+            .catch(() => []);
+          console.log(`    successfactors: that address led to ${ledTo}; the posting is at ${shapeOf(back)}${gone ? " — taken down" : ""}; ways to apply on it: ${JSON.stringify(routes)}`);
+          if (gone) return { status: "skipped", skip_reason: "the posting is no longer on the employer's careers site" };
         }
       }
     }
