@@ -3606,7 +3606,10 @@ async function openVerificationLink(page, link) {
 /** The security code a portal has just emailed, polled the same way. */
 const USED_CODES = new Set();
 
+// Employers whose portal has emailed a code in this run.
+const CODE_ASKED = new Set();
 async function waitForVerificationCode(host, company, attempts = 6, gapMs = 10_000, since = null) {
+  CODE_ASKED.add(String(company ?? "").toLowerCase().trim());
   const base = (process.env.APP_URL || "https://applynow.lol").replace(/\/+$/, "");
   const key = process.env.ENGINE_API_KEY;
   if (!key) {
@@ -9708,6 +9711,11 @@ const main = async () => {
     const deadline = Date.now() + budgetMs;
 
     const BUSY_COMPANIES = new Set();
+    const STALLED_COMPANIES = new Set();
+    // What a portal's session is made of once it has been verified, by
+    // employer: handed to the next application there so that it is not
+    // asked for a second emailed code.
+    const SESSIONS = new Map();
     const companyOf = (j) => String(j?.company ?? j?.id ?? "").toLowerCase().trim();
 
     async function worker(slot) {
@@ -9784,6 +9792,13 @@ const main = async () => {
               // arrival and not design. Taking a different employer's job
               // while one is in flight costs nothing and removes the question.
               if (BUSY_COMPANIES.has(companyOf(row))) continue;
+              // An employer whose form stopped one application in this run
+              // will stop the next for the same reason — and a portal that
+              // emails a code for every attempt sends the owner one each
+              // time. Three codes for three stalled attempts is noise in
+              // somebody's inbox. One attempt; the rest wait for a run that
+              // follows a fix.
+              if (STALLED_COMPANIES.has(companyOf(row))) continue;
               // And only so many to one employer in a day. Eight went to
               // Carvana this afternoon; a recruiter who sees one name on
               // eight requisitions reads it as noise, not interest.
@@ -9864,7 +9879,15 @@ const main = async () => {
               hideJob(job);
               console.log(`[${mine}] ${job.title} @ ${job.company ?? "?"}`);
               await heartbeat({ online: true, state: "applying", current_job: job.id });
+              // A session another worker has already had verified at this
+              // employer, so that the portal does not email a second code.
+              const carried = SESSIONS.get(companyOf(job));
+              if (carried?.length) await ctx.addCookies(carried).catch(() => {});
               await runOne(ctx, job, mine);
+              if ((job.ats ?? "") === "oracle") {
+                const kept = (await ctx.cookies().catch(() => [])).filter((c) => /oraclecloud\.com$/i.test(String(c.domain ?? "")));
+                if (kept.length) SESSIONS.set(companyOf(job), kept);
+              }
             });
           } finally {
             BUSY_COMPANIES.delete(companyOf(job));
@@ -9930,6 +9953,13 @@ const main = async () => {
       // what the applier saw on that form.
       if (outcome.note) patch.last_error = outcome.note;
       await patchJob(job.id, patch);
+
+      // Stalled, at an employer whose portal emails a code for each attempt:
+      // no more of its postings in this run.
+      if (outcome.status === "needs_help" && CODE_ASKED.has(String(job.company ?? "").toLowerCase().trim())) {
+        STALLED_COMPANIES.add(companyOf(job));
+        console.log("    this employer's portal emails a code for each attempt and this one stalled; its other postings wait for a later run");
+      }
 
       // Pressed Submit and saw no confirmation: the employer may well have it.
       if (outcome.status !== "applied" && outcome.help_reason === "unconfirmed") {
