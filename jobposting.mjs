@@ -19,6 +19,7 @@
 // Free: a public-repo runner and public pages.
 
 import { guardLogs, hideNames } from "./quiet.mjs";
+import { FRESH_MS } from "./fresh.mjs";
 import { nearPattern } from "./near.mjs";
 // Nothing this prints names an employer, a posting or a place: see quiet.mjs.
 guardLogs();
@@ -207,7 +208,7 @@ export function shape(p, pageUrl, employer) {
 /** Posted within two weeks, or closing within one. Undated is not fresh. */
 export function fresh(j, now = Date.now()) {
   if (j.closes_at && Date.parse(j.closes_at) < now) return false;
-  if (j.posted_at && now - Date.parse(j.posted_at) <= 14 * 86_400_000) return true;
+  if (j.posted_at && now - Date.parse(j.posted_at) <= FRESH_MS) return true;
   if (j.closes_at && Date.parse(j.closes_at) - now <= 7 * 86_400_000) return true;
   return false;
 }

@@ -16,6 +16,7 @@
 // Free: a public-repo runner and public pages.
 
 import { guardLogs, hideNames, shape } from "./quiet.mjs";
+import { FRESH_MS } from "./fresh.mjs";
 import { nearPattern, stateName } from "./near.mjs";
 // Nothing this prints names an employer, a posting or a place: see quiet.mjs.
 guardLogs();
@@ -199,7 +200,7 @@ async function read(origin, place) {
     seen.rows.push(...rows);
     if (rows.length < 20) break;
     const dates = rows.map((r) => postedAt(r.posted)).filter(Boolean).map((d) => new Date(d).getTime());
-    if (dates.length && Math.max(...dates) < Date.now() - 14 * 86_400_000) break;
+    if (dates.length && Math.max(...dates) < Date.now() - FRESH_MS) break;
     await pause(500);
   }
   if (seen.rows.length) return seen;
@@ -344,7 +345,7 @@ if (process.env.SF_IMPORT_ONLY !== "1") {
       if (!NEAR.test(r.location) && !/\bremote\b/i.test(r.title)) continue;
       tally.near++;
       const posted_at = postedAt(r.posted);
-      if (posted_at && new Date(posted_at).getTime() < Date.now() - 14 * 86_400_000) continue;
+      if (posted_at && new Date(posted_at).getTime() < Date.now() - FRESH_MS) continue;
       tally.fresh++;
       keep.push({ ...r, posted_at });
     }

@@ -28,12 +28,33 @@ import { chooseOption, generateAnswer, resumeFacts } from "./answers.mjs";
 import { alignToPosting, composeAnswer } from "./ats.mjs";
 import { tailorResume, rolesText, standardResume, arrangedResume, structureResume } from "./tailor.mjs";
 import { guardLogs, hideJob, STATES } from "./quiet.mjs";
+import { FRESH_DAYS } from "./fresh.mjs";
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const ANON_KEY = process.env.SUPABASE_ANON_KEY;
 const AP_EMAIL = process.env.APPLYPILOT_EMAIL;
 const AP_PASSWORD = process.env.APPLYPILOT_PASSWORD;
 const MAX_JOBS = parseInt(process.env.MAX_JOBS || "25", 10);
+
+// A lane may be one of several runners working the same kind of portal at
+// once: "workday@1of3" is the second of three. Each takes its own employers
+// — an employer always falls to the same runner — so that no two of them
+// sign in to one portal, are emailed codes under one subject, or count the
+// day's limit for one employer separately. Everything else reads the lane
+// by its plain name.
+export function shardOf(lane) {
+  const m = String(lane ?? "").match(/^(.*)@(\d+)of(\d+)$/);
+  return m && Number(m[3]) > 1 && Number(m[2]) < Number(m[3]) ? { lane: m[1], i: Number(m[2]), n: Number(m[3]) } : null;
+}
+export function shardFor(company, n) {
+  let h = 5381;
+  for (const ch of String(company ?? "").toLowerCase().trim()) h = ((h << 5) + h + ch.charCodeAt(0)) >>> 0;
+  return h % n;
+}
+const SHARD = shardOf(process.env.ATS_ONLY);
+if (SHARD) process.env.ATS_ONLY = SHARD.lane;
+/** The one runner in a round that does what is done once a round. */
+const LEADS_THE_ROUND = (!process.env.ATS_ONLY || process.env.ATS_ONLY === "workday") && (!SHARD || SHARD.i === 0);
 // Decided once in main(): the autopilot setting can turn it off for a
 // scheduled run. applyToJob reads this binding, so there must not be a
 // second copy of the decision floating around.
@@ -7634,15 +7655,15 @@ async function applyToJobOnce(context, job, profile, answers) {
       const left = body.match(/(\d+)\s+days?\s+left to apply/);
       const closingSoon = left !== null && Number(left[1]) <= 7;
       if (days !== null) {
-        if (days > 14 && closingSoon) {
+        if (days > FRESH_DAYS && closingSoon) {
           // The date is left unrecorded: stored, it would rule the posting
           // out of every later claim, and this is the one case it must not.
           console.log(`    posted ${m[1]}, but closing in ${left[1]} day(s) — still wanted`);
         } else {
           const posted = new Date(Date.now() - days * 86_400_000).toISOString();
           await patchJob(job.id, { posted_at: posted }).catch(() => {});
-          if (days > 14) {
-            return { status: "skipped", skip_reason: `posted ${m[1]}, older than 14 days` };
+          if (days > FRESH_DAYS) {
+            return { status: "skipped", skip_reason: `posted ${m[1]}, older than ${FRESH_DAYS} days` };
           }
         }
       } else if (closingSoon) {
@@ -10897,11 +10918,10 @@ const main = async () => {
   // left alone until it has been.
   // The owner's rule, built in rather than configurable: only postings from
   // the last two weeks are applied to.
-  const FRESH_DAYS = 14;
   const FRESH_SINCE = new Date(Date.now() - FRESH_DAYS * 86_400_000).toISOString().slice(0, 19) + "Z";
 
   // Applications already sent to each employer today.
-  const PER_EMPLOYER_DAILY = Math.max(1, Number(process.env.PER_EMPLOYER_DAILY ?? 3));
+  const PER_EMPLOYER_DAILY = Math.max(1, Number(process.env.PER_EMPLOYER_DAILY || 5));
   const SENT_TO = new Map();
   {
     // Whole seconds. Inside an or=(…) the fraction's full stop reads as the
@@ -10957,7 +10977,19 @@ const main = async () => {
   p.last_name = names.length > 1 ? names[names.length - 1] : "";
 
   // Once a round, in the lane that always runs.
-  if (!process.env.ATS_ONLY || process.env.ATS_ONLY === "workday") await refreshAnswers(p).catch(() => {});
+  if (LEADS_THE_ROUND) await refreshAnswers(p).catch(() => {});
+  // The owner's standing order: postings scored into the middle band are
+  // sent, not held for a yes. Done once a round, by the first lane, on a
+  // round that sends for real.
+  if (process.env.SEND_REVIEW !== "false" && !DRY_RUN && LEADS_THE_ROUND) {
+    const moved =
+      (await db("jobs?status=eq.review", {
+        method: "PATCH",
+        headers: { Prefer: "return=representation" },
+        body: JSON.stringify({ status: "queued", updated_at: new Date().toISOString() }),
+      }).catch(() => null)) ?? [];
+    if (moved.length) console.log(`review: ${moved.length} posting(s) that were held for a yes are now in the queue.`);
+  }
   const answers = await db("answers?confirmed=eq.true&select=q_key,answer") ?? [];
 
   // Adopt the row the panel opened when it dispatched this run.
@@ -11207,7 +11239,7 @@ const main = async () => {
                   // The newest first, and the better match among those of
                   // a day: an application in the first days of a posting is
                   // read; one in its second week often is not.
-                  `&attempts=lt.3&order=posted_at.desc.nullslast,score.desc.nullslast&limit=30&select=*`,
+                  `&attempts=lt.3&order=posted_at.desc.nullslast,score.desc.nullslast&limit=${SHARD ? 40 * SHARD.n : 30}&select=*`,
               ).catch(() => null)) ?? [];
             for (const row of rows) {
               // One application per employer at a time.
@@ -11218,6 +11250,8 @@ const main = async () => {
               // application it is for. Both went through, which was order of
               // arrival and not design. Taking a different employer's job
               // while one is in flight costs nothing and removes the question.
+              // Another runner's employer.
+              if (SHARD && shardFor(companyOf(row), SHARD.n) !== SHARD.i) continue;
               if (BUSY_COMPANIES.has(companyOf(row)) || CLAIMING.has(companyOf(row))) continue;
               // An employer whose form stopped one application in this run
               // will stop the next for the same reason — and a portal that

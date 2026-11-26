@@ -17,6 +17,7 @@
 // Free: public addresses, and a runner in a public repository.
 
 import { guardLogs, hideNames, shape, STATES } from "./quiet.mjs";
+import { FRESH_MS } from "./fresh.mjs";
 import { nearPattern, stateName } from "./near.mjs";
 // Nothing this prints names an employer, a posting or a place: see quiet.mjs.
 guardLogs();
@@ -411,7 +412,7 @@ if (process.env.BOARDS_IMPORT_ONLY !== "1") {
       // kept and read from its own page.
       if (r.location && !r.remote && !NEAR.test(r.location)) continue;
       tally.near++;
-      if (r.posted_at && new Date(r.posted_at).getTime() < Date.now() - 14 * 86_400_000) continue;
+      if (r.posted_at && new Date(r.posted_at).getTime() < Date.now() - FRESH_MS) continue;
       keep.push(r);
     }
     console.log(`  ok ${e.name} (${e.ats}) — ${rows.length} read, ${keep.length} wanted`);
@@ -444,7 +445,7 @@ if (process.env.BOARDS_IMPORT_ONLY !== "1") {
       }
       // Fresh postings only, as everywhere else; one with no date is kept
       // undated and left for the applier to judge.
-      if (posted_at && new Date(posted_at).getTime() < Date.now() - 14 * 86_400_000) continue;
+      if (posted_at && new Date(posted_at).getTime() < Date.now() - FRESH_MS) continue;
       tally.fresh++;
       sys.kept++;
       body.push({

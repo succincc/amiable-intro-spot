@@ -23,6 +23,7 @@
 // Free: a public-repo runner and public feeds.
 
 import { guardLogs, hideNames, shape } from "./quiet.mjs";
+import { FRESH_DAYS, FRESH_MS } from "./fresh.mjs";
 // Nothing this prints names an employer, a posting or a place: see quiet.mjs.
 guardLogs();
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -111,7 +112,7 @@ const NOT_AN_EMPLOYER =
 
 const fresh14 = (iso) => {
   const t = Date.parse(iso ?? "");
-  return Number.isFinite(t) ? Date.now() - t <= 14 * 86_400_000 : true;
+  return Number.isFinite(t) ? Date.now() - t <= FRESH_MS : true;
 };
 
 /** The Muse: jobs by city, twenty to a page. */
@@ -351,7 +352,7 @@ async function fromAdzuna(titles, excludes, where, tally) {
       try {
         j = await getJson(
           `https://api.adzuna.com/v1/api/jobs/us/search/${page}?app_id=${id}&app_key=${key}` +
-            `&results_per_page=50&max_days_old=14&distance=65&where=${encodeURIComponent(where)}` +
+            `&results_per_page=50&max_days_old=${FRESH_DAYS}&distance=65&where=${encodeURIComponent(where)}` +
             `&what=${encodeURIComponent(title)}&content-type=application/json`,
         );
       } catch (e) {

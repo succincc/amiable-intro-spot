@@ -7,6 +7,9 @@ import { cachedGeocode, geocode } from "@/lib/geo.server";
 import { suggestTitles } from "@/lib/titles.server";
 import { fetchWorkday } from "@/lib/workday.server";
 
+/** How old a posting may be and still be wanted. The same number as fresh.mjs. */
+const FRESH_DAYS = 30;
+
 const UA = "ApplyPilot/1.0 (job search automation; contact via app)";
 const TIMEOUT_MS = 15_000;
 
@@ -600,14 +603,15 @@ export async function runDiscover(supabase: any, opts: { since?: string | undefi
         bump((verdict.why ?? "filtered").replace(/:.*$/, "").trim());
         continue;
       }
-      // Fresh postings only: up within the last fourteen days. Built in, not
+      // Fresh postings only: up within the last thirty days (it was
+      // fourteen; the owner raised it, and fresh.mjs says why). Built in, not
       // a setting. A posting that gives no date is kept and judged by the
       // applier, which can read the date off the posting page itself.
       if (j.posted_at) {
         const up = new Date(j.posted_at).getTime();
-        if (Number.isFinite(up) && up < Date.now() - 14 * 86_400_000) {
+        if (Number.isFinite(up) && up < Date.now() - FRESH_DAYS * 86_400_000) {
           stats.filtered++;
-          bump("posted more than 14 days ago");
+          bump(`posted more than ${FRESH_DAYS} days ago`);
           continue;
         }
       }

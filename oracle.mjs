@@ -10,6 +10,7 @@
 // Free: a public-repo runner and a public feed.
 
 import { guardLogs, hideNames, shape } from "./quiet.mjs";
+import { FRESH_MS } from "./fresh.mjs";
 import { nearPattern } from "./near.mjs";
 // Nothing this prints names an employer, a posting or a place: see quiet.mjs.
 guardLogs();
@@ -203,7 +204,7 @@ if (process.env.ORACLE_IMPORT_ONLY !== "1") {
       tally.near++;
       const posted = r.PostedDate ? new Date(r.PostedDate) : null;
       const posted_at = posted && Number.isFinite(posted.getTime()) ? posted.toISOString() : null;
-      if (posted_at && posted.getTime() < Date.now() - 14 * 86_400_000) continue;
+      if (posted_at && posted.getTime() < Date.now() - FRESH_MS) continue;
       tally.fresh++;
       keep.push({ r, where, posted_at });
     }

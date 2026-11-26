@@ -4,7 +4,7 @@
 // does not know iCIMS, and
 // teaching it would need a change to the panel; this reads the portals from
 // a runner instead and puts what it finds in the same queue, as postings like
-// any other — scored, measured for distance and held to the fourteen-day rule
+// any other — scored, measured for distance and held to the freshness rule
 // by the machinery that already exists.
 //
 // An iCIMS portal is a search page per employer: careers-NAME.icims.com/jobs/
@@ -15,6 +15,7 @@
 // Free: a public-repo runner and public pages.
 
 import { guardLogs, hideNames, shape } from "./quiet.mjs";
+import { FRESH_MS } from "./fresh.mjs";
 import { nearPattern } from "./near.mjs";
 // Nothing this prints names an employer, a posting or a place: see quiet.mjs.
 guardLogs();
@@ -425,7 +426,7 @@ if (process.env.ICIMS_IMPORT_ONLY !== "1") {
       const posted_at = r.posted_at ?? postedOf(r.text);
       // Fresh postings only, as everywhere else. One that shows no date is
       // kept undated and left for the applier to judge.
-      if (posted_at && new Date(posted_at).getTime() < Date.now() - 14 * 86_400_000) continue;
+      if (posted_at && new Date(posted_at).getTime() < Date.now() - FRESH_MS) continue;
       tally.fresh++;
       const loc = (r.text.match(/\b([A-Z]{2}-[A-Z]{2}(?:-[A-Za-z .'-]+)?)\b/) ?? [])[1] ?? null;
       const location = r.location ?? placeOf(loc);

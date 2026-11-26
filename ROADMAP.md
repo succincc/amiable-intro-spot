@@ -45,8 +45,11 @@ applications first; if either fails, nothing is sent.
   A job parked for mail that had not arrived is tried again half an hour on.
 - Distance measured for every waiting posting; a location the map cannot find
   as written is tried again as its town and state, never a town alone.
-- Newest postings first; posted within fourteen days, or closing soon.
-- At most three applications per employer per day; a daily cap overall.
+- Newest postings first; posted within thirty days, or closing soon.
+- At most five applications per employer per day; a daily cap overall.
+- Postings scored into the middle band are sent, not held for a yes.
+- The two biggest lanes are split across parallel runners, each with its
+  own employers; every push is tested before a round runs on it.
 - A receipt email turns an unconfirmed submission into a confirmed one.
 - Six key-free public feeds for discovering employers, on top of the
   employer list and the weekly resolver.
