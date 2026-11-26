@@ -3607,11 +3607,21 @@ async function oracleRepair(page, form, profile, job, onlyReport = false, lookup
         await pickDate("month-startDate", role.start_month, monthRe(role.start_month), "work entry, month started"),
         await pickDate("year-startDate", role.start_year, new RegExp(`^${role.start_year}$`), "work entry, year started"),
       ];
-      if (!role.current && role.end_year) {
+      // "The End Date field is required." — of a job the resume says is the
+      // present one, on a form with no box to say so. The honest end date of
+      // a job still held is this month: it says the job has run up to now
+      // and claims nothing about its having ended. A job that did end gets
+      // the end the resume gives it.
+      {
+        const now = new Date();
+        const held = role.current || !role.end_year;
+        const endMonth = held ? MONTHS[now.getMonth()] : role.end_month;
+        const endYear = held ? String(now.getFullYear()) : String(role.end_year);
         did.end = [
-          await pickDate("month-endDate", role.end_month, monthRe(role.end_month), "work entry, month ended"),
-          await pickDate("year-endDate", role.end_year, new RegExp(`^${role.end_year}$`), "work entry, year ended"),
+          await pickDate("month-endDate", endMonth, monthRe(endMonth), "work entry, month ended"),
+          await pickDate("year-endDate", endYear, new RegExp(`^${endYear}$`), "work entry, year ended"),
         ];
+        if (held) console.log("    oracle work history: the job is the present one and the form insists on an end date; this month is given");
       }
       // The button that keeps a new entry is not always called SAVE. It is
       // the entry's own: found from the employer's box outwards, and pressed
