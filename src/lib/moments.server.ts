@@ -122,7 +122,40 @@ export async function tellOwner(supabase: any, now = new Date()): Promise<{ told
       continue;
     }
 
-    const note = noticeFor({ moment, job, from: e.from_addr, subject: e.subject, body: e.body, zone, resume: profile.resume_text, kind, clash, openTimes });
+    // Written questions are drafted only where the invitation itself says
+    // AI tools may be used, and only from the owner's own resume. They go to
+    // the owner to check and send; nothing is submitted to anyone.
+    let drafts: Array<{ question: string; answer: string }> | null = null;
+    if (moment.kind === "assessment" && moment.ai?.stance === "permitted" && moment.questions?.length && process.env["GEMINI_API_KEY"]) {
+      try {
+        const { callGemini } = await import("@/lib/gemini.server");
+        const raw = await callGemini({
+          apiKey: process.env["GEMINI_API_KEY"] ?? "",
+          temperature: 0.3,
+          maxTokens: 1400,
+          prompt:
+            `An employer has asked a candidate written questions and has said in the invitation that AI tools may be used. ` +
+            `Draft an answer to each, in the first person, 60 to 120 words, plain and specific. Use ONLY what the resume below shows: ` +
+            `never invent an employer, a title, a date, a number, a degree or a skill. Where the resume shows nothing for a question, ` +
+            `write exactly "[yours to write: the resume shows nothing for this]".\n\n` +
+            `Answer as JSON: [{"question": "...", "answer": "..."}].\n\n` +
+            `ROLE: ${job?.title ?? "not known"} at ${job?.company ?? "the employer"}\n\n` +
+            `QUESTIONS:\n${moment.questions.map((q, i) => `${i + 1}. ${q}`).join("\n")}\n\n` +
+            `RESUME:\n${String(profile.resume_text ?? "").slice(0, 6000)}`,
+        });
+        const parsed = JSON.parse(raw.replace(/^[^\[]*/, "").replace(/[^\]]*$/, ""));
+        if (Array.isArray(parsed)) {
+          drafts = parsed
+            .filter((d: any) => typeof d?.question === "string" && typeof d?.answer === "string")
+            .slice(0, 5)
+            .map((d: any) => ({ question: d.question.slice(0, 300), answer: d.answer.slice(0, 1200) }));
+        }
+      } catch {
+        drafts = null;
+      }
+    }
+
+    const note = noticeFor({ moment, job, from: e.from_addr, subject: e.subject, body: e.body, zone, resume: profile.resume_text, kind, clash, openTimes, drafts });
     let sent: { ok: boolean; error?: string };
     if (note.event) {
       if (to === undefined) to = await ownAddress(supabase);

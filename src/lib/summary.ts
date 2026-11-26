@@ -50,6 +50,8 @@ export function composeSummary(d: {
   questions?: number;
   /** Interviews booked for the week ahead, already worded: when, and what for. */
   coming?: Array<{ when: string; what: string }>;
+  /** Every assessment still to take, wherever it was asked for: by email or on a portal. */
+  assessments?: Array<{ what: string; due?: string | null; link?: string | null }>;
   /** How the last thirty days of applications have been answered. */
   month?: { sent: number; interviews: number; offers: number; rejected: number };
 }): { subject: string; body: string } {
@@ -59,6 +61,11 @@ export function composeSummary(d: {
   if (d.coming?.length) {
     say(`COMING UP: ${d.coming.length} interview${d.coming.length === 1 ? "" : "s"} this week`);
     for (const c of d.coming.slice(0, 10)) say(`  ${c.when} - ${short(c.what, 70)}`);
+    say();
+  }
+  if (d.assessments?.length) {
+    say(`ASSESSMENTS TO TAKE: ${d.assessments.length}`);
+    for (const x of d.assessments.slice(0, 12)) say(`  ${short(x.what, 60)}${x.due ? ` - due ${x.due}` : ""}${x.link ? `\n    ${x.link}` : ""}`);
     say();
   }
   say("The last 24 hours.");

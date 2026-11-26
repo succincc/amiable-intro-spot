@@ -377,7 +377,13 @@ async function fromJooble(titles, excludes, where, tally) {
   const key = process.env.JOOBLE_KEY;
   if (!key) return null;
   const out = [];
-  for (const title of titles.slice(0, 40)) {
+  // A few titles a run, a different few each time. What a free key allows
+  // is not stated by the service and is reported as low; asked forty times
+  // a run it would be spent in a week. Six a run, in turn, covers every
+  // title every few days and lasts.
+  const turn = Math.floor(Date.now() / (12 * 3_600_000));
+  const startAt = titles.length ? (turn * 6) % titles.length : 0;
+  for (const title of [...titles.slice(startAt), ...titles.slice(0, startAt)].slice(0, 6)) {
     let j;
     try {
       j = await getJson(`https://jooble.org/api/${key}`, {

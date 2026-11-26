@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { afterBooking, afterRejection, bookingLink, deadlineIn, googleCalendarLink, healthProblems, icsFor, meetingLink, momentOf, noticeFor, offerFacts, requirementsMet, statedTime, streetAddress } from "./moments";
+import { afterBooking, afterRejection, aiPolicy, assessmentKind, writtenQuestions, bookingLink, deadlineIn, googleCalendarLink, healthProblems, icsFor, meetingLink, momentOf, noticeFor, offerFacts, requirementsMet, statedTime, streetAddress } from "./moments";
 
 const ZONE = "America/New_York";
 const NOW = new Date("2026-11-27T15:00:00Z"); // a Friday, 10am Eastern
@@ -65,7 +65,7 @@ describe("which moment an email is", () => {
     expect(momentOf({ category: "interview", subject: "Next steps", body: "Please choose a time: https://calendly.com/acme/intro" }, ZONE, NOW)).toEqual({ kind: "pick_a_time", link: "https://calendly.com/acme/intro" });
   });
   it("an assessment, with its link and its day", () => {
-    expect(momentOf({ category: "action_needed", subject: "Complete your assessment", body: "Take the skills test at https://assess.example.com/candidate/abc by December 3." }, ZONE, NOW)).toEqual({ kind: "assessment", link: "https://assess.example.com/candidate/abc", due: "December 3" });
+    expect(momentOf({ category: "action_needed", subject: "Complete your assessment", body: "Take the skills test at https://assess.example.com/candidate/abc by December 3." }, ZONE, NOW)).toMatchObject({ kind: "assessment", link: "https://assess.example.com/candidate/abc", due: "December 3", ai: { stance: "not stated" }, provider: null });
   });
   it("a receipt is never a moment, whatever it mentions", () => {
     expect(momentOf({ category: "confirmation", subject: "Thanks for applying", body: "If selected, your interview may be on December 1 at 10:00 AM." }, ZONE, NOW)).toBeNull();
@@ -176,5 +176,40 @@ describe("the email to the owner", () => {
   });
   it("the calendar link carries the place", () => {
     expect(googleCalendarLink({ start: new Date("2026-12-01T15:00:00Z"), end: new Date("2026-12-01T16:00:00Z"), title: "Interview", where: "100 Example Ave" })).toContain("location=100+Example+Ave");
+  });
+});
+
+describe("an assessment's invitation, read for what it says", () => {
+  it("AI tools are permitted or ruled out only where it says so", () => {
+    expect(aiPolicy("You may use AI tools such as ChatGPT to help with this exercise.").stance).toBe("permitted");
+    expect(aiPolicy("Please complete this on your own. The use of AI tools is not permitted.").stance).toBe("prohibited");
+    expect(aiPolicy("Do not use ChatGPT or other generative tools. You are welcome to use a calculator.").stance).toBe("prohibited");
+    expect(aiPolicy("You are welcome to use a calculator and scratch paper.").stance).toBe("not stated");
+    expect(aiPolicy("Our hiring process uses AI to review responses.").stance).toBe("not stated");
+  });
+  it("a known provider is named with what it gives and how to be ready", () => {
+    expect(assessmentKind("Complete your HireVue interview at https://acme.hirevue.com/x")?.name).toBe("HireVue");
+    expect(assessmentKind("Your Criteria assessment (CCAT) is ready")?.what).toMatch(/50 questions in 15 minutes/);
+    expect(assessmentKind("Please take our short quiz")).toBeNull();
+  });
+  it("finds questions put in so many words, and not the small print", () => {
+    expect(writtenQuestions("Please reply with answers:\n1. Why do you want to work in retail operations at our company?\n2. Describe a time you resolved a conflict with a coworker?\nAny questions? Contact us.")).toEqual([
+      "Why do you want to work in retail operations at our company?",
+      "Describe a time you resolved a conflict with a coworker?",
+    ]);
+  });
+  it("the email says the policy, gives the preparation, and carries drafts only when allowed", () => {
+    const base = { category: "action_needed", subject: "Complete your assessment", body: "Take your HireVue assessment at https://acme.hirevue.com/c/1 by December 3. You may use AI tools to prepare your answers." };
+    const m = momentOf(base, ZONE, NOW);
+    if (m?.kind !== "assessment") throw new Error("not an assessment");
+    const allowed = noticeFor({ moment: m, job: null, from: "hr@acme.com", zone: ZONE, drafts: [{ question: "Why us?", answer: "Because of X." }] });
+    expect(allowed.body).toContain("WHAT IT IS: HireVue");
+    expect(allowed.body).toContain("AI TOOLS: the invitation allows them");
+    expect(allowed.body).toContain("Q: Why us?");
+    const silent = momentOf({ ...base, body: "Take the skills test at https://assess.example.com/candidate/abc by December 3." }, ZONE, NOW);
+    if (silent?.kind !== "assessment") throw new Error("not an assessment");
+    const n = noticeFor({ moment: silent, job: null, zone: ZONE, drafts: [{ question: "x", answer: "y" }] });
+    expect(n.body).toContain("AI TOOLS: the invitation does not say");
+    expect(n.body).not.toContain("Q: x");
   });
 });

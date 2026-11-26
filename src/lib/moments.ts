@@ -19,7 +19,7 @@ import { cleanHolds, type Hold, type Kind } from "@/lib/availability";
 export type Moment =
   | { kind: "interview_time"; when: Date; link: string | null; where: string | null }
   | { kind: "pick_a_time"; link: string }
-  | { kind: "assessment"; link: string | null; due: string | null }
+  | { kind: "assessment"; link: string | null; due: string | null; ai?: { stance: "permitted" | "prohibited" | "not stated"; quote: string | null }; provider?: { name: string; what: string; ready: string[] } | null; questions?: string[] }
   | { kind: "offer"; pay: string | null; start: string | null; replyBy: string | null }
   | { kind: "rejection" };
 
@@ -143,6 +143,69 @@ export function deadlineIn(text: string | null | undefined): string | null {
   return m ? m[1]!.trim() : null;
 }
 
+/**
+ * What an assessment's invitation says about using AI tools, in its own
+ * words. Only what is stated counts: "permitted" and "prohibited" each need
+ * the invitation to say so, and silence is "not stated" — which is treated
+ * as the owner's own work to do.
+ */
+export function aiPolicy(text: string | null | undefined): { stance: "permitted" | "prohibited" | "not stated"; quote: string | null } {
+  const sentences = String(text ?? "").replace(/\s+/g, " ").split(/(?<=[.!?])\s+/);
+  const about = /\b(a\.?i\.?|artificial intelligence|chatgpt|gpt|copilot|claude|gemini|llm|generative|large language model)\b/i;
+  const no = /\b(not (?:be )?(?:permitted|allowed|use|used|to use|rely)|do not use|don'?t use|may not|must not|cannot|can'?t|prohibit(?:ed|s)?|forbidden|without (?:the )?(?:use|help|aid|assistance) of|unassisted|your own work|disqualif|refrain from|no (?:use of|ai|outside))\b/i;
+  const yes = /\b(may use|can use|are (?:welcome|free|allowed|permitted|encouraged) to use|is (?:allowed|permitted|encouraged|welcome)|feel free to use|encourage (?:you|the use)|permitted to use|allowed to use)\b/i;
+  for (const sentence of sentences) {
+    if (!about.test(sentence)) continue;
+    if (no.test(sentence)) return { stance: "prohibited", quote: sentence.trim().slice(0, 240) };
+  }
+  for (const sentence of sentences) {
+    if (about.test(sentence) && yes.test(sentence)) return { stance: "permitted", quote: sentence.trim().slice(0, 240) };
+  }
+  return { stance: "not stated", quote: null };
+}
+
+/** What kind of assessment a known provider gives, and how to get ready for it. */
+const PROVIDERS: Array<{ re: RegExp; name: string; what: string; ready: string[] }> = [
+  { re: /hirevue/i, name: "HireVue", what: "recorded video answers, sometimes with short games; usually 20 to 30 minutes, each answer timed with one or two retakes",
+    ready: ["A quiet room, the camera at eye level, light on your face.", "Three stories ready from your own roles: a problem you solved, a time you dealt with a difficult person, something you improved. Say what you did and what came of it.", "Use the practice question first; it is not recorded."] },
+  { re: /criteria|ccat|ondemandassessment/i, name: "Criteria (CCAT)", what: "50 questions in 15 minutes: arithmetic, word and pattern problems. Nobody finishes; it is scored on how many are right",
+    ready: ["No calculator is allowed; have paper and a pen.", "Skip what stalls you: a guess costs nothing, time does.", "Criteria publishes sample questions; ten minutes with them shows the pace."] },
+  { re: /wonderlic/i, name: "Wonderlic", what: "50 questions in 12 minutes (or 30 in 8 online): quick reasoning with words and numbers",
+    ready: ["About fourteen seconds a question: answer, or guess and move on.", "Paper and a pen; no calculator."] },
+  { re: /predictive ?index|\bpi (?:behavioral|cognitive)|predictiveindex/i, name: "Predictive Index", what: "a behavioural checklist of adjectives (untimed, about six minutes) and often a 12-minute, 50-question reasoning test",
+    ready: ["The checklist has no right answers; answer as you are at work, and consistently.", "For the timed part, pace over perfection."] },
+  { re: /\bshl\b|talentcentral/i, name: "SHL", what: "timed numerical, verbal or inductive reasoning sets, sometimes a personality questionnaire",
+    ready: ["A calculator and paper are usually allowed for the numerical set; the instructions say.", "SHL has free practice tests under 'practice' on its site."] },
+  { re: /pymetrics|harver|plum\.io|arctic ?shores/i, name: "a games-based assessment", what: "short on-screen games measuring attention, memory and risk, about 25 minutes; no knowledge is tested",
+    ready: ["A laptop with a mouse, not a phone.", "Rested and uninterrupted matters more than practice."] },
+  { re: /hackerrank|codility|codesignal|coderpad/i, name: "a coding assessment", what: "timed programming problems in a browser editor",
+    ready: ["Read the rules on outside help before starting; they differ by employer.", "The practice environment is worth five minutes to learn the editor."] },
+  { re: /testgorilla|eskill|indeed\.com\/(?:assessments|test)|assessments?\.indeed/i, name: "a skills test", what: "multiple-choice questions on the skills the posting names, usually 10 to 20 minutes a section, timed",
+    ready: ["The posting's own requirements are the syllabus: read it once more first.", "Once started the clock does not stop; start when you have the full time free."] },
+  { re: /hogan|caliper|korn ?ferry|16pf|disc\b|gallup/i, name: "a personality questionnaire", what: "untimed statements to agree or disagree with; 20 to 40 minutes",
+    ready: ["Answer as you are at work, steadily; these check for consistency.", "No preparation changes the result much; a clear half hour does."] },
+];
+
+export function assessmentKind(text: string | null | undefined): { name: string; what: string; ready: string[] } | null {
+  const t = String(text ?? "");
+  const hit = PROVIDERS.find((p) => p.re.test(t));
+  return hit ? { name: hit.name, what: hit.what, ready: hit.ready } : null;
+}
+
+/** Questions an invitation puts in so many words, for answering in writing. */
+export function writtenQuestions(text: string | null | undefined): string[] {
+  const out: string[] = [];
+  for (const raw of String(text ?? "").split(/\n+|(?<=[?])\s+/)) {
+    const line = raw.replace(/^[\s\-*•\d.)]+/, "").replace(/\s+/g, " ").trim();
+    if (line.length < 25 || line.length > 300 || !line.endsWith("?")) continue;
+    if (/\b(questions\?|any questions|need (?:help|assistance)|unsubscribe|trouble|having issues|did you know)\b/i.test(line)) continue;
+    if (!/\b(why|how|what|describe|tell us|explain|which|when have|give an example)\b/i.test(line)) continue;
+    if (!out.includes(line)) out.push(line);
+    if (out.length >= 5) break;
+  }
+  return out;
+}
+
 /** What an offer says about itself: pay, start, and the day an answer is wanted by. */
 export function offerFacts(text: string | null | undefined): { pay: string | null; start: string | null; replyBy: string | null } {
   const t = String(text ?? "").replace(/\s+/g, " ");
@@ -181,7 +244,7 @@ export function momentOf(
     return null;
   }
   if (m.category === "action_needed" && /\b(assessment|skills? test|questionnaire|coding (?:challenge|test)|online test|video interview|hirevue|one-way interview|complete (?:the|your|a) (?:assessment|test|survey))\b/i.test(text)) {
-    return { kind: "assessment", link: firstLink(text, /assess|test|survey|hirevue|challenge|interview|questionnaire|candidate/i), due: deadlineIn(text) };
+    return { kind: "assessment", link: firstLink(text, /assess|test|survey|hirevue|challenge|interview|questionnaire|candidate/i), due: deadlineIn(text), ai: aiPolicy(text), provider: assessmentKind(text), questions: writtenQuestions(m.body) };
   }
   return null;
 }
@@ -318,6 +381,8 @@ export function noticeFor(a: {
   kind?: Kind | null;
   clash?: Hold | null;
   openTimes?: string | null;
+  /** Answers drafted for written questions, only where the invitation allows AI tools. */
+  drafts?: Array<{ question: string; answer: string }> | null;
 }): { subject: string; body: string; event: { start: Date; end: Date; title: string; where: string | null; notes: string } | null } {
   const who = whoFrom(a.job, a.from);
   const role = a.job?.title ? `${a.job.title} at ${who}` : who;
@@ -392,8 +457,33 @@ export function noticeFor(a: {
     say();
     if (m.link) say(`Open:  ${m.link}`);
     if (m.due) say(`Due:   ${m.due}`);
+    if (m.provider) {
+      say();
+      say(`WHAT IT IS: ${m.provider.name} - ${m.provider.what}.`);
+      say();
+      say("TO BE READY");
+      for (const r of m.provider.ready) say(`  - ${r}`);
+    }
     say();
-    say("This one is yours to take; it is never taken for you.");
+    const stance = m.ai?.stance ?? "not stated";
+    if (stance === "permitted") {
+      say(`AI TOOLS: the invitation allows them - "${m.ai?.quote}"`);
+      if (a.drafts?.length) {
+        say();
+        say("DRAFTS, written from your resume and the posting because the invitation allows it. They are yours to check, change and send; nothing has been submitted.");
+        for (const d of a.drafts) {
+          say();
+          say(`Q: ${d.question}`);
+          say(d.answer);
+        }
+      }
+    } else if (stance === "prohibited") {
+      say(`AI TOOLS: the invitation rules them out - "${m.ai?.quote}" Nothing is drafted for this one.`);
+    } else {
+      say("AI TOOLS: the invitation does not say. Treated as your own work: nothing is drafted or taken for you.");
+    }
+    say();
+    say("It is yours to take. What is done for you is this page: what it is, when it is due, and how to be ready.");
     mail();
     return { subject: `ApplyPilot: assessment to take${m.due ? `, due ${m.due}` : ""} - ${role}`.slice(0, 150), body: L.join("\n"), event: null };
   }

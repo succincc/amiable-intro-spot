@@ -84,9 +84,32 @@ export const Route = createFileRoute("/api/public/email/summary")({
             /* the summary goes out without them */
           }
 
+          // Assessments, gathered from both places they are asked for.
+          const assessments: Array<{ what: string; due?: string | null; link?: string | null }> = [];
+          try {
+            const { deadlineIn } = await import("@/lib/moments");
+            const [mail, parked] = await Promise.all([
+              supabaseAdmin.from("emails").select("subject, body, from_addr, job_id, received_at").eq("moment", "assessment").gte("received_at", new Date(Date.now() - 21 * DAY).toISOString()).order("received_at", { ascending: false }).limit(20),
+              supabaseAdmin.from("jobs").select("id, title, company, apply_url, url").eq("status", "needs_help").eq("help_reason", "assessment").limit(20),
+            ]);
+            const seen = new Set<string>();
+            for (const j of parked.data ?? []) {
+              seen.add(j.id);
+              assessments.push({ what: `${j.title} at ${j.company} (on the employer's portal)`, link: j.apply_url ?? j.url });
+            }
+            for (const m of mail.data ?? []) {
+              if (m.job_id && seen.has(m.job_id)) continue;
+              const link = (String(m.body ?? "").match(/https?:\/\/[^\s<>"')\]]+/) ?? [])[0] ?? null;
+              assessments.push({ what: String(m.subject ?? m.from_addr ?? "an assessment"), due: deadlineIn(m.body), link });
+            }
+          } catch {
+            /* the summary goes out without them */
+          }
+
           const { composeSummary } = await import("@/lib/summary");
           const made = composeSummary({
             coming,
+            assessments,
             ...(month ? { month } : {}),
             sent: sent.data ?? [],
             replies: replies.data ?? [],
