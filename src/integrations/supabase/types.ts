@@ -603,10 +603,12 @@ export type Database = {
           autopilot: boolean | null
           availability: string | null
           can_background_check: string | null
+          citizenship: string | null
           city: string | null
           country: string | null
           create_accounts: boolean | null
           daily_summary: boolean | null
+          date_of_birth: string | null
           disability_status: string | null
           earliest_start: string | null
           education_level: string | null
@@ -615,6 +617,7 @@ export type Database = {
           full_name: string | null
           gender: string | null
           github_url: string | null
+          hispanic_latino: string | null
           home_city: string | null
           home_lat: number | null
           home_lon: number | null
@@ -622,9 +625,6 @@ export type Database = {
           id: number
           linkedin_url: string | null
           needs_sponsorship: string | null
-          citizenship: string | null
-          date_of_birth: string | null
-          hispanic_latino: string | null
           over_18: string | null
           phone: string | null
           portfolio_url: string | null
@@ -652,10 +652,12 @@ export type Database = {
           autopilot?: boolean | null
           availability?: string | null
           can_background_check?: string | null
+          citizenship?: string | null
           city?: string | null
           country?: string | null
           create_accounts?: boolean | null
           daily_summary?: boolean | null
+          date_of_birth?: string | null
           disability_status?: string | null
           earliest_start?: string | null
           education_level?: string | null
@@ -664,6 +666,7 @@ export type Database = {
           full_name?: string | null
           gender?: string | null
           github_url?: string | null
+          hispanic_latino?: string | null
           home_city?: string | null
           home_lat?: number | null
           home_lon?: number | null
@@ -671,9 +674,6 @@ export type Database = {
           id?: number
           linkedin_url?: string | null
           needs_sponsorship?: string | null
-          citizenship?: string | null
-          date_of_birth?: string | null
-          hispanic_latino?: string | null
           over_18?: string | null
           phone?: string | null
           portfolio_url?: string | null
@@ -701,10 +701,12 @@ export type Database = {
           autopilot?: boolean | null
           availability?: string | null
           can_background_check?: string | null
+          citizenship?: string | null
           city?: string | null
           country?: string | null
           create_accounts?: boolean | null
           daily_summary?: boolean | null
+          date_of_birth?: string | null
           disability_status?: string | null
           earliest_start?: string | null
           education_level?: string | null
@@ -713,6 +715,7 @@ export type Database = {
           full_name?: string | null
           gender?: string | null
           github_url?: string | null
+          hispanic_latino?: string | null
           home_city?: string | null
           home_lat?: number | null
           home_lon?: number | null
@@ -720,9 +723,6 @@ export type Database = {
           id?: number
           linkedin_url?: string | null
           needs_sponsorship?: string | null
-          citizenship?: string | null
-          date_of_birth?: string | null
-          hispanic_latino?: string | null
           over_18?: string | null
           phone?: string | null
           portfolio_url?: string | null
