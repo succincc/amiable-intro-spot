@@ -12,6 +12,7 @@ import {
 import { addCompanyByUrl } from "@/lib/engine.functions";
 import { LargeEmployerImport } from "@/components/mission-control/large-employer-import";
 import { GmailSettings } from "@/components/mission-control/gmail-settings";
+import { InterviewCalendar } from "@/components/mission-control/interview-calendar";
 import { extractResumeText, looksScanned } from "@/lib/resume-parse";
 import bridgeCode from "../../../gmail-bridge/Code.gs?raw";
 
@@ -160,7 +161,7 @@ function ProfileBlock({ initial }: { initial: Profile }) {
       </div>
       <SaveLine onSave={async () => {
         // Fields owned by other sections are left out so a stale copy here never overwrites them.
-        const { id: _id, updated_at: _u, resume_text: _r, home_city: _hc, home_lat: _hl, home_lon: _ho, home_state: _hs, auto_reply: _ar, autopilot: _ap, follow_up: _fu, daily_summary: _ds, availability: _av,
+        const { id: _id, updated_at: _u, resume_text: _r, home_city: _hc, home_lat: _hl, home_lon: _ho, home_state: _hs, auto_reply: _ar, autopilot: _ap, follow_up: _fu, daily_summary: _ds, availability: _av, availability_slots: _as, interview_holds: _ih,
           resume_file_path: _fp, resume_file_name: _fn, resume_word_count: _wc, resume_error: _re, ...rest } = p;
         const { error } = await supabase.from("profile").update(rest).eq("id", 1);
         if (error) throw error;
@@ -368,9 +369,16 @@ function SearchBlock({ initial, profile }: { initial: SearchConfig; profile: Pro
       <div className="space-y-1">
         <label className="flex items-center gap-2 text-xs">
           <input type="checkbox" checked={s.same_state_only ?? false} onChange={(e) => set("same_state_only", e.target.checked)} />
-          only jobs in {homeState}
+          same state only{homeState ? ` (${homeState})` : ""}
         </label>
-        <p className="text-xs text-muted-foreground">a radius is a circle and crosses state lines — 50 miles from Princeton reaches New York and Pennsylvania. This keeps it to one state.</p>
+        <p className="text-xs text-muted-foreground">a radius is a circle and crosses state lines. this keeps on-site jobs to your home state, whichever state your home city is in. remote jobs are not held to it.</p>
+      </div>
+      <div className="space-y-1">
+        <label className="flex items-center gap-2 text-xs">
+          <input type="checkbox" checked={s.same_country_only ?? true} onChange={(e) => set("same_country_only", e.target.checked)} />
+          only jobs in my country
+        </label>
+        <p className="text-xs text-muted-foreground">on unless you turn it off. remote jobs are held to it too: a remote role advertised abroad usually cannot be worked from here. built for the united states.</p>
       </div>
       <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={s.include_remote ?? true} onChange={(e) => set("include_remote", e.target.checked)} /> always include remote jobs</label>
       <div className="space-y-1">
@@ -781,7 +789,16 @@ function EmailBlock({ initial, open }: { initial: Profile; open: boolean }) {
       </div>
 
       <div className="space-y-1">
-        <label className="block text-xs" htmlFor="availability">when i can interview</label>
+        <div className="text-xs">interview calendar</div>
+        <InterviewCalendar
+          initialSlots={(initial as Profile & { availability_slots?: unknown }).availability_slots}
+          initialHolds={(initial as Profile & { interview_holds?: unknown }).interview_holds}
+          zone={String((initial as Profile & { timezone?: string | null }).timezone ?? "") || "America/New_York"}
+        />
+      </div>
+
+      <div className="space-y-1">
+        <label className="block text-xs" htmlFor="availability">when i can interview, in words</label>
         <input
           id="availability"
           className="w-full border border-border bg-background px-2 py-1 text-xs"

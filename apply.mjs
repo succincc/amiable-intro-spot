@@ -313,6 +313,28 @@ function livesInListedState(label, p) {
   return listed.length ? (listed.includes(code) ? "Yes" : "No") : null;
 }
 
+/**
+ * The day the owner could start, from what the profile says: a date as a
+ * date, "two weeks" as two weeks from today — the day of the application —
+ * "immediately" as a few days on, and two weeks out where it says nothing
+ * that can be read. Never a day that has passed.
+ */
+function startDateFrom(text, now = new Date()) {
+  const DAY = 86_400_000;
+  const t = String(text ?? "").trim().toLowerCase();
+  const NUM = { a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, eight: 8 };
+  const rel = t.match(/\b(\d{1,2}|a|an|one|two|three|four|five|six|eight)\s*-?\s*(day|week|month)s?\b/);
+  if (rel) {
+    const n = Number(rel[1]) || NUM[rel[1]] || 2;
+    const per = rel[2] === "day" ? 1 : rel[2] === "week" ? 7 : 30;
+    return new Date(now.getTime() + Math.min(n * per, 180) * DAY);
+  }
+  if (/\b(immediate(ly)?|asap|right away|now|any ?time)\b/.test(t)) return new Date(now.getTime() + 3 * DAY);
+  const d = t ? new Date(text) : null;
+  if (d && !Number.isNaN(d.getTime()) && d.getTime() > now.getTime()) return d;
+  return new Date(now.getTime() + 14 * DAY);
+}
+
 /** "Yes" or "No" to being eighteen, from a date of birth on file; null without one. */
 function ageSays(p) {
   const m = String(p?.date_of_birth ?? "").trim().match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$|^(\d{4})-(\d{1,2})-(\d{1,2})$/);
@@ -689,8 +711,7 @@ function fieldValue(label, p) {
   ) {
     // A blank start date blocks the whole application, and two weeks out is
     // what the notice-period rule already answers in words.
-    const d = p.earliest_start ? new Date(p.earliest_start) : new Date(Date.now() + 14 * 86_400_000);
-    return datePart(label, Number.isNaN(d.getTime()) ? new Date(Date.now() + 14 * 86_400_000) : d);
+    return datePart(label, startDateFrom(p.earliest_start));
   }
   // Zscaler asks "How did you learn about this job?" — same question, and
   // "hear" was the only verb this knew.
@@ -10321,6 +10342,33 @@ async function applyToJobOnce(context, job, profile, answers) {
       )
       .catch(() => []);
     console.log(`    submitted but unconfirmed; page says: ${JSON.stringify(said)}`);
+    // And what it objects to, field by field: the message and the label of
+    // the box it sits beside. The form's own wording about a field, never
+    // what was typed into it.
+    {
+      const objections = await form
+        .evaluate(() => {
+          const vis = (e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+          const out = [];
+          for (const e of Array.from(document.querySelectorAll('[class*="error" i], [class*="invalid" i], [role=alert], [aria-invalid="true"]')).filter(vis)) {
+            let t = (e.innerText || "").replace(/\s+/g, " ").trim();
+            let label = "";
+            const box = e.matches("input, select, textarea") ? e : e.querySelector("input, select, textarea");
+            const near = box ?? e;
+            const row = near.closest("tr, .rcmFormElement, .formRow, [class*=field i], li, div");
+            const l = (box?.id && document.querySelector(`label[for="${CSS.escape(box.id)}"]`)) || row?.querySelector("label");
+            if (l) label = (l.innerText || "").replace(/\s+/g, " ").trim().slice(0, 60);
+            if (e.matches("input, select, textarea")) t = "marked invalid";
+            if (!t || t.length > 140) continue;
+            const line = label && !t.includes(label) ? `${label}: ${t}` : t;
+            if (!out.includes(line)) out.push(line);
+            if (out.length >= 14) break;
+          }
+          return out;
+        })
+        .catch(() => []);
+      if (objections.length) console.log(`    the form objects to: ${JSON.stringify(objections)}`);
+    }
 
     // Ask the form why it did not go.
     //
@@ -10434,6 +10482,65 @@ async function saveGeneratedAnswer(question, answer, fieldType) {
       generated: true,
     }]),
   }).catch(() => {});
+}
+
+/**
+ * The Answers page, gone through before each round.
+ *
+ * Questions pile up there from every form that asked something nothing could
+ * answer at the time. Since then the profile has gained facts and the rules
+ * have learned wordings, so many of those questions now answer themselves —
+ * and some were never questions at all: a passcode box, a name suffix, a
+ * label with the page's own plumbing in it.
+ *
+ * So each waiting question is put to the same rules an application would
+ * use. One that now has an answer is given it and filed as answered, where
+ * the owner can still change it. One that should never have been asked is
+ * removed. Anything else stays for the owner. Where the form offered its own
+ * list of options, the answer has to be one of them or it is left alone.
+ */
+async function refreshAnswers(profile) {
+  const rows = await db("answers?confirmed=eq.false&select=id,question,options&limit=500").catch(() => null);
+  if (!rows?.length) return;
+  const flat = (t) => String(t ?? "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const NEVER = /social security|\bssn\b|date of birth|birth ?date|birthday|\bdob\b|^pass(code|word)\b|^(prefix|suffix|title|salutation)\b/i;
+  let answered = 0;
+  let removed = 0;
+  for (const row of rows) {
+    const q = String(row.question ?? "").trim();
+    try {
+      if (!q || NEVER.test(q)) {
+        await db(`answers?id=eq.${row.id}`, { method: "DELETE", headers: { Prefer: "return=minimal" } });
+        removed++;
+        continue;
+      }
+      // The form's own words, without the plumbing some portals put in a
+      // label ("no selection 155:_input").
+      const plain = q.replace(/\bno selection\b/gi, " ").replace(/\b\d+:_?[a-z]*input\b/gi, " ").replace(/\s+/g, " ").trim();
+      let want = answerQuestion(plain, profile) ?? livesInListedState(plain, profile);
+      if (want === null || want === undefined || String(want).trim() === "") continue;
+      want = String(want).trim();
+      const options = Array.isArray(row.options) ? row.options.map(String).filter(Boolean) : [];
+      if (options.length) {
+        const w = flat(want);
+        const hit =
+          options.find((o) => flat(o) === w) ??
+          options.find((o) => flat(o).startsWith(`${w} `) || w.startsWith(`${flat(o)} `)) ??
+          (/^none\b/.test(w) ? options.find((o) => /^none\b/i.test(o.trim())) : undefined);
+        if (!hit) continue;
+        want = hit;
+      }
+      await db(`answers?id=eq.${row.id}`, {
+        method: "PATCH",
+        headers: { Prefer: "return=minimal" },
+        body: JSON.stringify({ answer: want, confirmed: true }),
+      });
+      answered++;
+    } catch {
+      /* one row must not stop the rest */
+    }
+  }
+  console.log(`Answers page: ${rows.length} question(s) were waiting; ${answered} answered from the profile and the rules, ${removed} removed as never askable, ${rows.length - answered - removed} left for the owner.`);
 }
 
 async function recordUnknowns(all) {
@@ -10611,6 +10718,8 @@ const main = async () => {
   p.first_name = names[0] || "";
   p.last_name = names.length > 1 ? names[names.length - 1] : "";
 
+  // Once a round, in the lane that always runs.
+  if (!process.env.ATS_ONLY || process.env.ATS_ONLY === "workday") await refreshAnswers(p).catch(() => {});
   const answers = await db("answers?confirmed=eq.true&select=q_key,answer") ?? [];
 
   // Adopt the row the panel opened when it dispatched this run.

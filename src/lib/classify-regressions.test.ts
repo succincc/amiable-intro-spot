@@ -190,4 +190,16 @@ describe("regressions from the first real Gmail sync", () => {
       ),
     ).toBe("job-1");
   });
+
+  // A receipt that talks about interviews, with no line break to blame.
+  it("files 'we received your application ... a recruiter may schedule an interview' as a receipt", () => {
+    const body =
+      "Hi, thank you for applying to the Store Manager role. We have received your application and our team is reviewing it. If your experience matches, a recruiter will contact you to schedule an interview. You can check your status any time.";
+    expect(classifyEmail("Thank you for applying", body).category).toBe("confirmation");
+  });
+  it("but a thank-you that goes on to ask for a time is an interview", () => {
+    const body =
+      "Thank you for applying to the Store Manager role. We would like to schedule a phone interview with you. Are you available Tuesday or Wednesday afternoon?";
+    expect(classifyEmail("Next steps with us", body).category).toBe("interview");
+  });
 });

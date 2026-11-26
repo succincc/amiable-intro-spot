@@ -201,3 +201,36 @@ export async function timesToOffer(
   // Two or more, or it is not a choice.
   return slots.length >= 2 ? sayTimes(slots, zone) : null;
 }
+
+
+/**
+ * Times to offer one employer out of the windows the owner marked on the
+ * calendar in settings, as one sentence fragment — and those times held, so
+ * that nobody else is offered them. Null when no window is marked or none is
+ * open; the caller then falls back to the hours written in words.
+ *
+ * The Google calendar is consulted when it can be read and ignored when it
+ * cannot: the marked windows are the owner's word either way.
+ */
+export async function timesFromWindows(
+  supabase: any,
+  profile: { availability_slots?: unknown; interview_holds?: unknown; timezone?: string | null },
+  ask: { text: string; ref: string },
+  now = new Date(),
+): Promise<string | null> {
+  const { cleanSlots, cleanHolds, kindOf, offerable, withOffers } = await import("@/lib/availability");
+  const slots = cleanSlots(profile.availability_slots);
+  if (!slots.length) return null;
+  const zone = String(profile.timezone ?? "").trim() || "America/New_York";
+  // Read fresh: another reply in this same pass may have just held some.
+  const { data: fresh } = await supabase.from("profile").select("interview_holds").limit(1).maybeSingle();
+  const holds = cleanHolds(fresh?.interview_holds ?? profile.interview_holds, now).filter((h) => h.ref !== ask.ref || h.state === "booked");
+  const busy = (await busyBetween(supabase, now, new Date(now.getTime() + 45 * 24 * 60 * 60_000))) ?? [];
+  const offers = offerable(slots, busy, holds, { now, zone, kind: kindOf(ask.text) });
+  if (!offers.length) return null;
+  const { error } = await supabase.from("profile").update({ interview_holds: withOffers(holds, ask.ref, offers, now) }).eq("id", 1);
+  // Not held is not offered: a time that could be given out twice is worse
+  // than naming none.
+  if (error) return null;
+  return sayTimes(offers.map((o) => o.start), zone);
+}

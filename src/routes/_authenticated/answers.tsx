@@ -50,7 +50,7 @@ function Answers() {
 
   return (
     <div className="space-y-3">
-      <p className="text-xs text-muted-foreground">the agent answers from this list first. anything it could not answer lands here — fill it once and it is used forever.</p>
+      <p className="text-xs text-muted-foreground">the agent answers from this list first. anything it could not answer lands here — fill it once and it is used forever. before every round it goes back through what is waiting: whatever your profile and its own rules can now answer is answered and moved to saved (where you can change it), and anything that was never a real question is removed. what is left here is yours.</p>
       <div className="flex gap-1 text-xs">
         <button onClick={() => setTab("need")} className={`border px-2 py-1 ${tab === "need" ? "border-primary text-primary" : "border-border text-muted-foreground"}`}>needs answer {needCount}</button>
         <button onClick={() => setTab("saved")} className={`border px-2 py-1 ${tab === "saved" ? "border-primary text-primary" : "border-border text-muted-foreground"}`}>saved</button>

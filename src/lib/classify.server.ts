@@ -267,9 +267,23 @@ export function classifyEmail(subject?: string | null, body?: string | null): Cl
   // hiring is only ever said in the body.
   const gateOpen = (rule: { requires?: RegExp }) => !rule.requires || rule.requires.test(text);
 
+  // A receipt that mentions interviews is still a receipt. "We have received
+  // your application. If your background is a match, a recruiter will reach
+  // out to schedule an interview" was filed under interviews, and an inbox
+  // that says there is an interview when there is not is worse than one that
+  // says nothing. Mail that acknowledges an application is an interview
+  // request only if it also asks the reader for something: a time, their
+  // availability, a booking.
+  const isReceipt =
+    /\b(?:we(?:'ve| have)? (?:received|got) your (?:application|resume|submission)|thank(?:s| you) for (?:applying|your application|your interest|submitting)|your application (?:has been |was |is )?(?:received|submitted|complete)|application (?:received|confirmation|submitted)|successfully (?:applied|submitted))\b/i.test(text);
+  const asksForATime =
+    /\b(?:(?:would|we'd|i'd|i would) like to (?:invite|schedule|set up|arrange|speak|talk|meet|chat)|are you (?:available|free)|(?:share|send|provide|let (?:me|us) know) (?:me |us )?your availability|what (?:times?|days?) (?:work|are you)|please (?:select|choose|pick|book|schedule) (?:a |an |your )?(?:time|slot|interview)|calendly\.com|book (?:a |some )?time|pick a time)\b/i.test(text);
+  const notAnInterview = isReceipt && !asksForATime;
+  const allowed = (rule: { cat: Category }) => !(rule.cat === "interview" && notAnInterview);
+
   // 1. A decisive rule in the subject line settles it.
   for (const rule of RULES) {
-    if (rule.decisive && gateOpen(rule) && rule.test.test(against(rule, subj, literalSubj))) {
+    if (rule.decisive && allowed(rule) && gateOpen(rule) && rule.test.test(against(rule, subj, literalSubj))) {
       return { category: rule.cat, confidence: "high", why: `${rule.why} (subject)` };
     }
   }
@@ -277,16 +291,17 @@ export function classifyEmail(subject?: string | null, body?: string | null): Cl
   //    any weak rule so that a rejection body always beats a receipt-shaped
   //    subject line.
   for (const rule of RULES) {
-    if (rule.decisive && gateOpen(rule) && rule.test.test(against(rule, text, literal))) {
+    if (rule.decisive && allowed(rule) && gateOpen(rule) && rule.test.test(against(rule, text, literal))) {
       return { category: rule.cat, confidence: "high", why: rule.why };
     }
   }
   // 3. Only now the weak rules.
   for (const rule of RULES) {
-    if (gateOpen(rule) && rule.test.test(against(rule, text, literal))) {
+    if (allowed(rule) && gateOpen(rule) && rule.test.test(against(rule, text, literal))) {
       return { category: rule.cat, confidence: "high", why: rule.why };
     }
   }
+  if (notAnInterview) return { category: "confirmation", confidence: "high", why: "acknowledges an application and asks for nothing" };
   return { category: "other", confidence: "low", why: "no rule matched" };
 }
 

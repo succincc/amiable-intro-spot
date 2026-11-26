@@ -208,7 +208,24 @@ export async function ingestMessages(supabase: any, messages: InboundMessage[]) 
         email: d.m,
         category: d.category,
         job: d.job,
-        profile: offered && d.category === "interview" ? { ...(profile ?? {}), availability: offered } : (profile ?? {}),
+        profile: await (async () => {
+          if (d.category !== "interview") return profile ?? {};
+          // The owner's marked windows first, held per employer so no two
+          // are offered the same hour; then the general free times; then
+          // whatever the owner wrote in words.
+          let mine: string | null = null;
+          try {
+            const { timesFromWindows } = await import("@/lib/calendar.server");
+            mine = await timesFromWindows(supabase, profile ?? {}, {
+              text: `${d.m.subject ?? ""}\n${d.m.body ?? ""}`,
+              ref: String(d.job?.id ?? d.m.message_id ?? ""),
+            });
+          } catch {
+            mine = null;
+          }
+          const say = mine ?? offered;
+          return say ? { ...(profile ?? {}), availability: say } : (profile ?? {});
+        })(),
         apiKey,
       }).catch(() => null);
       if (!draft) {

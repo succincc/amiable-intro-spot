@@ -753,7 +753,7 @@ export async function runDiscover(supabase: any, opts: { since?: string | undefi
             // Germany cannot be worked from New Jersey, and this branch used
             // to return before any country check ran at all — which is how
             // German postings survived a 25-mile search.
-            if (coarse.basis === "non-us") {
+            if (coarse.basis === "non-us" && cfg.same_country_only !== false) {
               row.skip_reason = `outside the US: ${row.location}`;
               stats.filtered++;
               bump("outside the US");
@@ -781,7 +781,7 @@ export async function runDiscover(supabase: any, opts: { since?: string | undefi
             }
           }
 
-          if (coarse.basis !== "unknown" && coarse.miles > radius + STATE_SLACK_MI) {
+          if (coarse.basis !== "unknown" && coarse.miles > radius + STATE_SLACK_MI && !(coarse.basis === "non-us" && cfg.same_country_only === false)) {
             row.skip_reason =
               coarse.basis === "non-us"
                 ? `outside the US: ${row.location}`
@@ -880,7 +880,7 @@ export async function runDiscover(supabase: any, opts: { since?: string | undefi
             // A job in Germany has no state at all, so a check that requires
             // one to be set lets every foreign posting through. That is why
             // German listings survived "only jobs in NJ".
-            if (coarse.basis === "non-us") {
+            if (coarse.basis === "non-us" && cfg.same_country_only !== false) {
               tooFarOffline.push({ id: job.id, why: `outside the US: ${job.location}` });
               continue;
             }

@@ -104,6 +104,24 @@ async function tick() {
           /* the employers named in alerts are a bonus, never a reason to fail */
         }
       }
+      // Mail filed under interviews by an older reading is read again by
+      // the current one, so a receipt that was called an interview stops
+      // being one. Only ever from "interview" to something lesser.
+      try {
+        const { classifyEmail } = await import("@/lib/classify.server");
+        const { data: filed } = await supabase
+          .from("emails")
+          .select("message_id, subject, body")
+          .eq("category", "interview")
+          .order("received_at", { ascending: false })
+          .limit(60);
+        for (const e of filed ?? []) {
+          const now = classifyEmail(e.subject, e.body).category;
+          if (now !== "interview") await supabase.from("emails").update({ category: now }).eq("message_id", e.message_id);
+        }
+      } catch {
+        /* tidying the labels never stops the mail */
+      }
       const replies = await sendApprovedReplies(supabase);
       counts.sent = replies.sent;
       counts.failed = replies.failed;
