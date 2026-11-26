@@ -323,6 +323,32 @@ function readAddresses(urls) {
   return { feeds: [...feeds.values()], others, hosts };
 }
 
+/**
+ * Other places an employer's careers pages usually are, given one address
+ * for them that turned out to be dead: careers. and jobs. under its own
+ * name, and /careers and /jobs on its main site.
+ */
+export function otherAddresses(careersUrl) {
+  let host = "";
+  try {
+    host = new URL(careersUrl).hostname.toLowerCase();
+  } catch {
+    return [];
+  }
+  const base = host.replace(/^(www|careers?|jobs?|work|join|apply|hire|talent)\./, "");
+  if (!base.includes(".")) return [];
+  const all = [
+    `https://www.${base}/careers`,
+    `https://careers.${base}/`,
+    `https://jobs.${base}/`,
+    `https://www.${base}/jobs`,
+    `https://www.${base}/company/careers`,
+    `https://www.${base}/about/careers`,
+  ];
+  const same = (u) => u.replace(/\/+$/, "").toLowerCase();
+  return all.filter((u) => same(u) !== same(careersUrl));
+}
+
 async function look(browser, name, careersUrl) {
   const context = await browser.newContext({
     userAgent: UA,
@@ -597,6 +623,30 @@ if (process.env.RESOLVE_IMPORT_ONLY !== "1") {
       } catch {
         seen = null;
       }
+      // A careers address that is dead — not found, or no such site — is a
+      // wrong guess at the address, not an employer without jobs. The usual
+      // places are tried before giving up: careers and jobs under the
+      // employer's own name, and the pages of those names on its main site.
+      if (seen && !seen.feeds.length && !seen.others.size && /HTTP 404|HTTP 410|NAME_NOT_RESOLVED|CERT_|SSL_/.test(String(seen.blocked ?? ""))) {
+        for (const other of otherAddresses(c.careers_url)) {
+          if (Date.now() - started > BUDGET_MS) break;
+          let again = null;
+          try {
+            again = await Promise.race([
+              look(browser, c.name, other),
+              new Promise((r) => setTimeout(() => r(null), PER_SITE_MS)),
+            ]);
+          } catch {
+            again = null;
+          }
+          if (again && (again.feeds.length || again.others.size)) {
+            tally.elsewhere = (tally.elsewhere ?? 0) + 1;
+            seen = again;
+            c.careers_url = other;
+            break;
+          }
+        }
+      }
       if (!seen) {
         tally.nothing++;
         lines.push(`  ?  ${c.name} — took too long`);
@@ -664,7 +714,7 @@ if (process.env.RESOLVE_IMPORT_ONLY !== "1") {
         lines.push(`  -  ${c.name} — runs on ${top}${at ? ` (${at})` : ""}`);
         await save(c, {
           status: "failed", resolved_url: seen.final,
-          note: `browser: runs on ${top}${at ? ` at ${at}` : ""}, which the applier does not handle yet`,
+          note: `browser: runs on ${top}${at ? ` at ${at}` : ""}${/^(oracle|successfactors|icims)$/.test(top) ? ", read by its own job" : ", which the applier does not handle yet"}`,
         });
         continue;
       }
