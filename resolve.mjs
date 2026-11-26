@@ -451,7 +451,7 @@ export function census(rows) {
     else if (/refused the visit/i.test(note)) add(out.not_found, `refused (${(note.match(/HTTP (\d{3})/) ?? note.match(/(ERR_[A-Z0-9_]+)/) ?? note.match(/(timeout)/i) ?? [])[1] ?? "other"})`);
     else if (/no application system recognised/i.test(note)) add(out.not_found, "site read, no system recognised");
     else if (/did not finish loading/i.test(note)) add(out.not_found, "site too slow");
-    else if (/returned nothing/i.test(note)) add(out.not_found, "board seen, its list empty");
+    else if (/returned nothing/i.test(note)) add(out.not_found, `board seen, its list empty${(note.match(/its list answered: (HTTP \d{3}|answered)/) ?? [])[1] ? ` (${(note.match(/its list answered: (HTTP \d{3}|answered)/) ?? [])[1]})` : ""}`);
     else if (/does not look like/i.test(note)) add(out.not_found, "board seen, not this employer's");
     else add(out.not_found, note ? "older note" : "no note");
   }
@@ -848,7 +848,7 @@ if (process.env.RESOLVE_IMPORT_ONLY !== "1") {
         const also = seen.others.size ? ` Also reaches ${[...seen.others.keys()].slice(0, 3).join(", ")}.` : "";
         await save(c, {
           status: "failed", resolved_url: seen.final,
-          note: `browser: saw ${f.ats} ${f.token}${f.site ? "/" + f.site : ""}, but ${why}.${also}`.slice(0, 380),
+          note: `browser: saw ${f.ats} ${f.token}${f.site ? "/" + f.site : ""}, but ${why} (its list answered: ${said}).${also}`.slice(0, 380),
         });
         if (!seen.others.size) continue;
         const top = [...seen.others.entries()].sort((x, y) => y[1] - x[1])[0][0];
