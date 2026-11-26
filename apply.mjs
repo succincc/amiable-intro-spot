@@ -7162,7 +7162,26 @@ async function revealForm(page) {
       // Said, because "it pressed something and ended up somewhere else" is
       // not a thing a log should leave to be guessed at.
       console.log(`    pressed "${pick.text.slice(0, 30)}" to reach the application`);
-      await pick.control.click({ timeout: 5000 }).catch(() => {});
+      // Where the button leads, if it is a link, and any new tab it opens:
+      // a careers site's "Apply Now" often opens the application in a tab
+      // of its own, and four presses on the first tab found nothing.
+      const href = await pick.control
+        .evaluate((n) => { const a = n.closest("a[href]"); try { return a ? new URL(a.getAttribute("href"), location.href).href : ""; } catch { return ""; } })
+        .catch(() => "");
+      const before = page.url();
+      const [tab] = await Promise.all([
+        page.context().waitForEvent("page", { timeout: 5000 }).catch(() => null),
+        pick.control.click({ timeout: 5000 }).catch(() => {}),
+      ]);
+      if (tab) {
+        await tab.waitForLoadState("domcontentloaded", { timeout: 20000 }).catch(() => {});
+        console.log("    that opened the application in a new tab; carrying on there");
+        page = tab;
+      } else if (attempt >= 1 && /^https?:/i.test(href) && page.url() === before && href.split("#")[0] !== before.split("#")[0]) {
+        // Pressed twice and nothing moved: go where the link points.
+        console.log("    the press did not move the page; going to the link's own address");
+        await page.goto(href, { waitUntil: "domcontentloaded", timeout: 45000 }).catch(() => {});
+      }
       clicked = true;
       break;
     }
