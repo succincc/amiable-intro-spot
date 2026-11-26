@@ -3654,7 +3654,11 @@ async function oracleRepair(page, form, profile, job, onlyReport = false, lookup
                     keep.setAttribute("data-applypilot-keep", "1");
                     return { pressed: words(keep).slice(0, 24), names: all.map((b) => words(b).slice(0, 24)).filter(Boolean).slice(0, 12) };
                   }
-                  if (all.length >= 8) break;
+                  // Far enough out to be the whole page, and still no button of
+                  // the entry's own. (Eight was the limit here, and an entry
+                  // with both its dates chosen has ten buttons before the one
+                  // that keeps it.)
+                  if (all.length >= 40) break;
                 }
                 return { pressed: null, names: all.map((b) => words(b).slice(0, 24)).filter(Boolean).slice(0, 12) };
               })
