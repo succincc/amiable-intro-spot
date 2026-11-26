@@ -52,7 +52,18 @@ const truthy = (name, got) => check(name, Boolean(got), true);
   const tt = boards.readTeamtailor("<rss><channel><item><title><![CDATA[Shift Lead]]></title><link>https://acme.teamtailor.com/jobs/1-shift-lead</link><pubDate>Fri, 20 Nov 2026 10:00:00 +0000</pubDate><description><![CDATA[<p>Lead a shift.</p>]]></description></item></channel></rss>");
   check("boards: Teamtailor's feed", [tt[0].title, tt[0].url, tt[0].posted_at, tt[0].description], ["Shift Lead", "https://acme.teamtailor.com/jobs/1-shift-lead", "2026-11-20T10:00:00.000Z", "Lead a shift."]);
   check("boards: a posting's words from its JobPosting data", boards.describeFrom('<html><script type="application/ld+json">{"@type":"JobPosting","description":"<p>Count the till.</p>","datePosted":"2026-11-21"}</script><body>x</body></html>'), { description: "Count the till.", posted_at: "2026-11-21T00:00:00.000Z" });
-  check("boards: and its place, where the posting states one", boards.describeFrom('<script type="application/ld+json">{"@type":"JobPosting","description":"x","jobLocation":{"@type":"Place","address":{"addressLocality":"Exampleton","addressRegion":"NJ"}}}</script>').location, "Exampleton, NJ");
+check("boards: an Eightfold list, with the country taken off the place", boards.readEightfold({ count: 3, positions: [
+    { id: 123, name: "Store Manager", location: "Exampleton, NJ, US", t_create: 1795000000, canonicalPositionUrl: "https://acme.eightfold.ai/careers/job/123" },
+    { id: 124, name: "Office Lead", location: "Bengaluru, India", t_create: 1795000000 },
+    { id: 125, name: "Analyst", location: "Albany, New York", work_location_option: "remote" },
+  ] }, "acme.eightfold.ai").map((r) => [r.id, r.url, r.location, r.country, r.remote, r.posted_at?.slice(0, 4)]), [
+    ["123", "https://acme.eightfold.ai/careers/job/123", "Exampleton, NJ", "US", false, "2026"],
+    ["124", "https://acme.eightfold.ai/careers/job/124", "Bengaluru, India", "India", false, "2026"],
+    ["125", "https://acme.eightfold.ai/careers/job/125", "Albany, New York", null, true, null],
+  ]);
+  check("boards: the domain an Eightfold page asks its list by", [boards.eightfoldDomain('<script>window.x = {"domain": "acme.com", "y": 1}</script>'), boards.eightfoldDomain('<a href="/careers?domain=acme.co.uk&x=1">'), boards.eightfoldDomain("<p>none</p>")], ["acme.com", "acme.co.uk", null]);
+  check("boards: an Eightfold host is known", boards.boardOf("acme.eightfold.ai")?.ats, "eightfold");
+    check("boards: and its place, where the posting states one", boards.describeFrom('<script type="application/ld+json">{"@type":"JobPosting","description":"x","jobLocation":{"@type":"Place","address":{"addressLocality":"Exampleton","addressRegion":"NJ"}}}</script>').location, "Exampleton, NJ");
   check("boards: a wanted title needs half the words of one the owner searches", [boards.wanted("Assistant Store Manager", ["store manager"], []), boards.wanted("Software Engineer", ["store manager"], []), boards.wanted("Store Manager Intern", ["store manager"], ["intern"])], [true, false, false]);
 }
 

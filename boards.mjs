@@ -16,7 +16,7 @@
 //
 // Free: public addresses, and a runner in a public repository.
 
-import { guardLogs, hideNames, shape } from "./quiet.mjs";
+import { guardLogs, hideNames, shape, STATES } from "./quiet.mjs";
 // Nothing this prints names an employer, a posting or a place: see quiet.mjs.
 guardLogs();
 
@@ -35,6 +35,7 @@ export const SYSTEMS = {
   recruitee: /^([a-z0-9-]+)\.recruitee\.com$/i,
   pinpoint: /^([a-z0-9-]+)\.pinpointhq\.com$/i,
   teamtailor: /^([a-z0-9-]+)\.teamtailor\.com$/i,
+  eightfold: /^([a-z0-9-]+)\.eightfold\.ai$/i,
 };
 
 /** A board's host, as the system it is and the employer's name on it; null for anything else. */
@@ -159,6 +160,55 @@ export function readJazz(html, host) {
   return out;
 }
 
+const US_STATE_NAMES = new Set(Object.values(STATES).map((n) => n.toLowerCase()));
+
+/**
+ * Eightfold: /api/apply/v2/jobs?domain=… → { positions: [{ id, name, location,
+ * locations, t_create, canonicalPositionUrl, work_location_option }], count }.
+ * The place is written "Town, ST, US" or "Town, Country"; the country is
+ * taken off the end so that only postings in this one are kept.
+ */
+export function readEightfold(json, host) {
+  const out = [];
+  for (const r of json?.positions ?? []) {
+    const id = r?.id ?? r?.ats_job_id;
+    const title = String(r?.name ?? r?.posting_name ?? "").trim();
+    if (!id || !title) continue;
+    const raw = String(r.location ?? (Array.isArray(r.locations) ? r.locations[0] : "") ?? "").trim();
+    const parts = raw.split(",").map((x) => x.trim()).filter(Boolean);
+    const last = parts.at(-1) ?? "";
+    let country = null;
+    if (/^(US|USA|United States( of America)?)$/i.test(last)) {
+      country = "US";
+      parts.pop();
+    } else if (parts.length >= 2 && !/^[A-Z]{2}$/.test(last) && !US_STATE_NAMES.has(last.toLowerCase()) && !/remote|hybrid|multiple|virtual/i.test(last)) {
+      country = last;
+    }
+    const made = Number(r.t_create ?? r.t_update ?? 0);
+    out.push({
+      id: String(id),
+      url: typeof r.canonicalPositionUrl === "string" && r.canonicalPositionUrl.startsWith("http") ? r.canonicalPositionUrl : `https://${host}/careers/job/${id}`,
+      title,
+      location: parts.join(", ") || null,
+      country,
+      remote: /remote/i.test(`${r.work_location_option ?? ""} ${raw}`),
+      description: r.job_description ? plain(r.job_description).slice(0, 12000) : "",
+      posted_at: made > 0 ? new Date(made < 1e11 ? made * 1000 : made).toISOString() : null,
+    });
+  }
+  return out;
+}
+
+/** The employer's own domain as an Eightfold careers page states it: the key its list is asked for by. */
+export function eightfoldDomain(html) {
+  const t = String(html ?? "");
+  return (
+    (t.match(/["']domain["']\s*:\s*["']([a-z0-9-]+(?:\.[a-z0-9-]+)+)["']/i) ?? [])[1] ??
+    (t.match(/[?&]domain=([a-z0-9-]+(?:\.[a-z0-9-]+)+)/i) ?? [])[1] ??
+    null
+  );
+}
+
 /** Teamtailor: /jobs.rss → <item><title/><link/><pubDate/><description/> and its own location tags. */
 export function readTeamtailor(xml) {
   const out = [];
@@ -266,10 +316,16 @@ if (process.env.BOARDS_IMPORT_ONLY !== "1") {
       (() => { try { return new URL(r.resolved_url).hostname; } catch { return null; } })(),
       (() => { try { return new URL(r.careers_url).hostname; } catch { return null; } })(),
     ];
+    let placed = false;
     for (const h of hosts) {
       const b = boardOf(h);
+      if (b) placed = true;
       if (b && !boards.has(b.host)) { boards.set(b.host, { ...b, name: r.name }); break; }
     }
+    // Eightfold is often served from the employer's own careers address,
+    // and answers there the same way.
+    const own = (String(r.note).match(/runs on eightfold at ([a-z0-9.-]+\.[a-z]{2,})/i) ?? [])[1]?.toLowerCase();
+    if (!placed && own && !boards.has(own)) boards.set(own, { ats: "eightfold", sub: own.split(".").slice(-2, -1)[0] ?? "", host: own, name: r.name });
   }
   const list = [...boards.values()].slice(0, MAX_EMPLOYERS);
   hideNames(list.map((e) => e.name));
@@ -293,6 +349,25 @@ if (process.env.BOARDS_IMPORT_ONLY !== "1") {
       else if (e.ats === "pinpoint") rows = readPinpoint(await (await get(`https://${e.host}/postings.json`, "application/json")).json());
       else if (e.ats === "jazzhr") rows = readJazz(await (await get(`https://${e.host}/apply`, "text/html")).text(), e.host);
       else if (e.ats === "teamtailor") rows = readTeamtailor(await (await get(`https://${e.host}/jobs.rss`, "application/rss+xml, text/xml")).text());
+      else if (e.ats === "eightfold") {
+        // Its list is asked for by the employer's own domain, which the
+        // careers page states. Newest first, a few pages: fresh is all that
+        // is wanted.
+        const page = await (await get(`https://${e.host}/careers`, "text/html")).text();
+        const domain = eightfoldDomain(page) ?? `${e.sub}.com`;
+        e.domain = domain;
+        let total = Infinity;
+        for (let start = 0; start < Math.min(total, 300); ) {
+          const j = await (await get(`https://${e.host}/api/apply/v2/jobs?domain=${encodeURIComponent(domain)}&start=${start}&num=50&sort_by=timestamp`, "application/json")).json();
+          const got = readEightfold(j, e.host);
+          if (start === 0 && !got.length) console.log(`     eightfold answered ${JSON.stringify(shape(j)).slice(0, 300)}; domain ${eightfoldDomain(page) ? "stated on the page" : "guessed"}`);
+          if (!got.length) break;
+          rows.push(...got);
+          total = Number(j?.count ?? rows.length);
+          start += (j?.positions ?? []).length;
+          await pause(400);
+        }
+      }
     } catch (err) {
       tally.unreadable++;
       sys.failed++;
@@ -329,6 +404,9 @@ if (process.env.BOARDS_IMPORT_ONLY !== "1") {
             const o = d?.result?.jobOpening ?? d?.result ?? {};
             description = plain(o.description ?? "").slice(0, 12000);
             posted_at ??= isoOr(o.datePosted);
+          } else if (e.ats === "eightfold") {
+            const d = await (await get(`https://${e.host}/api/apply/v2/jobs/${r.id}?domain=${encodeURIComponent(e.domain ?? "")}`, "application/json")).json();
+            description = plain(d?.job_description ?? "").slice(0, 12000);
           } else {
             const got = describeFrom(await (await get(r.url, "text/html")).text());
             description = got.description;
