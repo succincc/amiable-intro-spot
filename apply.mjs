@@ -1158,6 +1158,27 @@ async function successFactorsAccount(page, profile, job) {
     return (await where()) === "signin" ? "the portal did not accept the saved sign-in" : null;
   };
 
+  // A passcode emailed to prove the address, asked for before the account
+  // counts as made. Null when none is asked for or it was taken; otherwise
+  // what went wrong.
+  const PASSCODE = "#passcode, input[name='passcode']";
+  const passcode = async () => {
+    const box = await shown(PASSCODE);
+    if (!box) return null;
+    console.log("    successfactors: the portal emailed a passcode; reading it from the inbox");
+    const code = await waitForVerificationCode(hostname, job.company, 10, 10_000, Date.now() - 90_000);
+    if (!code) return "the emailed passcode did not arrive in time";
+    await box.fill(String(code), { timeout: 5000 }).catch(() => {});
+    if (!(await pressNamed(/^(continue|verify|submit|next|confirm)$/i, "button, input[type=submit], input[type=button]"))) {
+      await box.press("Enter").catch(() => {});
+    }
+    await page.waitForLoadState("domcontentloaded").catch(() => {});
+    await page.waitForTimeout(5000);
+    const still = await shown(PASSCODE);
+    console.log(`    successfactors: passcode entered — ${still ? "the portal is still asking for it" : "taken"}`);
+    return still ? "the portal did not take the emailed passcode" : null;
+  };
+
   let at = await where();
   if (existing) {
     if (at === "register") {
@@ -1165,17 +1186,24 @@ async function successFactorsAccount(page, profile, job) {
       await page.waitForTimeout(2500);
       at = await where();
     }
-    if (at === "signin") {
-      const why = await signIn();
-      if (!why) {
-        await saveAccount(key, email, password, "active", job.id, "signed in on SuccessFactors");
-        console.log("    successfactors: signed in with the saved account");
-        return { ok: true };
-      }
+    if (at !== "signin") return { ok: false, reason: "the SuccessFactors sign-in page was not where it was expected" };
+    const why = await signIn();
+    if (!why) {
+      const pc = await passcode();
+      if (pc) return { ok: false, reason: "email_verification" };
+      await saveAccount(key, email, password, "active", job.id, "signed in on SuccessFactors");
+      console.log("    successfactors: signed in with the saved account");
+      return { ok: true };
+    }
+    // An account that was registered but never confirmed by its passcode
+    // does not exist as far as the portal is concerned: register again.
+    const unconfirmed = existing.status === "pending_verification" || /^registered on successfactors/i.test(String(existing.note ?? ""));
+    if (!unconfirmed) {
       WALLED_HOSTS.add(key);
       return { ok: false, reason: why };
     }
-    return { ok: false, reason: "the SuccessFactors sign-in page was not where it was expected" };
+    console.log("    successfactors: the saved account was never confirmed; registering again");
+    at = await where();
   }
 
   if (at === "signin") {
@@ -1268,6 +1296,14 @@ async function successFactorsAccount(page, profile, job) {
   }
   await page.waitForLoadState("domcontentloaded").catch(() => {});
   await page.waitForTimeout(6000);
+
+  {
+    const pc = await passcode();
+    if (pc) {
+      await saveAccount(key, email, password, "pending_verification", job.id, `SuccessFactors: ${pc}`);
+      return { ok: false, reason: "email_verification" };
+    }
+  }
 
   if ((await where()) === "register") {
     // What the form objects to, in its own words and by which boxes it
@@ -10240,7 +10276,9 @@ async function recordUnknowns(all) {
   const unknowns = (all ?? []).filter(
     (u) =>
       !/social security|\bssn\b|date of birth|birth ?date|birthday|\bdob\b/i.test(String(u?.question ?? "")) &&
-      !/^(prefix|suffix|title|salutation)\b/i.test(String(u?.question ?? "").trim()),
+      !/^(prefix|suffix|title|salutation)\b/i.test(String(u?.question ?? "").trim()) &&
+      // A passcode or a password is the portal's business, not a question.
+      !/^pass(code|word)\b/i.test(String(u?.question ?? "").trim()),
   );
   // Say what is being handed to the panel.
   //
