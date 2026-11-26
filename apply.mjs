@@ -2403,7 +2403,16 @@ async function oracleChoose(page, form, box, typed, wantRe, what) {
   }
   await box.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
   await box.click({ timeout: 3000 }).catch(() => {});
-  await box.fill("", { timeout: 3000 }).catch(() => {});
+  // Emptied only if it holds something. Emptying this box tells the page
+  // "no country", and the page redraws the section for that; choosing one a
+  // moment later asks for a second redraw, and whichever answer arrives last
+  // wins. Twelve rounds ended with a country chosen and an empty box drawn
+  // over it.
+  if (String(await box.inputValue().catch(() => "")).length) {
+    await box.fill("", { timeout: 3000 }).catch(() => {});
+    await page.waitForTimeout(3500);
+    await box.click({ timeout: 3000 }).catch(() => {});
+  }
   if (String(typed)) await box.type(String(typed), { delay: 70 }).catch(() => {});
   // Nothing to type: the list is opened and read whole.
   else await page.keyboard.press("ArrowDown").catch(() => {});
@@ -2440,67 +2449,32 @@ async function oracleChoose(page, form, box, typed, wantRe, what) {
   const hit = list.find((r) => wantRe.test(r.text.toLowerCase()));
   let how = "nothing matched";
   if (hit) {
-    // By key first: the list's own way of taking a row.
-    const at = list.indexOf(hit);
-    const distinct = [...new Set(list.map((r) => r.text))];
-    const steps = Math.max(1, distinct.indexOf(hit.text) + 1);
-    for (let k = 0; k < steps; k++) await page.keyboard.press("ArrowDown").catch(() => {});
-    await page.keyboard.press("Enter").catch(() => {});
-    await page.waitForTimeout(900);
-    how = "by key";
-    console.log(`    oracle ${what}: after the key, ${JSON.stringify(await state())}`);
-    // A real press of the mouse on the row's own cell, where the pointer
-    // would be. Typed text with the list shut looks the same as a choice
-    // from the outside, so this is done whether or not the key seemed to work
-    // whenever the row can still be found.
-    {
-      await box.click({ timeout: 3000 }).catch(() => {});
-      await box.fill("", { timeout: 3000 }).catch(() => {});
-      if (String(typed)) await box.type(String(typed), { delay: 70 }).catch(() => {});
-      else await page.keyboard.press("ArrowDown").catch(() => {});
-      const again = (await until(async () => { const l = await rows(); return l.length ? l : null; }, 9000, 400)) ?? [];
-      const cells = again.filter((r) => wantRe.test(r.text.toLowerCase()));
-      // The innermost match: the cell, not the row around it.
-      const cell = cells[cells.length - 1];
-      if (cell) {
-        const b = await cell.el.boundingBox().catch(() => null);
-        if (b) {
-          await page.mouse.move(b.x + Math.min(b.width / 2, 40), b.y + b.height / 2).catch(() => {});
-          await page.mouse.down().catch(() => {});
-          await page.waitForTimeout(60);
-          await page.mouse.up().catch(() => {});
-          await page.waitForTimeout(900);
-          how = "by key, then by the mouse on its cell";
-          console.log(`    oracle ${what}: after the mouse, ${JSON.stringify(await state())}`);
-        }
-      }
-      // Away from the box, as a person moves on: a box that keeps its text
-      // after that has kept a choice.
-      await page.keyboard.press("Tab").catch(() => {});
-      await page.waitForTimeout(700);
-    }
-    if (!chosen(await state())) {
-      await hit.el.click({ timeout: 3000 }).catch(() => hit.el.click({ timeout: 3000, force: true }).catch(() => {}));
-      await page.waitForTimeout(900);
+    // One press, on the row's own cell, where the pointer would be — and
+    // then nothing at all until the page has finished what the choice sets
+    // off.
+    const cells = list.filter((r) => wantRe.test(r.text.toLowerCase()));
+    const cell = cells[cells.length - 1] ?? hit;
+    const b = await cell.el.boundingBox().catch(() => null);
+    if (b) {
+      await page.mouse.move(b.x + Math.min(b.width / 2, 40), b.y + b.height / 2).catch(() => {});
+      await page.mouse.down().catch(() => {});
+      await page.waitForTimeout(60);
+      await page.mouse.up().catch(() => {});
+      how = "by the mouse on its cell";
+    } else {
+      await cell.el.click({ timeout: 3000 }).catch(() => cell.el.click({ timeout: 3000, force: true }).catch(() => {}));
       how = "by click";
     }
-    if (!chosen(await state())) {
-      // The innermost thing in the row, pressed as a person presses it.
-      await hit.el.evaluate((n) => {
-        const leaf = Array.from(n.querySelectorAll("*")).filter((c) => !c.children.length).pop() ?? n;
-        for (const type of ["mousedown", "mouseup", "click"]) leaf.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
-      }).catch(() => {});
-      await page.waitForTimeout(900);
-      how = "by a pressed leaf";
-    }
-    void at;
+    await page.waitForTimeout(4000);
   } else {
     await page.keyboard.press("Escape").catch(() => {});
     await box.fill("", { timeout: 2000 }).catch(() => {});
   }
   const after = await state();
   console.log(`    oracle ${what}: ${list.length} row(s) made of ${JSON.stringify(made)}; ${hit ? `taken ${how}` : how}; now ${JSON.stringify(after)}`);
-  return chosen(after);
+  // A box the page replaced when it redrew the section cannot be read any
+  // more; the press was made, and the form will say if it did not count.
+  return chosen(after) || (!!hit && after === null);
 }
 
 /**
@@ -7645,7 +7619,7 @@ async function applyToJobOnce(context, job, profile, answers) {
           // routine written for Oracle's lists. The general way typed
           // "Male", pressed the first row offered and got "Female" — caught
           // and emptied, but it stopped the application all the same.
-          if (/\.oraclecloud\.com$/i.test(hostOf(page.url()) ?? "") && /^US-STANDARD-ORA_/i.test(String((await el.getAttribute("id").catch(() => "")) ?? ""))) continue;
+          if (/\.oraclecloud\.com$/i.test(hostOf(page.url()) ?? "") && /^(US-STANDARD-ORA_|country-\d+$|country-codes-dropdown)/i.test(String((await el.getAttribute("id").catch(() => "")) ?? ""))) continue;
 
           // text-ish
           const existing = await el.inputValue().catch(() => "");
