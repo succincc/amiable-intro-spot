@@ -15,6 +15,7 @@
 // Free: a public-repo runner and public pages.
 
 import { guardLogs, hideNames, shape } from "./quiet.mjs";
+import { nearPattern } from "./near.mjs";
 // Nothing this prints names an employer, a posting or a place: see quiet.mjs.
 guardLogs();
 import { chromium } from "playwright";
@@ -150,6 +151,37 @@ export function rowsIn(html, host) {
   return out;
 }
 
+/**
+ * The same postings from the employer's own careers site, where that site
+ * is the kind that hands its list out as data at /api/jobs: rows of
+ * { data: { req_id, slug, title, city, state, country, posted_date,
+ * apply_url, description } }.
+ */
+export function rowsFromSiteData(json, origin) {
+  const out = [];
+  for (const j of json?.jobs ?? []) {
+    const d = j?.data ?? j ?? {};
+    const title = String(d.title ?? "").trim();
+    const id = String(d.req_id ?? d.slug ?? d.id ?? "").trim();
+    if (!title || !id) continue;
+    const country = String(d.country_code ?? d.country ?? "").trim();
+    if (country && !/^(US|USA|United States( of America)?)$/i.test(country)) continue;
+    const place = [d.city, d.state].map((x) => String(x ?? "").trim()).filter(Boolean).join(", ");
+    const when = d.posted_date ? new Date(d.posted_date) : null;
+    out.push({
+      id,
+      href: String(d.meta_data?.canonical_url || `${origin}/jobs/${d.slug ?? id}`),
+      apply: typeof d.apply_url === "string" && d.apply_url.startsWith("http") ? d.apply_url : null,
+      title: title.slice(0, 160),
+      text: `${title} ${place}`,
+      location: place || null,
+      posted_at: when && Number.isFinite(when.getTime()) ? when.toISOString() : null,
+      description: strip(d.description ?? "").slice(0, 12000),
+    });
+  }
+  return out;
+}
+
 /** The listing rows on whatever frame holds them. */
 async function rowsOn(page) {
   const out = [];
@@ -223,9 +255,9 @@ if (process.env.ICIMS_IMPORT_ONLY !== "1") {
 
   // Employers the resolver found on iCIMS, with the host it saw.
   const found =
-    (await db("company_candidates?note=ilike.*runs%20on%20icims%20at*&select=name,note&limit=500")) ?? [];
+    (await db("company_candidates?note=ilike.*runs%20on%20icims%20at*&select=id,name,note,careers_url,resolved_url&limit=500")) ?? [];
   let employers = found
-    .map((r) => ({ name: r.name, host: (String(r.note).match(/icims at ([a-z0-9.-]+\.icims\.com)/i) ?? [])[1] }))
+    .map((r) => ({ name: r.name, id: r.id, note: String(r.note ?? ""), sites: [r.resolved_url, r.careers_url], host: (String(r.note).match(/icims at ([a-z0-9.-]+\.icims\.com)/i) ?? [])[1] }))
     .filter((e) => e.host && !/^(www|api|cdn\d*|assets?|static|login|cookie[a-z-]*)\./.test(e.host))
     // The staff-only twin of a portal sits beside the public one.
     .map((e) => ({ ...e, host: e.host.replace(/^(internalcareers|internal|employee)-/, "careers-") }));
@@ -245,7 +277,17 @@ if (process.env.ICIMS_IMPORT_ONLY !== "1") {
     .catch(() => {});
 
   const started = Date.now();
-  const tally = { employers: 0, rows: 0, wanted: 0, fresh: 0, saved: 0, empty: 0, plain: 0 };
+  const tally = { employers: 0, rows: 0, wanted: 0, fresh: 0, saved: 0, empty: 0, plain: 0, ownSite: 0 };
+  // An employer nothing could be read from is said so on its record, so
+  // that the reader of employers' own pages takes it up.
+  const UNREAD = "; list not read";
+  const mark = async (e, read) => {
+    if (!APPLY || !e.id || read === !e.note.includes(UNREAD)) return;
+    const note = read ? e.note.replace(UNREAD, "") : `${e.note}${UNREAD}`.slice(0, 380);
+    await db(`company_candidates?id=eq.${e.id}`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ note }) }).catch(() => {});
+  };
+  const [prof] = (await db("profile?id=eq.1&select=state,home_state").catch(() => [])) ?? [];
+  const NEAR = nearPattern(prof?.home_state || prof?.state || process.env.HOME_STATE);
   let sampled = 0;
   let looked = 0;
 
@@ -314,11 +356,51 @@ if (process.env.ICIMS_IMPORT_ONLY !== "1") {
     }
     await page.close().catch(() => {});
 
-    const rows = [...seen.values()];
+    let rows = [...seen.values()];
+    // The portal would not show its list. The employer's own careers site
+    // often carries the same postings as data; that is asked for instead.
+    let ownSaid = "";
+    if (!rows.length) {
+      const origins = [];
+      for (const raw of e.sites ?? []) {
+        try {
+          const u = new URL(raw);
+          if (/icims\.com$/i.test(u.hostname)) continue;
+          const base = u.hostname.toLowerCase().replace(/^(www|careers?|jobs?|work|join|apply|hire|talent)\./, "");
+          for (const o of [u.origin, `https://careers.${base}`, `https://jobs.${base}`]) if (!origins.includes(o)) origins.push(o);
+        } catch {
+          /* not an address */
+        }
+      }
+      for (const origin of origins.slice(0, 4)) {
+        try {
+          const got = [];
+          for (let pageNo = 1; pageNo <= 3; pageNo++) {
+            const res = await fetch(`${origin}/api/jobs?page=${pageNo}&limit=100&sortBy=posted_date&descending=true&internal=false`, {
+              headers: { "User-Agent": UA, Accept: "application/json" }, redirect: "follow", signal: AbortSignal.timeout(20_000),
+            });
+            if (!res.ok) { ownSaid = `HTTP ${res.status}`; break; }
+            const j = await res.json().catch(() => null);
+            const these = rowsFromSiteData(j, origin);
+            ownSaid = `answered, ${(j?.jobs ?? []).length} on page ${pageNo}`;
+            got.push(...these);
+            if ((j?.jobs ?? []).length < 100) break;
+          }
+          if (got.length) {
+            rows = got;
+            tally.ownSite++;
+            break;
+          }
+        } catch (err) {
+          ownSaid = String(err?.message ?? err).slice(0, 30);
+        }
+      }
+    }
+    await mark(e, rows.length > 0);
     tally.rows += rows.length;
     if (!rows.length) {
       tally.empty++;
-      console.log(`  ?  ${e.name} (${e.host}) — no postings read`);
+      console.log(`  ?  ${e.name} (${e.host}) — no postings read${ownSaid ? `; its own site: ${ownSaid}` : ""}`);
       continue;
     }
     // What a row looks like, a few times, so the parsing can be checked
@@ -332,13 +414,15 @@ if (process.env.ICIMS_IMPORT_ONLY !== "1") {
     for (const r of rows) {
       if (!wanted(r.title, titles, excludes)) continue;
       tally.wanted++;
-      const posted_at = postedOf(r.text);
+      const posted_at = r.posted_at ?? postedOf(r.text);
       // Fresh postings only, as everywhere else. One that shows no date is
       // kept undated and left for the applier to judge.
       if (posted_at && new Date(posted_at).getTime() < Date.now() - 14 * 86_400_000) continue;
       tally.fresh++;
       const loc = (r.text.match(/\b([A-Z]{2}-[A-Z]{2}(?:-[A-Za-z .'-]+)?)\b/) ?? [])[1] ?? null;
-      keep.push({ ...r, posted_at, location: placeOf(loc) });
+      const location = r.location ?? placeOf(loc);
+      if (location && !NEAR.test(location) && !/\bremote\b/i.test(`${r.title} ${r.text}`)) continue;
+      keep.push({ ...r, posted_at, location });
     }
     console.log(`  ok ${e.name} — ${rows.length} read, ${keep.length} wanted and fresh`);
     if (!APPLY || !keep.length) continue;
@@ -347,12 +431,12 @@ if (process.env.ICIMS_IMPORT_ONLY !== "1") {
     for (const r of keep.slice(0, 25)) {
       body.push({
         url: r.href,
-        apply_url: r.href,
+        apply_url: r.apply ?? r.href,
         title: r.title,
         company: e.name,
         location: r.location,
         remote: /\bremote\b/i.test(`${r.title} ${r.text}`),
-        description: await describe(context, r.href),
+        description: r.description || (await describe(context, r.href)),
         source: "icims",
         ats: "icims",
         posted_at: r.posted_at,
