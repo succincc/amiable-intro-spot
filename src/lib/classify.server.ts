@@ -275,9 +275,12 @@ export function classifyEmail(subject?: string | null, body?: string | null): Cl
   // request only if it also asks the reader for something: a time, their
   // availability, a booking.
   const isReceipt =
-    /\b(?:we(?:'ve| have)? (?:received|got) your (?:application|resume|submission)|thank(?:s| you) for (?:applying|your application|your interest|submitting)|your application (?:has been |was |is )?(?:received|submitted|complete)|application (?:received|confirmation|submitted)|successfully (?:applied|submitted))\b/i.test(text);
+    /\b(?:we(?:['’]ve| have)? (?:received|got) your (?:application|resume|submission)|thank(?:s| you) for (?:applying|your application|your interest|submitting)|your application (?:has been |was |is )?(?:received|submitted|complete)|application (?:received|confirmation|submitted)|successfully (?:applied|submitted))\b/i.test(text) ||
+    // "Job Application … : Application Update" — a portal's notice about an
+    // application, by its subject.
+    /\b(?:application (?:update|status|received|confirmation)|status of your application|update on your application)\b/i.test(subj);
   const asksForATime =
-    /\b(?:(?:would|we'd|i'd|i would) like to (?:invite|schedule|set up|arrange|speak|talk|meet|chat)|are you (?:available|free)|(?:share|send|provide|let (?:me|us) know) (?:me |us )?your availability|what (?:times?|days?) (?:work|are you)|please (?:select|choose|pick|book|schedule) (?:a |an |your )?(?:time|slot|interview)|calendly\.com|book (?:a |some )?time|pick a time)\b/i.test(text);
+    /\b(?:(?:would|we['’]d|i['’]d|i would) like to (?:invite|schedule|set up|arrange|speak|talk|meet|chat)|are you (?:available|free)|(?:share|send|provide|let (?:me|us) know) (?:me |us )?your availability|what (?:times?|days?) (?:work|are you)|please (?:select|choose|pick|book|schedule) (?:a |an |your )?(?:time|slot|interview)|calendly\.com|book (?:a |some )?time|pick a time|invit(?:e|ing) you (?:to|for) (?:a |an )?(?:interview|phone|video|call))\b/i.test(text);
   const notAnInterview = isReceipt && !asksForATime;
   const allowed = (rule: { cat: Category }) => !(rule.cat === "interview" && notAnInterview);
 

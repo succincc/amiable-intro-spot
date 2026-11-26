@@ -111,13 +111,20 @@ async function tick() {
         const { classifyEmail } = await import("@/lib/classify.server");
         const { data: filed } = await supabase
           .from("emails")
-          .select("message_id, subject, body")
+          .select("message_id, subject, body, reply_state")
           .eq("category", "interview")
           .order("received_at", { ascending: false })
-          .limit(60);
+          .limit(200);
         for (const e of filed ?? []) {
           const now = classifyEmail(e.subject, e.body).category;
-          if (now !== "interview") await supabase.from("emails").update({ category: now }).eq("message_id", e.message_id);
+          if (now === "interview") continue;
+          // A reply drafted to a receipt is withdrawn with the label, unless
+          // it has already gone or been approved by the owner.
+          const withdraw = e.reply_state !== "sent" && e.reply_state !== "approved";
+          await supabase
+            .from("emails")
+            .update(withdraw ? { category: now, reply_draft: null, reply_state: "none" } : { category: now })
+            .eq("message_id", e.message_id);
         }
       } catch {
         /* tidying the labels never stops the mail */

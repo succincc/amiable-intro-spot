@@ -202,4 +202,12 @@ describe("regressions from the first real Gmail sync", () => {
       "Thank you for applying to the Store Manager role. We would like to schedule a phone interview with you. Are you available Tuesday or Wednesday afternoon?";
     expect(classifyEmail("Next steps with us", body).category).toBe("interview");
   });
+
+  // The inbox showed twenty-three of these under "interview".
+  it("files the portals' own receipts as receipts, curly apostrophe and all", () => {
+    const tail = " If your qualifications match our needs, a member of our team will contact you to schedule an interview.";
+    expect(classifyEmail("We’ve received your application", `Hello, we’ve received your application for the role.${tail}`).category).toBe("confirmation");
+    expect(classifyEmail("Thank you for applying to Example Corp", `Thank you for applying.${tail}`).category).toBe("confirmation");
+    expect(classifyEmail("Job Application Retail Associate : Application Update", `There is an update on your profile.${tail}`).category).not.toBe("interview");
+  });
 });
