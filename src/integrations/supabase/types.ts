@@ -602,6 +602,7 @@ export type Database = {
           auto_reply: boolean | null
           autopilot: boolean | null
           availability: string | null
+          availability_slots: Json
           can_background_check: string | null
           citizenship: string | null
           city: string | null
@@ -623,6 +624,7 @@ export type Database = {
           home_lon: number | null
           home_state: string | null
           id: number
+          interview_holds: Json
           linkedin_url: string | null
           needs_sponsorship: string | null
           over_18: string | null
@@ -651,6 +653,7 @@ export type Database = {
           auto_reply?: boolean | null
           autopilot?: boolean | null
           availability?: string | null
+          availability_slots?: Json
           can_background_check?: string | null
           citizenship?: string | null
           city?: string | null
@@ -672,6 +675,7 @@ export type Database = {
           home_lon?: number | null
           home_state?: string | null
           id?: number
+          interview_holds?: Json
           linkedin_url?: string | null
           needs_sponsorship?: string | null
           over_18?: string | null
@@ -700,6 +704,7 @@ export type Database = {
           auto_reply?: boolean | null
           autopilot?: boolean | null
           availability?: string | null
+          availability_slots?: Json
           can_background_check?: string | null
           citizenship?: string | null
           city?: string | null
@@ -721,6 +726,7 @@ export type Database = {
           home_lon?: number | null
           home_state?: string | null
           id?: number
+          interview_holds?: Json
           linkedin_url?: string | null
           needs_sponsorship?: string | null
           over_18?: string | null
@@ -800,6 +806,7 @@ export type Database = {
           remote_ok: boolean | null
           review_score: number | null
           salary_floor: number | null
+          same_country_only: boolean
           same_state_only: boolean | null
           sources: string[] | null
           titles: string[] | null
@@ -819,6 +826,7 @@ export type Database = {
           remote_ok?: boolean | null
           review_score?: number | null
           salary_floor?: number | null
+          same_country_only?: boolean
           same_state_only?: boolean | null
           sources?: string[] | null
           titles?: string[] | null
@@ -838,6 +846,7 @@ export type Database = {
           remote_ok?: boolean | null
           review_score?: number | null
           salary_floor?: number | null
+          same_country_only?: boolean
           same_state_only?: boolean | null
           sources?: string[] | null
           titles?: string[] | null
