@@ -7167,6 +7167,34 @@ async function applyToJobOnce(context, job, profile, answers) {
           resumeWanted = true;
           resumeNote = r.note;
           console.log(`    step ${step + 1}: ${r.note}`);
+          // Oracle reads the uploaded resume into the form, and takes its
+          // time. Whatever is typed before it finishes is drawn over when it
+          // does — a country and a dialling code that were there at the
+          // first look and gone at the last, fourteen rounds running, with
+          // "We couldn't import your profile" on the page. Nothing is filled
+          // until the reading has ended one way or the other.
+          if (r.note === "resume attached" && /\.oraclecloud\.com$/i.test(hostOf(page.url()) ?? "")) {
+            const tiles = async () => (await form.$$(".apply-flow-profile-item-tile, [class*='profile-item-tile']").catch(() => [])).length;
+            const before = await tiles();
+            const t0 = Date.now();
+            let ended = "the wait ran out";
+            let lastChange = Date.now();
+            let seenTiles = before;
+            while (Date.now() - t0 < 75_000) {
+              const body = ((await form.evaluate(() => document.body.innerText || "").catch(() => "")) || "").toLowerCase();
+              if (/couldn'?t import your profile|could not import your profile|unable to import/.test(body)) { ended = "the portal says it could not read the resume"; break; }
+              const busy = (await form.$$('[class*="spinner" i], [class*="loading" i], [aria-busy="true"]').catch(() => [])).length;
+              const now = await tiles();
+              if (now !== seenTiles) { seenTiles = now; lastChange = Date.now(); }
+              // Entries drawn, and nothing has changed for eight seconds.
+              if (now > before && Date.now() - lastChange > 8000) { ended = `${now - before} entr${now - before === 1 ? "y" : "ies"} read in`; break; }
+              // Nothing at all happening for twenty seconds: it is not coming.
+              if (!busy && now === before && Date.now() - t0 > 20_000) { ended = "nothing was read in"; break; }
+              await page.waitForTimeout(1500);
+            }
+            await page.waitForTimeout(3000);
+            console.log(`    oracle: waited ${Math.round((Date.now() - t0) / 1000)}s for the portal to finish reading the resume — ${ended}`);
+          }
         }
       }
       // Entries Workday's reader of the resume left half-filled.
