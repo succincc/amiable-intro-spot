@@ -2360,11 +2360,33 @@ async function oracleChoose(page, form, box, typed, wantRe, what) {
       .evaluate((n) => {
         const shown = (e) => { if (!e) return false; const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
         const wrap = n.closest(".cx-select-container, .cx-select, .input-row") ?? n.parentElement;
+        // What the page itself has recorded for this box, where it will
+        // say. Text in the box is not a choice; this is.
+        let model = null;
+        try {
+          const ko = window.ko;
+          const d = ko?.dataFor?.(n);
+          if (d) {
+            const seen = {};
+            for (const k of Object.keys(d).slice(0, 60)) {
+              if (!/value|select|chosen|option|item|code/i.test(k)) continue;
+              let v = d[k];
+              try { if (typeof v === "function" && ko.isObservable?.(v)) v = v(); } catch { continue; }
+              if (typeof v === "function") continue;
+              seen[k] = v == null || v === "" ? "empty" : Array.isArray(v) ? `list of ${v.length}` : typeof v === "object" ? "object" : `${typeof v} of ${String(v).length}`;
+              if (Object.keys(seen).length >= 8) break;
+            }
+            model = seen;
+          }
+        } catch {
+          model = "unreadable";
+        }
         return {
           holds: String(n.value ?? "").length,
           open: n.getAttribute("aria-expanded"),
           clear: shown(wrap?.querySelector('.icon-clear, [class*="clear" i]')),
           marked: n.getAttribute("aria-invalid"),
+          model,
         };
       })
       .catch(() => null);
@@ -2413,6 +2435,37 @@ async function oracleChoose(page, form, box, typed, wantRe, what) {
     await page.keyboard.press("Enter").catch(() => {});
     await page.waitForTimeout(900);
     how = "by key";
+    console.log(`    oracle ${what}: after the key, ${JSON.stringify(await state())}`);
+    // A real press of the mouse on the row's own cell, where the pointer
+    // would be. Typed text with the list shut looks the same as a choice
+    // from the outside, so this is done whether or not the key seemed to work
+    // whenever the row can still be found.
+    {
+      await box.click({ timeout: 3000 }).catch(() => {});
+      await box.fill("", { timeout: 3000 }).catch(() => {});
+      if (String(typed)) await box.type(String(typed), { delay: 70 }).catch(() => {});
+      else await page.keyboard.press("ArrowDown").catch(() => {});
+      const again = (await until(async () => { const l = await rows(); return l.length ? l : null; }, 9000, 400)) ?? [];
+      const cells = again.filter((r) => wantRe.test(r.text.toLowerCase()));
+      // The innermost match: the cell, not the row around it.
+      const cell = cells[cells.length - 1];
+      if (cell) {
+        const b = await cell.el.boundingBox().catch(() => null);
+        if (b) {
+          await page.mouse.move(b.x + Math.min(b.width / 2, 40), b.y + b.height / 2).catch(() => {});
+          await page.mouse.down().catch(() => {});
+          await page.waitForTimeout(60);
+          await page.mouse.up().catch(() => {});
+          await page.waitForTimeout(900);
+          how = "by key, then by the mouse on its cell";
+          console.log(`    oracle ${what}: after the mouse, ${JSON.stringify(await state())}`);
+        }
+      }
+      // Away from the box, as a person moves on: a box that keeps its text
+      // after that has kept a choice.
+      await page.keyboard.press("Tab").catch(() => {});
+      await page.waitForTimeout(700);
+    }
     if (!chosen(await state())) {
       await hit.el.click({ timeout: 3000 }).catch(() => hit.el.click({ timeout: 3000, force: true }).catch(() => {}));
       await page.waitForTimeout(900);
@@ -2430,6 +2483,7 @@ async function oracleChoose(page, form, box, typed, wantRe, what) {
     void at;
   } else {
     await page.keyboard.press("Escape").catch(() => {});
+    await box.fill("", { timeout: 2000 }).catch(() => {});
   }
   const after = await state();
   console.log(`    oracle ${what}: ${list.length} row(s) made of ${JSON.stringify(made)}; ${hit ? `taken ${how}` : how}; now ${JSON.stringify(after)}`);
