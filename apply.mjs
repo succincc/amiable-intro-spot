@@ -2478,6 +2478,26 @@ async function oracleChoose(page, form, box, typed, wantRe, what) {
 }
 
 /**
+ * Every country and dialling-code box on the page, as it stands: how many
+ * there are, and for each whether it is shown, how much it holds and whether
+ * the form marks it. Printed at fixed moments, so that the moment a value
+ * disappears can be read off the log rather than guessed at.
+ */
+async function oracleProbe(form, when) {
+  const seen = await form
+    .evaluate(() => {
+      const shown = (e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+      return Array.from(document.querySelectorAll('input[id^="country-"]')).map((n) => {
+        const wrap = n.closest(".cx-select-container, .cx-select, .input-row") ?? n.parentElement;
+        const pill = wrap?.querySelector('[class*="pill" i], [class*="chip" i], [class*="selected" i], [class*="value" i]');
+        return `${n.id}:${shown(n) ? "shown" : "hidden"}:${String(n.value ?? "").length}ch:${n.getAttribute("aria-invalid") === "true" ? "marked" : "ok"}:${n.disabled || n.readOnly ? "locked" : "open"}${pill ? `:beside it ${pill.tagName}.${(typeof pill.className === "string" ? pill.className : "").trim().split(/\s+/)[0]}(${(pill.innerText || "").trim().length}ch)` : ""}`;
+      });
+    })
+    .catch(() => null);
+  console.log(`    oracle probe, ${when}: ${JSON.stringify(seen)}`);
+}
+
+/**
  * Oracle's self-identification lists — gender, veteran status and the rest.
  * The owner's saved answer, matched from its first word so that "Male" is
  * never "Female"; where nothing is saved, the list's own way of declining.
@@ -3546,10 +3566,14 @@ async function oracleRepair(page, form, profile, job, onlyReport = false, lookup
       const asks = await form
         .evaluate(() => {
           const shown = (e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
-          const save = Array.from(document.querySelectorAll("button")).filter(shown).filter((b) => /^save$/i.test((b.innerText || "").trim())).pop();
-          let box = save?.parentElement ?? null;
-          for (let n = 0; n < 10 && box && box.querySelectorAll("input, textarea").length < 3; n++) box = box.parentElement;
-          return Array.from((box ?? document).querySelectorAll("input, select, textarea, button[role=radio], [role=combobox]"))
+          // The entry is whatever holds the employer's box and a SAVE of its
+          // own: found from the box outwards, so that it is the entry and not
+          // the whole application that is described.
+          const anchor = Array.from(document.querySelectorAll('input[id^="employerName-"], input[id^="jobTitle-"]')).filter(shown).pop();
+          let box = anchor?.parentElement ?? null;
+          for (let n = 0; n < 12 && box && !Array.from(box.querySelectorAll("button")).some((b) => shown(b) && /^save$/i.test((b.innerText || "").trim())); n++) box = box.parentElement;
+          if (!box) return ["no entry was opened"];
+          return Array.from(box.querySelectorAll("input, select, textarea, button[role=radio], [role=combobox]"))
             .filter(shown)
             .slice(0, 30)
             .map((c) => `${c.tagName}${c.getAttribute("role") ? `[${c.getAttribute("role")}]` : ""}${c.getAttribute("type") ? `:${c.getAttribute("type")}` : ""}#${String(c.id || "").replace(/\d+/g, "N").slice(0, 28)}${c.required || c.getAttribute("aria-required") === "true" ? "*" : ""}${String(c.value ?? "").trim() ? "=set" : ""}`);
@@ -8866,6 +8890,7 @@ async function applyToJobOnce(context, job, profile, answers) {
       filled += await oraclePills(page, form, profile, job, lookupSaved);
       filled += await oracleSelfId(page, form, profile, lookupSaved);
       await oracleOpenItems(form);
+      await oracleProbe(form, "filled, before submit");
     }
 
     // Is the form actually complete before anything is clicked?
@@ -9605,7 +9630,9 @@ async function applyToJobOnce(context, job, profile, answers) {
       // chosen (these are not in the page until the submit is refused), or
       // an entry imported from the resume that is missing its employer.
       // Put right what can be, then submit once more.
+      await oracleProbe(form, "after the form refused");
       const fixed = await oracleRepair(page, form, profile, job, false, lookupSaved);
+      await oracleProbe(form, "after the repairs");
       if (fixed > 0) {
         const again = await findSubmit(page, form);
         if (again) {
