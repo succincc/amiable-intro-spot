@@ -2377,7 +2377,9 @@ async function oracleChoose(page, form, box, typed, wantRe, what) {
   await box.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
   await box.click({ timeout: 3000 }).catch(() => {});
   await box.fill("", { timeout: 3000 }).catch(() => {});
-  await box.type(String(typed), { delay: 70 }).catch(() => {});
+  if (String(typed)) await box.type(String(typed), { delay: 70 }).catch(() => {});
+  // Nothing to type: the list is opened and read whole.
+  else await page.keyboard.press("ArrowDown").catch(() => {});
   const listId = String((await box.getAttribute("aria-controls").catch(() => null)) ?? "").replace(/["\\]/g, "");
   const rows = async () => {
     const sel = listId
@@ -3420,6 +3422,75 @@ async function oracleRepair(page, form, profile, job, onlyReport = false, lookup
       // digits the form accepts are left as they are.
       if (took && !code) await oracleAddress(page, form, profile);
       if (took && !bad) fixed++;
+      continue;
+    }
+
+    // Gender, veteran status and the like, asked as a list the form insists
+    // on. The owner's saved answer where there is one; where there is none,
+    // the list's own way of declining — never a guess at the answer.
+    if (about.role === "combobox" && /^(gender|sex|veteran|disability|race|ethnic)/i.test(about.label) && !comboTried.has(about.id)) {
+      comboTried.add(about.id);
+      const l = about.label.toLowerCase();
+      const saved = String(answerQuestion(l, profile) ?? lookupSaved(l) ?? "").trim();
+      const esc = (t) => t.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const want = saved
+        ? new RegExp(`^${esc(saved)}\\b`)
+        : /prefer not|decline|don'?t wish|do not wish|choose not|not to answer|rather not|not disclose|not specified|undisclosed/;
+      const ok = await oracleChoose(page, form, el, saved ? saved.slice(0, 10) : "", want, `self-identification (${saved ? "the saved answer" : "nothing is saved, so declining"})`);
+      if (ok) fixed++;
+      continue;
+    }
+
+    // "You need to add at least 1 Work History item." The portal's reading
+    // of the resume failed and left the section empty; the most recent job
+    // is entered by hand, from the resume, through the section's own button.
+    if (/^profileItemsAddButton/.test(about.id) && !comboTried.has("work-history")) {
+      comboTried.add("work-history");
+      const role = latestRoleFrom(job, profile);
+      if (!role?.company || !role?.title) {
+        console.log("    oracle work history: the section is empty and the resume gives no employer and title to enter");
+        continue;
+      }
+      await el.click({ timeout: 3000 }).catch(() => el.evaluate((b) => b.click()).catch(() => {}));
+      await page.waitForTimeout(2500);
+      const put = async (stem, value) => {
+        for (const c of await form.$$(`input[id^="${stem}-"], textarea[id^="${stem}-"]`).catch(() => [])) {
+          if (!(await c.isVisible().catch(() => false))) continue;
+          await c.fill(String(value).slice(0, 80), { timeout: 3000 }).catch(() => {});
+          await page.keyboard.press("Tab").catch(() => {});
+          return true;
+        }
+        return false;
+      };
+      const did = { employer: await put("employerName", role.company), title: await put("jobTitle", role.title) };
+      // What else the new entry asks for, by the names of its boxes.
+      const asks = await form
+        .evaluate(() => {
+          const shown = (e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+          const save = Array.from(document.querySelectorAll("button")).filter(shown).filter((b) => /^save$/i.test((b.innerText || "").trim())).pop();
+          let box = save?.parentElement ?? null;
+          for (let n = 0; n < 10 && box && box.querySelectorAll("input, textarea").length < 3; n++) box = box.parentElement;
+          return Array.from((box ?? document).querySelectorAll("input, select, textarea, button[role=radio], [role=combobox]"))
+            .filter(shown)
+            .slice(0, 30)
+            .map((c) => `${c.tagName}${c.getAttribute("role") ? `[${c.getAttribute("role")}]` : ""}${c.getAttribute("type") ? `:${c.getAttribute("type")}` : ""}#${String(c.id || "").replace(/\d+/g, "N").slice(0, 28)}${c.required || c.getAttribute("aria-required") === "true" ? "*" : ""}${String(c.value ?? "").trim() ? "=set" : ""}`);
+        })
+        .catch(() => []);
+      // The dates, where the entry has boxes for them that take a month and year.
+      const mm = (name) => { const k = MONTHS.findIndex((x) => x.toLowerCase() === String(name ?? "").toLowerCase()); return k >= 0 ? String(k + 1).padStart(2, "0") : "01"; };
+      if (role.start_year) {
+        for (const c of await form.$$('input[id^="startDate"]').catch(() => [])) {
+          if (!(await c.isVisible().catch(() => false))) continue;
+          const ph = String((await c.getAttribute("placeholder").catch(() => "")) ?? "").toLowerCase();
+          const text = /yyyy.?mm/.test(ph) ? `${role.start_year}-${mm(role.start_month)}` : /mm.?dd.?yy/.test(ph) ? `${mm(role.start_month)}/01/${role.start_year}` : `${mm(role.start_month)}/${role.start_year}`;
+          await c.fill(text, { timeout: 3000 }).catch(() => {});
+          await page.keyboard.press("Tab").catch(() => {});
+          break;
+        }
+      }
+      const saved = await oracleSave(page, form);
+      console.log(`    oracle work history: the most recent job entered by hand ${JSON.stringify(did)}; ${saved ? "saved" : "not saved"}; the entry is made of ${JSON.stringify(asks).slice(0, 900)}`);
+      if (saved) fixed++;
       continue;
     }
 
