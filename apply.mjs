@@ -1155,8 +1155,42 @@ async function successFactorsAccount(page, profile, job) {
     await put("#password", password);
     if (!(await pressNamed(/^(sign in|log in)$/i, "button, input[type=submit], input[type=button]"))) return "no Sign In button on the page";
     await page.waitForLoadState("domcontentloaded").catch(() => {});
-    await page.waitForTimeout(4500);
-    return (await where()) === "signin" ? "the portal did not accept the saved sign-in" : null;
+    // Up to twenty seconds for the form to go away, or to say why it stays.
+    // Four and a half were not enough: a sign-in that had worked was read as
+    // refused while the portal was still answering.
+    for (let i = 0; i < 20; i++) {
+      await page.waitForTimeout(1000);
+      if ((await where()) !== "signin") return null;
+      if (i >= 3 && (await refusal())) break;
+    }
+    return "the portal did not accept the saved sign-in";
+  };
+  // The portal's own words that a sign-in was refused, if it is showing any.
+  const refusal = async () => {
+    for (const f of page.frames()) {
+      const said = await f
+        .evaluate(() => {
+          const vis = (e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+          return Array.from(document.querySelectorAll('[class*="error" i], [role=alert], .feedback, [id*="error" i]'))
+            .filter(vis)
+            .map((e) => (e.innerText || "").replace(/\s+/g, " ").trim())
+            .find((t) => /invalid|incorrect|not (valid|recogni[sz]ed|match)|locked|try again|wrong/i.test(t)) ?? null;
+        })
+        .catch(() => null);
+      if (said) return said;
+    }
+    return null;
+  };
+  // Signed in, by what only a signed-in page carries.
+  const signedIn = async () => {
+    for (const f of page.frames()) {
+      for (const c of await f.$$("a, button").catch(() => [])) {
+        if (!(await c.isVisible().catch(() => false))) continue;
+        const t = plainWords(((await c.innerText().catch(() => "")) || (await c.getAttribute("aria-label").catch(() => "")) || ""));
+        if (/^(sign out|log ?out|logout)$/i.test(t)) return true;
+      }
+    }
+    return false;
   };
 
   // A passcode emailed to prove the address, asked for before the account
@@ -1210,6 +1244,13 @@ async function successFactorsAccount(page, profile, job) {
     await page.waitForTimeout(3000);
     await dismissBanners(page).catch(() => {});
     at = await where();
+    // The sign-in address answering with a signed-in page: the sign-in had
+    // gone through after all, and the portal was only slow to show it.
+    if (at === "other" && (await signedIn())) {
+      await saveAccount(key, email, password, "active", job.id, "signed in on SuccessFactors");
+      console.log("    successfactors: the saved account is signed in after all");
+      return { ok: true };
+    }
   }
 
   if (at === "signin") {
@@ -1230,6 +1271,9 @@ async function successFactorsAccount(page, profile, job) {
           heads: Array.from(document.querySelectorAll("h1, h2, h3")).filter(vis).map((h) => (h.innerText || "").replace(/\s+/g, " ").trim().slice(0, 44)).filter(Boolean).slice(0, 5),
           boxes: Array.from(document.querySelectorAll("input, select")).filter((e) => e.type !== "hidden" && vis(e)).map((e) => `${e.type || e.tagName.toLowerCase()}:${String(e.id || e.getAttribute("name") || "").replace(/\d{4,}/g, "N").slice(0, 22)}`).slice(0, 10),
           says: Array.from(document.querySelectorAll('[class*="error" i], [role=alert], .feedback')).filter(vis).map((e) => (e.innerText || "").replace(/\s+/g, " ").trim().slice(0, 90)).filter(Boolean).slice(0, 3),
+          // The short links at the top of the page: "Sign In" or "Sign
+          // Out" among them says which side of the door this is.
+          links: Array.from(document.querySelectorAll("a, button")).filter(vis).map((e) => (e.innerText || "").replace(/\s+/g, " ").trim()).filter((t) => t && t.length < 22 && /sign|log|account|profile|welcome|application/i.test(t)).slice(0, 8),
         };
       })
       .catch(() => null);
