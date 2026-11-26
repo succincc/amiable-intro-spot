@@ -137,6 +137,46 @@ if (process.env.PRETAILOR_IMPORT_ONLY !== "1") {
     console.log("no resume on file; nothing to write from.");
     process.exit(0);
   }
+  // An empty Experience page is filled from the resume, once. Somebody who
+  // has uploaded a resume has already written down where they worked; asking
+  // them to type it again is a step that gets skipped, and everything that
+  // reads this page — the written resumes, a portal's work history — then
+  // has nothing to read. Only what the resume says goes in, and the owner
+  // can change or remove any of it in settings afterwards.
+  try {
+    const have = (await db("experience?select=id&limit=1")) ?? [];
+    if (!have.length) {
+      const parsed = (structureResume(profile.resume_text, profile ?? {})?.experience ?? []).filter((e) => e?.company && e?.title).slice(0, 12);
+      const rows = parsed.map((e) => {
+        const [from, to] = String(e.dates ?? "").split(/\s+(?:-|–|—|to|through)\s+|(?<=\d)\s*[–—-]\s*(?=[A-Za-z0-9])/);
+        const end = String(to ?? "").trim();
+        return {
+          company: String(e.company).slice(0, 120),
+          title: String(e.title).slice(0, 120),
+          location: String(e.location ?? "").trim() || null,
+          start_date: String(from ?? "").trim() || null,
+          end_date: !end || /present|current|now/i.test(end) ? null : end,
+          details: (e.bullets ?? []).join("\n").slice(0, 4000) || null,
+        };
+      });
+      if (!rows.length) {
+        console.log("experience: the page is empty and no roles could be read from the resume.");
+      } else if (!WRITE) {
+        console.log(`experience: the page is empty; ${rows.length} role(s) from the resume would be entered (report only).`);
+      } else {
+        // Oldest first, one at a time, so that the newest is the newest row.
+        let put = 0;
+        for (const row of [...rows].reverse()) {
+          await db("experience", { method: "POST", headers: { Prefer: "return=minimal" }, body: JSON.stringify(row) });
+          put++;
+          await new Promise((r) => setTimeout(r, 1100));
+        }
+        console.log(`experience: the page was empty; ${put} role(s) entered from the resume.`);
+      }
+    }
+  } catch (e) {
+    console.log(`experience: could not be filled from the resume — ${String(e?.message ?? e).slice(0, 100)}`);
+  }
   let roles = "";
   try {
     roles = rolesText((await db("experience?select=company,title,location,start_date,end_date,details&order=created_at.desc&limit=40")) ?? []);
