@@ -2373,7 +2373,16 @@ async function oracleAddress(page, form, profile) {
     if (held && chosenBefore) continue;
     // A country the portal itself is showing, and not complaining about, is
     // left alone.
-    if (stem === "country" && /^united states$/i.test(held) && (await box.getAttribute("aria-invalid").catch(() => null)) !== "true") continue;
+    // Whatever it is called there — "United States", "United States of
+    // America", "US" — a country the portal filled in itself and does not
+    // mark is the portal's own choice from its own list. Typing over it left
+    // text in the box and nothing chosen: the box "held a value" and the
+    // form said "The Country field is required" at the end, and redrawing
+    // the address under it unsettled the phone number as well.
+    if (stem === "country" && held && (await box.getAttribute("aria-invalid").catch(() => null)) !== "true") {
+      console.log("    oracle: country is already set by the portal and not marked; left as it is");
+      continue;
+    }
 
     await box.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
     const listId = String((await box.getAttribute("aria-controls").catch(() => null)) ?? "").replace(/["\\]/g, "");
@@ -3176,6 +3185,7 @@ async function oracleRepair(page, form, profile, job, onlyReport = false, lookup
   let fixed = 0;
   let eduDone = false;
   const comboTried = new Set();
+  const issueWords = [];
   let shapesShown = 0;
   const report = [];
   const resume = String(job?.tailored_resume || profile?.resume_text || "");
@@ -3184,6 +3194,19 @@ async function oracleRepair(page, form, profile, job, onlyReport = false, lookup
     if (!next) break;
     await next.click({ timeout: 2500 }).catch(() => {});
     await page.waitForTimeout(700);
+    // The issue this stop is about, in the form's own words.
+    {
+      const msg = await form
+        .evaluate(() => {
+          for (const e of Array.from(document.querySelectorAll("div, span, p"))) {
+            const t = (e.innerText || "").replace(/\s+/g, " ").trim();
+            if (t.length < 160 && /\(\d+ out of \d+ issues?\)\s*$/.test(t) && !/^\(/.test(t)) return t;
+          }
+          return "";
+        })
+        .catch(() => "");
+      if (msg && !issueWords.includes(msg)) issueWords.push(msg);
+    }
     const at = await form.evaluateHandle(() => document.activeElement).catch(() => null);
     const el = at?.asElement?.();
     if (!el) continue;
@@ -3499,6 +3522,7 @@ async function oracleRepair(page, form, profile, job, onlyReport = false, lookup
     }
   }
   console.log(`    oracle issue stops: ${JSON.stringify(Array.from(new Set(report)).slice(0, 10))}`);
+  if (issueWords.length) console.log(`    oracle issues, in the form's words: ${JSON.stringify(issueWords.slice(0, 12))}`);
   return fixed;
 }
 
@@ -9310,8 +9334,8 @@ async function applyToJobOnce(context, job, profile, answers) {
                 const out = [];
                 for (const e of Array.from(document.querySelectorAll('[class*="validation" i], [class*="error" i], [role=alert]')).filter(shown)) {
                   const t = (e.innerText || "").replace(/\s+/g, " ").trim();
-                  if (t && t.length < 110 && !out.includes(t)) out.push(t);
-                  if (out.length >= 8) break;
+                  if (t && t.length < 130 && /required|valid|need to|must|at least|missing|select|enter/i.test(t) && !/^\(\d+ out of/.test(t) && !/issues that need|import/i.test(t) && !out.includes(t)) out.push(t);
+                  if (out.length >= 14) break;
                 }
                 return out;
               })
