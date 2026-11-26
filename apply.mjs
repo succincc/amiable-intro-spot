@@ -1104,6 +1104,7 @@ async function successFactorsAccount(page, profile, job) {
   const existing = rows.find((r) => r.status !== "failed");
   const email = profile.email;
   const password = existing?.password ?? portalPassword();
+  const startedAt = page.url();
   await dismissBanners(page).catch(() => {});
 
   const shown = async (sel) => {
@@ -1203,6 +1204,11 @@ async function successFactorsAccount(page, profile, job) {
       return { ok: false, reason: why };
     }
     console.log("    successfactors: the saved account was never confirmed; registering again");
+    // From the sign-in page as it first was: after a refused sign-in the
+    // page's own link to the registration form did not open it.
+    await page.goto(startedAt, { waitUntil: "domcontentloaded", timeout: 45000 }).catch(() => {});
+    await page.waitForTimeout(3000);
+    await dismissBanners(page).catch(() => {});
     at = await where();
   }
 
@@ -1214,7 +1220,22 @@ async function successFactorsAccount(page, profile, job) {
     for (let i = 0; i < 20 && (await where()) !== "register"; i++) await page.waitForTimeout(500);
     at = await where();
   }
-  if (at !== "register") return { ok: false, reason: "the SuccessFactors registration form did not open" };
+  if (at !== "register") {
+    // What is there instead, by shape: headings, the boxes on show, the
+    // buttons. Never what is typed in them.
+    const seen = await page
+      .evaluate(() => {
+        const vis = (e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+        return {
+          heads: Array.from(document.querySelectorAll("h1, h2, h3")).filter(vis).map((h) => (h.innerText || "").replace(/\s+/g, " ").trim().slice(0, 44)).filter(Boolean).slice(0, 5),
+          boxes: Array.from(document.querySelectorAll("input, select")).filter((e) => e.type !== "hidden" && vis(e)).map((e) => `${e.type || e.tagName.toLowerCase()}:${String(e.id || e.getAttribute("name") || "").replace(/\d{4,}/g, "N").slice(0, 22)}`).slice(0, 10),
+          says: Array.from(document.querySelectorAll('[class*="error" i], [role=alert], .feedback')).filter(vis).map((e) => (e.innerText || "").replace(/\s+/g, " ").trim().slice(0, 90)).filter(Boolean).slice(0, 3),
+        };
+      })
+      .catch(() => null);
+    console.log(`    successfactors: the registration form did not open; the page shows ${JSON.stringify(seen).split(String(email)).join("[email]").slice(0, 600)}`);
+    return { ok: false, reason: "the SuccessFactors registration form did not open" };
+  }
 
   const filled = {
     email: await put("#fbclc_userName", email),
@@ -1339,7 +1360,9 @@ async function successFactorsAccount(page, profile, job) {
     return { ok: false, reason: "the SuccessFactors registration form did not go through" };
   }
 
-  await saveAccount(key, email, password, "active", job.id, "registered on SuccessFactors");
+  // Worded apart from the older "registered on SuccessFactors", which was
+  // also written for accounts whose passcode was never entered.
+  await saveAccount(key, email, password, "active", job.id, "SuccessFactors account made and confirmed");
   console.log("    successfactors: registered");
   return { ok: true, created: true };
 }
