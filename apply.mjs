@@ -2880,6 +2880,66 @@ async function phoneCodeBoxes(page, form) {
   return done;
 }
 
+/**
+ * Of the places an employer offers to be based in, the one in the owner's
+ * state; failing that, the remote one; failing that, none.
+ */
+export function placeChoice(options, state) {
+  const st = String(state ?? "").trim().toUpperCase();
+  const name = STATE_NAMES[st];
+  let i = st.length === 2 ? options.findIndex((o) => new RegExp(`,\\s*${st}\\b`).test(o) || (name && new RegExp(`\\b${name}\\b`, "i").test(o))) : -1;
+  if (i < 0) i = options.findIndex((o) => /\bremote\b/i.test(o));
+  return i;
+}
+
+/** "Where would you want to be based?", asked as a set of the employer's places. */
+async function placeGroups(form, profile) {
+  const sets = await form
+    .evaluate(() => {
+      const out = new Map();
+      for (const el of document.querySelectorAll("input[type=radio]")) {
+        const name = el.getAttribute("name");
+        if (!name) continue;
+        const lab = (el.closest("label")?.innerText || (el.id && document.querySelector(`label[for="${CSS.escape(el.id)}"]`)?.innerText) || el.value || "").replace(/\s+/g, " ").trim();
+        const g = out.get(name) ?? { name, options: [], ids: [], checked: false, ask: "" };
+        g.options.push(lab.slice(0, 90));
+        g.ids.push(el.id || "");
+        g.checked = g.checked || el.checked;
+        if (!g.ask) {
+          let box = el.closest("fieldset, [role=group], [role=radiogroup]") ?? el.parentElement?.parentElement?.parentElement;
+          let ask = (box?.querySelector("legend")?.innerText || "").trim();
+          for (let d = 0; !ask && box && d < 3; d++, box = box.parentElement) ask = (box.querySelector("label, legend, p, span")?.innerText || "").trim();
+          g.ask = ask.replace(/\s+/g, " ").slice(0, 140);
+        }
+        out.set(name, g);
+      }
+      return [...out.values()];
+    })
+    .catch(() => []);
+  let done = 0;
+  for (const g of sets) {
+    if (g.checked || g.options.length < 2) continue;
+    if (!/\b(where|which)\b.{0,50}\b(based|located|location|office|work from|work out of)\b|preferred (work )?location/i.test(`${g.ask} ${g.name}`)) continue;
+    const i = placeChoice(g.options, profile.state);
+    if (i < 0) continue;
+    const id = g.ids[i] ? g.ids[i].replace(/["\\]/g, "") : null;
+    const box = id ? await form.$(`[id="${id}"]`).catch(() => null) : (await form.$$(`input[name="${g.name.replace(/["\\]/g, "")}"]`).catch(() => []))[i];
+    if (!box) continue;
+    try {
+      await box.check({ timeout: 3000 });
+    } catch {
+      const lab = id ? await form.$(`label[for="${id}"]`).catch(() => null) : null;
+      if (lab) await lab.click({ timeout: 3000 }).catch(() => {});
+      else await box.check({ force: true, timeout: 3000 }).catch(() => {});
+    }
+    if (await box.isChecked().catch(() => false)) {
+      done++;
+      console.log(`    where to be based: ${g.options.length} places offered; ${/remote/i.test(g.options[i]) ? "the remote one" : "the one in the owner's state"} chosen`);
+    }
+  }
+  return done;
+}
+
 /** Which self-identification a set of boxes is asking for, or null. */
 export function selfIdTopic(text) {
   const t = String(text ?? "").toLowerCase();
@@ -5740,8 +5800,12 @@ function defaultYesNo(label, p) {
     return "Yes";
   }
   // "Do you possess a bachelor's degree or equivalent professional experience?"
-  if (/\b(possess|have|hold|earned|completed)\b[^?]{0,20}\b(bachelor|associate|master|high school|college|university|ged)\b/.test(l)) {
-    const level = /\bbachelor|\bb\.?[as]\.?\b|\bmaster|\bm\.?b\.?a\b|\bph\.?d/.test(resume) ? 3 : /\bassociate/.test(resume) ? 2 : 1;
+  // And "Have you completed the following level of education: Bachelor's
+  // Degree?", which puts more words between the two.
+  if (/\b(possess|have|hold|earned|completed)\b[^?]{0,60}\b(bachelor|associate|master|high school|college|university|ged)\b/.test(l)) {
+    // What the resume shows, or what the owner entered as their level.
+    const shown = `${resume} ${String(p?.education_level ?? "").toLowerCase()}`;
+    const level = /\bmaster|\bm\.?b\.?a\b|\bph\.?d|\bdoctor/.test(shown) ? 4 : /\bbachelor|\bb\.?[as]\.?\b/.test(shown) ? 3 : /\bassociate/.test(shown) ? 2 : 1;
     const asked = /\bmaster/.test(l) ? 4 : /\bbachelor|college|university/.test(l) ? 3 : /\bassociate/.test(l) ? 2 : 1;
     if (level >= asked || (/equivalent[^?]{0,30}experience/.test(l) && Number(p?.years_experience ?? 0) >= 4)) return "Yes";
     return "No";
@@ -9758,6 +9822,7 @@ async function applyToJobOnce(context, job, profile, answers) {
       filled += await selfIdGroups(form, profile, lookupSaved).catch(() => 0);
       filled += await listsBehindDrawnOnes(form, profile, lookupSaved).catch(() => 0);
       filled += await phoneCodeBoxes(page, form).catch(() => 0);
+      filled += await placeGroups(form, profile).catch(() => 0);
     }
 
     // Is the form actually complete before anything is clicked?

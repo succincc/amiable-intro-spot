@@ -277,6 +277,15 @@ if (process.env.ICIMS_IMPORT_ONLY !== "1") {
     .route("**/*", (r) => (["image", "media", "font"].includes(r.request().resourceType()) ? r.abort() : r.continue()))
     .catch(() => {});
 
+  // Ones saved before that was known are taken out of the queue.
+  if (APPLY) {
+    await db("jobs?ats=eq.icims&status=in.(new,review,queued,needs_help)", {
+      method: "PATCH",
+      headers: { Prefer: "return=minimal" },
+      body: JSON.stringify({ status: "skipped", skip_reason: "its portal asks for a human check before applying; open it to apply by hand" }),
+    }).catch(() => {});
+  }
+
   const started = Date.now();
   const tally = { employers: 0, rows: 0, wanted: 0, fresh: 0, saved: 0, empty: 0, plain: 0, ownSite: 0 };
   // An employer nothing could be read from is said so on its record, so
@@ -449,7 +458,12 @@ if (process.env.ICIMS_IMPORT_ONLY !== "1") {
         source: "icims",
         ats: "icims",
         posted_at: r.posted_at,
-        status: "new",
+        // Found, and kept where the owner can see them — but not queued:
+        // applying goes through the portal, which asks a runner to prove it
+        // is a person before showing a form, and that is not got past. Two
+        // attempts ended on that page. They are the owner's to send by hand.
+        status: "skipped",
+        skip_reason: "its portal asks for a human check before applying; open it to apply by hand",
       });
     }
     try {
