@@ -52,6 +52,7 @@ const truthy = (name, got) => check(name, Boolean(got), true);
   const tt = boards.readTeamtailor("<rss><channel><item><title><![CDATA[Shift Lead]]></title><link>https://acme.teamtailor.com/jobs/1-shift-lead</link><pubDate>Fri, 20 Nov 2026 10:00:00 +0000</pubDate><description><![CDATA[<p>Lead a shift.</p>]]></description></item></channel></rss>");
   check("boards: Teamtailor's feed", [tt[0].title, tt[0].url, tt[0].posted_at, tt[0].description], ["Shift Lead", "https://acme.teamtailor.com/jobs/1-shift-lead", "2026-11-20T10:00:00.000Z", "Lead a shift."]);
   check("boards: a posting's words from its JobPosting data", boards.describeFrom('<html><script type="application/ld+json">{"@type":"JobPosting","description":"<p>Count the till.</p>","datePosted":"2026-11-21"}</script><body>x</body></html>'), { description: "Count the till.", posted_at: "2026-11-21T00:00:00.000Z" });
+  check("boards: and its place, where the posting states one", boards.describeFrom('<script type="application/ld+json">{"@type":"JobPosting","description":"x","jobLocation":{"@type":"Place","address":{"addressLocality":"Exampleton","addressRegion":"NJ"}}}</script>').location, "Exampleton, NJ");
   check("boards: a wanted title needs half the words of one the owner searches", [boards.wanted("Assistant Store Manager", ["store manager"], []), boards.wanted("Software Engineer", ["store manager"], []), boards.wanted("Store Manager Intern", ["store manager"], ["intern"])], [true, false, false]);
 }
 

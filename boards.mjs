@@ -192,7 +192,11 @@ export function describeFrom(html) {
       const j = JSON.parse(m[1]);
       for (const node of Array.isArray(j) ? j : [j, ...(Array.isArray(j?.["@graph"]) ? j["@graph"] : [])]) {
         if (node?.["@type"] === "JobPosting" && node.description) {
-          return { description: plain(node.description).slice(0, 12000), posted_at: isoOr(node.datePosted) };
+          // The place too, where the posting states it: a list that names no
+          // town leaves a posting that cannot be measured.
+          const at = [node.jobLocation].flat().filter(Boolean)[0]?.address ?? null;
+          const where = at && typeof at === "object" ? [at.addressLocality, at.addressRegion].map((x) => String(x ?? "").trim()).filter(Boolean).join(", ") : "";
+          return { description: plain(node.description).slice(0, 12000), posted_at: isoOr(node.datePosted), ...(where ? { location: where.slice(0, 80) } : {}) };
         }
       }
     } catch {
@@ -329,6 +333,7 @@ if (process.env.BOARDS_IMPORT_ONLY !== "1") {
             const got = describeFrom(await (await get(r.url, "text/html")).text());
             description = got.description;
             posted_at ??= got.posted_at;
+            r.location ??= got.location ?? null;
           }
         } catch {
           /* a posting without its text is still a posting */
