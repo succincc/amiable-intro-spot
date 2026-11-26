@@ -394,6 +394,9 @@ function answerQuestion(label, p) {
   if (has(label, "disability", "disabled", "disabilities", "impairment")) {
     return p.disability_status;
   }
+  // Asked of nobody's resume and never guessed: declined unless the owner
+  // has saved an answer, which is looked up before this is reached.
+  if (/transgender|sexual orientation|\blgbt/i.test(String(label))) return "Decline to self-identify";
   if (has(label, "gender", "genders", "sex", "pronouns", "gender identity")) return p.gender;
   // "Are you Hispanic/Latino?" is a yes/no question and the answer on file is
   // a race, so it was offered "White" against Yes / No / Decline. Only what
@@ -2725,6 +2728,99 @@ async function oracleProbe(form, when) {
  * never "Female"; where nothing is saved, the list's own way of declining.
  * Never a guess.
  */
+/** Which self-identification a set of boxes is asking for, or null. */
+export function selfIdTopic(text) {
+  const t = String(text ?? "").toLowerCase();
+  if (/transgender/.test(t)) return "transgender";
+  if (/sexual orientation|lgbt/.test(t)) return "sexual orientation";
+  if (/gender|pronoun|\bsex\b/.test(t)) return "gender";
+  if (/hispanic|latino/.test(t) && !/race/.test(t)) return "hispanic or latino";
+  if (/race|ethnic/.test(t)) return "race or ethnicity";
+  if (/veteran/.test(t)) return "veteran status";
+  if (/disab/.test(t)) return "disability";
+  return null;
+}
+
+const SELF_ID_DECLINE = /prefer not|decline|don'?t wish|do not wish|choose not|not to answer|rather not|not (to )?disclose|not to say|not specified|undisclosed|not to self/i;
+
+/**
+ * Which of a set's options to tick: the one that is the saved answer in the
+ * set's own words, else the one that declines, else none. Never a guess.
+ */
+export function selfIdChoice(options, saved) {
+  const flat = (v) => String(v ?? "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const mine = flat(saved);
+  if (mine && !SELF_ID_DECLINE.test(String(saved))) {
+    const exact = options.findIndex((o) => flat(o) === mine);
+    if (exact >= 0) return exact;
+    // "Man" for a saved "Male", "Woman" for "Female": the same answer.
+    const same = { male: /^(man|male)$/, female: /^(woman|female)$/, man: /^(man|male)$/, woman: /^(woman|female)$/ }[mine];
+    if (same) {
+      const i = options.findIndex((o) => same.test(flat(o)));
+      if (i >= 0) return i;
+    }
+    const whole = options.findIndex((o) => new RegExp(`(^| )${mine.replace(/ /g, " +")}( |$)`).test(flat(o)) && !/\bnot\b|\bnon\b/.test(flat(o)));
+    if (whole >= 0) return whole;
+  }
+  const no = options.findIndex((o) => SELF_ID_DECLINE.test(String(o)));
+  return no >= 0 ? no : -1;
+}
+
+async function selfIdGroups(form, profile, lookupSaved) {
+  // Each unanswered set, by the name its boxes share.
+  const sets = await form
+    .evaluate(() => {
+      const out = new Map();
+      for (const el of document.querySelectorAll('input[type=checkbox], input[type=radio]')) {
+        const name = el.getAttribute("name");
+        if (!name) continue;
+        const r = el.getBoundingClientRect();
+        const seen = r.width > 0 || r.height > 0 || !!el.closest("label") || !!document.querySelector(`label[for="${CSS.escape(el.id || "-")}"]`);
+        if (!seen) continue;
+        const lab = (el.closest("label")?.innerText || (el.id && document.querySelector(`label[for="${CSS.escape(el.id)}"]`)?.innerText) || el.getAttribute("aria-label") || el.value || "").replace(/\s+/g, " ").trim();
+        const g = out.get(name) ?? { name, options: [], ids: [], checked: false, ask: "" };
+        g.options.push(lab.slice(0, 90));
+        g.ids.push(el.id || "");
+        g.checked = g.checked || el.checked;
+        if (!g.ask) {
+          const box = el.closest("fieldset, [role=group], [role=radiogroup]") ?? el.parentElement?.parentElement?.parentElement;
+          g.ask = (box?.querySelector("legend")?.innerText || box?.getAttribute("aria-label") || "").replace(/\s+/g, " ").trim().slice(0, 140);
+        }
+        out.set(name, g);
+      }
+      return [...out.values()];
+    })
+    .catch(() => []);
+  let done = 0;
+  for (const g of sets) {
+    if (g.checked || g.options.length < 2) continue;
+    const topic = selfIdTopic(`${g.name} ${g.ask}`);
+    if (!topic) continue;
+    const saved = String(lookupSaved(g.ask || topic) ?? answerQuestion(topic, profile) ?? "").trim();
+    const i = selfIdChoice(g.options, saved);
+    if (i < 0) {
+      console.log(`    self-identification "${topic}": ${g.options.length} boxes, none of them a way to decline; left`);
+      continue;
+    }
+    const sel = g.ids[i] ? `[id="${g.ids[i].replace(/["\\]/g, "")}"]` : null;
+    const box = sel ? await form.$(sel).catch(() => null) : (await form.$$(`input[name="${g.name.replace(/["\\]/g, "")}"]`).catch(() => []))[i];
+    if (!box) continue;
+    try {
+      await box.check({ timeout: 3000 });
+    } catch {
+      // Drawn boxes cover the real one: the label is what a person presses.
+      const lab = g.ids[i] ? await form.$(`label[for="${g.ids[i].replace(/["\\]/g, "")}"]`).catch(() => null) : null;
+      if (lab) await lab.click({ timeout: 3000 }).catch(() => {});
+      else await box.check({ force: true, timeout: 3000 }).catch(() => {});
+    }
+    if (await box.isChecked().catch(() => false)) {
+      done++;
+      console.log(`    self-identification "${topic}": ${saved && !SELF_ID_DECLINE.test(g.options[i]) ? "the saved answer" : "declined"}, as the form words it`);
+    }
+  }
+  return done;
+}
+
 async function oracleSelfId(page, form, profile, lookupSaved) {
   let done = 0;
   for (const box of await form.$$('input[id^="US-STANDARD-ORA_" i]').catch(() => [])) {
@@ -9496,6 +9592,13 @@ async function applyToJobOnce(context, job, profile, answers) {
       await oracleProbe(form, "filled, before submit");
     }
 
+    // Self-identification asked as a set of boxes. Entered only from what
+    // the owner has saved; otherwise the set's own way of declining is
+    // ticked; where it offers none, it is left and the form says so.
+    if (!/myworkdayjobs\.com|myworkdaysite\.com|oraclecloud\.com|greenhouse\.io/i.test(hostOf(page.url()) ?? "")) {
+      filled += await selfIdGroups(form, profile, lookupSaved).catch(() => 0);
+    }
+
     // Is the form actually complete before anything is clicked?
     //
     // An ATS rejects a submission with a required field empty, and the
@@ -9584,6 +9687,29 @@ async function applyToJobOnce(context, job, profile, answers) {
           .catch(() => false);
         if (chosenNearby) continue;
 
+        // A search-and-pick box that draws what was picked beside itself and
+        // keeps its own text empty. What stands in its frame that is not the
+        // question, a prompt to choose, or a complaint, is the answer.
+        const drawnBeside = await el
+          .evaluate((node) => {
+            if (node.getAttribute("role") !== "combobox" || node.tagName !== "INPUT") return null;
+            let box = node.parentElement;
+            for (let d = 0; box && d < 3; d++, box = box.parentElement) {
+              if (!box.querySelector("button, svg")) continue;
+              if (box.querySelectorAll("input:not([type=hidden])").length > 1) return null;
+              let text = (box.innerText ?? "").replace(/\s+/g, " ").trim();
+              for (const l of box.querySelectorAll("label, legend")) text = text.replace((l.innerText ?? "").replace(/\s+/g, " ").trim(), "").trim();
+              text = text.replace(/^\*+|\*+$/g, "").trim();
+              if (!text) return "";
+              if (/^(-|–|—)*\s*(please )?(select|choose|search|type)\b.{0,24}$/i.test(text)) return "";
+              if (/\b(required|is invalid|must be|error)\b/i.test(text)) return "";
+              return text.slice(0, 40);
+            }
+            return null;
+          })
+          .catch(() => null);
+        if (drawnBeside) continue;
+
         // "unnamed field" names nothing and cannot be acted on. Fall back to
         // whatever the markup does carry before giving up on it.
         const label =
@@ -9632,6 +9758,16 @@ async function applyToJobOnce(context, job, profile, answers) {
               // A chosen value usually lands in a sibling element rather than
               // back in the box that searched for it.
               chosen: (near?.innerText ?? "").replace(/\s+/g, " ").trim().slice(0, 40),
+              // The frames around it, outermost last: what each is and how
+              // many words it holds. Counts only; the words may be anyone's.
+              frames: (() => {
+                const out = [];
+                let b = node.parentElement;
+                for (let d = 0; b && d < 3; d++, b = b.parentElement) {
+                  out.push(`${b.tagName.toLowerCase()}.${String(b.className ?? "").split(/\s+/)[0].replace(/[^A-Za-z_-]/g, "").slice(0, 18)}:${(b.innerText ?? "").trim().length}w${b.querySelector("input[type=hidden]") ? "+hidden" : ""}`);
+                }
+                return out;
+              })(),
               sameLabelCount: node.getAttribute("aria-label")
                 ? document.querySelectorAll(
                     `[aria-label="${CSS.escape(node.getAttribute("aria-label"))}"]`,

@@ -203,6 +203,10 @@ function swap(line) {
     const body = esc(from).replace(/\\? /g, "\\s+").replace(/['’]/g, "['’]");
     s = s.replace(new RegExp(from.length < 8 ? `(^|[^A-Za-z0-9])${body}(?![A-Za-z0-9])` : body, "gi"), (m, lead) => (from.length < 8 ? `${lead ?? ""}${to}` : to));
   }
+  // Whose other companies a question names is the employer's business.
+  s = s.replace(/(employer-[0-9a-f]{5}) or any of [^"|;\]]*/g, "$1 or any of [its companies]");
+  // A town with its state is a place, whoever wrote it.
+  s = s.replace(/\b[A-Z][a-z]+(?:[ -][A-Z][a-z]+){0,2}, (?:AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY|DC)\b/g, "[a place]");
   for (const [from, to] of SHORT) s = s.replace(new RegExp(`(^|[^A-Za-z0-9])${esc(from)}(?![A-Za-z0-9])`, "g"), (m, lead) => `${lead ?? ""}${to}`);
   return s;
 }
