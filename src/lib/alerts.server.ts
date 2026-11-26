@@ -99,6 +99,70 @@ export function companiesFromAlert(m: AlertMessage): string[] {
   return [...found.values()].slice(0, 40);
 }
 
+/**
+ * A board's receipt for an application made on the board itself — by the
+ * owner's own hand, or by a tool the board offers its members. Read for
+ * which employer and which role, so that the application is on record here
+ * and a reply from that employer is recognised as a reply to it.
+ */
+export function boardReceipt(m: AlertMessage): { board: string; company: string; title: string | null } | null {
+  const from = String(m.from_addr ?? "").toLowerCase();
+  const board = (from.match(BOARDS) ?? [])[1];
+  if (!board) return null;
+  const subject = String(m.subject ?? "").replace(/\s+/g, " ").trim();
+  const body = String(m.body ?? "").replace(/\r/g, "");
+  const first = body.split("\n").map((l) => l.replace(/\s+/g, " ").trim()).filter(Boolean).slice(0, 12);
+  const clean = (v: string | undefined | null) => tidy(String(v ?? "").replace(/[.!]+$/, ""));
+  let company = "";
+  let title: string | null = null;
+  let hit: RegExpMatchArray | null;
+  if ((hit = subject.match(/^you(?:'ve| have)? applied (?:to|for) (.+?) at (.+)$/i))) {
+    title = clean(hit[1]);
+    company = clean(hit[2]);
+  } else if ((hit = subject.match(/^your application for (.+?) at (.+?)(?: (?:was|has been) (?:sent|submitted|received))?$/i))) {
+    title = clean(hit[1]);
+    company = clean(hit[2]);
+  } else if ((hit = subject.match(/^your application (?:was|has been) (?:sent|submitted) to (.+)$/i)) || (hit = subject.match(/^your application to (.+?) (?:was|has been) (?:sent|submitted)/i))) {
+    company = clean(hit[1]);
+    // The role is the line above the employer's, where the receipt sets them out.
+    const at = first.findIndex((l) => l.toLowerCase().startsWith(company.toLowerCase()));
+    title = at > 0 ? clean(first[at - 1]) : null;
+  } else if ((hit = subject.match(/^indeed application:\s*(.+)$/i))) {
+    title = clean(hit[1]);
+    company = clean((body.match(/(?:sent|submitted) to ([^\n.]{2,60})/i) ?? [])[1]);
+  } else {
+    return null;
+  }
+  if (!plausibleCompany(company)) return null;
+  return { board, company, title: title && title.length <= 120 ? title : null };
+}
+
+/** Put on record the applications a board says were sent. Each once. */
+export async function recordBoardApplications(supabase: any, messages: Array<AlertMessage & { message_id?: string | null; received_at?: string | null }>) {
+  let recorded = 0;
+  for (const m of messages) {
+    const r = boardReceipt(m);
+    if (!r || !m.message_id) continue;
+    const { error } = await supabase.from("jobs").upsert(
+      {
+        // The receipt is the record; it has no posting address of its own.
+        url: `https://www.${r.board}.com/#applied-${String(m.message_id).replace(/[^A-Za-z0-9_-]/g, "").slice(0, 40)}`,
+        title: r.title ?? "an application made on the board",
+        company: r.company,
+        source: r.board,
+        status: "applied",
+        applied_at: m.received_at ?? new Date().toISOString(),
+        confirm_state: "confirmed",
+        confirmed_at: m.received_at ?? new Date().toISOString(),
+        description: `Applied on ${r.board}; recorded from its receipt.`,
+      },
+      { onConflict: "url", ignoreDuplicates: true },
+    );
+    if (!error) recorded++;
+  }
+  return { recorded };
+}
+
 /** A first guess at where an employer's careers page lives. */
 export function guessCareersUrl(company: string): string | null {
   const slug = company

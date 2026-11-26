@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { afterBooking, afterRejection, aiPolicy, assessmentKind, writtenQuestions, bookingLink, deadlineIn, googleCalendarLink, healthProblems, icsFor, meetingLink, momentOf, noticeFor, offerFacts, requirementsMet, statedTime, streetAddress } from "./moments";
+import { afterBooking, afterRejection, aiPolicy, assessmentKind, assessmentType, writtenQuestions, bookingLink, deadlineIn, googleCalendarLink, healthProblems, icsFor, meetingLink, momentOf, noticeFor, offerFacts, requirementsMet, statedTime, streetAddress } from "./moments";
 
 const ZONE = "America/New_York";
 const NOW = new Date("2026-11-27T15:00:00Z"); // a Friday, 10am Eastern
@@ -168,7 +168,7 @@ describe("the email to the owner", () => {
     expect(n.event).toBeNull();
   });
   it("an assessment and an offer say what is due and that nothing was done for the owner", () => {
-    expect(noticeFor({ moment: { kind: "assessment", link: "https://a.example.com/t", due: "December 3" }, job, zone: ZONE }).subject).toBe("ApplyPilot: assessment to take, due December 3 - Store Manager at Example Co");
+    expect(noticeFor({ moment: { kind: "assessment", link: "https://a.example.com/t", due: "December 3" }, job, zone: ZONE }).subject).toBe("ApplyPilot: an assessment to take, due December 3 - Store Manager at Example Co");
     const o = noticeFor({ moment: { kind: "offer", pay: "$58,000 per year", start: "January 4, 2027", replyBy: "December 5" }, job, zone: ZONE });
     expect(o.subject).toBe("ApplyPilot: an offer, answer by December 5 - Store Manager at Example Co");
     expect(o.body).toContain("Pay:        $58,000 per year");
@@ -211,5 +211,33 @@ describe("an assessment's invitation, read for what it says", () => {
     const n = noticeFor({ moment: silent, job: null, zone: ZONE, drafts: [{ question: "x", answer: "y" }] });
     expect(n.body).toContain("AI TOOLS: the invitation does not say");
     expect(n.body).not.toContain("Q: x");
+  });
+});
+
+describe("the several things an employer may ask for after an application", () => {
+  it("are told apart", () => {
+    expect(assessmentType("Please complete your HireVue on-demand interview")).toBe("recorded_interview");
+    expect(assessmentType("Your Criteria cognitive aptitude test is ready")).toBe("skills_exam");
+    expect(assessmentType("Complete the Predictive Index behavioral assessment")).toBe("personality");
+    expect(assessmentType("Please complete this short pre-screen questionnaire about your availability and work authorization")).toBe("screening_questionnaire");
+    expect(assessmentType("We need a few more questions answered to finish your application")).toBe("screening_questionnaire");
+    expect(assessmentType("Please reply with your answers.", "Why do you want to work in retail operations at our company?")).toBe("written_questions");
+    expect(assessmentType("Please take our online assessment")).toBe("skills_exam");
+  });
+  it("a questionnaire handed to the applier says it is being done, and asks nothing of the owner", () => {
+    const m = momentOf({ category: "action_needed", subject: "Complete your questionnaire", body: "Please complete the pre-screen questionnaire at https://forms.example.com/q/abc by December 3." }, ZONE, NOW);
+    if (m?.kind !== "assessment") throw new Error("not an assessment");
+    expect(m.type).toBe("screening_questionnaire");
+    const n = noticeFor({ moment: m, job: null, from: "hr@acme.com", zone: ZONE, queued: true });
+    expect(n.subject).toMatch(/^ApplyPilot: a questionnaire is being filled for you, due December 3/);
+    expect(n.body).toContain("BEING DONE FOR YOU");
+    expect(n.body).not.toContain("yours to take");
+  });
+  it("a test of the person stays the person's", () => {
+    const m = momentOf({ category: "action_needed", subject: "Assessment", body: "Complete your HireVue video interview at https://acme.hirevue.com/c/1" }, ZONE, NOW);
+    if (m?.kind !== "assessment") throw new Error("not an assessment");
+    const n = noticeFor({ moment: m, job: null, zone: ZONE, drafts: null });
+    expect(n.subject).toMatch(/a recorded interview to take/);
+    expect(n.body).toContain("It measures you, so it is yours to take.");
   });
 });

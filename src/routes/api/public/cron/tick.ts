@@ -101,8 +101,10 @@ async function tick() {
         counts.stored = r?.stored ?? 0;
         counts.drafted = r?.drafted ?? 0;
         try {
-          const { harvestAlerts } = await import("@/lib/alerts.server");
+          const { harvestAlerts, recordBoardApplications } = await import("@/lib/alerts.server");
           await harvestAlerts(supabase, messages);
+          // Applications a board says were sent on the board itself.
+          await recordBoardApplications(supabase, messages);
         } catch {
           /* the employers named in alerts are a bonus, never a reason to fail */
         }

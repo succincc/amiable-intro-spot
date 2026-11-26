@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { companiesFromAlert, guessCareersUrl, isJobAlert } from "./alerts.server";
+import { boardReceipt, companiesFromAlert, guessCareersUrl, isJobAlert } from "./alerts.server";
 import { greenhousePlace } from "./careers";
 
 describe("job-board alerts", () => {
@@ -54,5 +54,18 @@ describe("a Greenhouse posting's place", () => {
     expect(greenhousePlace({ location: { name: "In-Office" }, offices: [] })).toBe("In-Office");
     expect(greenhousePlace({ location: { name: "Hybrid" }, offices: [{ name: "HQ" }] })).toBe("Hybrid");
     expect(greenhousePlace({})).toBeUndefined();
+  });
+});
+
+describe("a board's receipt for an application made on the board", () => {
+  it("is read for the employer and the role, in each board's wording", () => {
+    expect(boardReceipt({ from_addr: "jobs-noreply@linkedin.com", subject: "Your application was sent to Acme Logistics", body: "Operations Manager\nAcme Logistics · Newark, NJ\nApplied on November 26" })).toEqual({ board: "linkedin", company: "Acme Logistics", title: "Operations Manager" });
+    expect(boardReceipt({ from_addr: "indeedapply@indeed.com", subject: "Indeed Application: Store Manager", body: "Your application has been submitted.\nThe following items were sent to Garden State Foods. Good luck!" })).toEqual({ board: "indeed", company: "Garden State Foods", title: "Store Manager" });
+    expect(boardReceipt({ from_addr: "noreply@ziprecruiter.com", subject: "You applied to Shift Supervisor at Shore Medical Group", body: "" })).toEqual({ board: "ziprecruiter", company: "Shore Medical Group", title: "Shift Supervisor" });
+    expect(boardReceipt({ from_addr: "jobs@monster.com", subject: "Your application for Area Manager at Acme Logistics has been submitted", body: "" })).toEqual({ board: "monster", company: "Acme Logistics", title: "Area Manager" });
+  });
+  it("is not made out of an alert, or of mail from anyone else", () => {
+    expect(boardReceipt({ from_addr: "alert@indeed.com", subject: "Operations Manager jobs in Princeton, NJ", body: "" })).toBeNull();
+    expect(boardReceipt({ from_addr: "recruiting@acme.com", subject: "Your application was sent to Acme", body: "" })).toBeNull();
   });
 });

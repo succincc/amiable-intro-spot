@@ -19,7 +19,7 @@ import { cleanHolds, type Hold, type Kind } from "@/lib/availability";
 export type Moment =
   | { kind: "interview_time"; when: Date; link: string | null; where: string | null }
   | { kind: "pick_a_time"; link: string }
-  | { kind: "assessment"; link: string | null; due: string | null; ai?: { stance: "permitted" | "prohibited" | "not stated"; quote: string | null }; provider?: { name: string; what: string; ready: string[] } | null; questions?: string[] }
+  | { kind: "assessment"; link: string | null; due: string | null; type?: AssessmentType; ai?: { stance: "permitted" | "prohibited" | "not stated"; quote: string | null }; provider?: { name: string; what: string; ready: string[] } | null; questions?: string[] }
   | { kind: "offer"; pay: string | null; start: string | null; replyBy: string | null }
   | { kind: "rejection" };
 
@@ -192,6 +192,26 @@ export function assessmentKind(text: string | null | undefined): { name: string;
   return hit ? { name: hit.name, what: hit.what, ready: hit.ready } : null;
 }
 
+export type AssessmentType = "recorded_interview" | "skills_exam" | "personality" | "written_questions" | "screening_questionnaire" | "unknown";
+
+/**
+ * Which of several different things an employer is asking for. They are not
+ * one thing: a form of facts and eligibility is answered from the profile
+ * like any application form, and written questions from the resume; a test
+ * of skill, a questionnaire about temperament and a recorded interview are
+ * measures of the person, and are the person's to sit.
+ */
+export function assessmentType(text: string | null | undefined, body?: string | null): AssessmentType {
+  const t = String(text ?? "").toLowerCase();
+  if (/hirevue|spark ?hire|willo\b|vidcruiter|one[- ]way (?:video )?interview|recorded (?:video )?(?:interview|responses?|answers?)|video interview|on[- ]demand interview|record your (?:answers|responses)/.test(t)) return "recorded_interview";
+  if (/coding (?:challenge|test|assessment)|skills? (?:test|exam)|typing test|excel test|hackerrank|codility|codesignal|testgorilla|eskill|aptitude|cognitive|ccat\b|wonderlic|reasoning (?:test|assessment)|timed (?:test|assessment)|proctored/.test(t)) return "skills_exam";
+  if (/personality|behaviou?ral (?:assessment|profile|survey)|predictive index|hogan|caliper|\bdisc (?:assessment|profile)|culture index|pymetrics|plum\.io|work ?style|strengths? (?:assessment|finder)/.test(t)) return "personality";
+  if (writtenQuestions(body ?? text).length && /\b(reply|respond|answer|send (?:us )?your (?:answers|responses))\b/.test(t)) return "written_questions";
+  if (/questionnaire|pre-?screen|screening questions?|supplemental questions?|additional (?:information|questions|details)|a few (?:more |quick |additional )?questions|eligibility|availability form|complete (?:the|this|your|a) (?:form|survey|application)|background (?:check )?(?:form|authorization)|finish (?:your|the) application/.test(t)) return "screening_questionnaire";
+  if (/skills? assessment|online assessment|assessment/.test(t)) return "skills_exam";
+  return "unknown";
+}
+
 /** Questions an invitation puts in so many words, for answering in writing. */
 export function writtenQuestions(text: string | null | undefined): string[] {
   const out: string[] = [];
@@ -244,7 +264,7 @@ export function momentOf(
     return null;
   }
   if (m.category === "action_needed" && /\b(assessment|skills? test|questionnaire|coding (?:challenge|test)|online test|video interview|hirevue|one-way interview|complete (?:the|your|a) (?:assessment|test|survey))\b/i.test(text)) {
-    return { kind: "assessment", link: firstLink(text, /assess|test|survey|hirevue|challenge|interview|questionnaire|candidate/i), due: deadlineIn(text), ai: aiPolicy(text), provider: assessmentKind(text), questions: writtenQuestions(m.body) };
+    return { kind: "assessment", link: firstLink(text, /assess|test|survey|hirevue|challenge|interview|questionnaire|candidate/i), due: deadlineIn(text), type: assessmentType(text, m.body), ai: aiPolicy(text), provider: assessmentKind(text), questions: writtenQuestions(m.body) };
   }
   return null;
 }
@@ -381,8 +401,10 @@ export function noticeFor(a: {
   kind?: Kind | null;
   clash?: Hold | null;
   openTimes?: string | null;
-  /** Answers drafted for written questions, only where the invitation allows AI tools. */
+  /** Answers drafted for written questions: never where the invitation rules AI out. */
   drafts?: Array<{ question: string; answer: string }> | null;
+  /** True when a questionnaire has been handed to the applier to fill. */
+  queued?: boolean;
 }): { subject: string; body: string; event: { start: Date; end: Date; title: string; where: string | null; notes: string } | null } {
   const who = whoFrom(a.job, a.from);
   const role = a.job?.title ? `${a.job.title} at ${who}` : who;
@@ -453,39 +475,51 @@ export function noticeFor(a: {
   }
 
   if (m.kind === "assessment") {
-    say(`${who} sent an assessment${a.job?.title ? ` for ${a.job.title}` : ""}.`);
+    const type = m.type ?? "unknown";
+    const stance = m.ai?.stance ?? "not stated";
+    const name = { recorded_interview: "a recorded interview", skills_exam: "a skills test", personality: "a personality questionnaire", written_questions: "written questions", screening_questionnaire: "a questionnaire", unknown: "an assessment" }[type];
+    const mine = type === "screening_questionnaire" && a.queued;
+    say(`${who} sent ${name}${a.job?.title ? ` for ${a.job.title}` : ""}.`);
     say();
     if (m.link) say(`Open:  ${m.link}`);
     if (m.due) say(`Due:   ${m.due}`);
-    if (m.provider) {
+    if (mine) {
+      say();
+      say("BEING DONE FOR YOU: it is a form of facts about you, like the application itself. It is being filled from your profile and saved answers and sent. Anything it asks that nothing on file answers will be on the Answers page; you need do nothing unless that happens.");
+    } else if (type === "screening_questionnaire") {
+      say();
+      say("It is a form of facts about you. It carries no link that can be opened for you, so it is yours to fill; your saved answers are on the Answers page.");
+    }
+    if (m.provider && !mine) {
       say();
       say(`WHAT IT IS: ${m.provider.name} - ${m.provider.what}.`);
       say();
       say("TO BE READY");
       for (const r of m.provider.ready) say(`  - ${r}`);
     }
-    say();
-    const stance = m.ai?.stance ?? "not stated";
-    if (stance === "permitted") {
-      say(`AI TOOLS: the invitation allows them - "${m.ai?.quote}"`);
-      if (a.drafts?.length) {
+    if (!mine) {
+      say();
+      if (stance === "prohibited") say(`AI TOOLS: the invitation rules them out - "${m.ai?.quote}" Nothing is drafted for this one.`);
+      else if (stance === "permitted") say(`AI TOOLS: the invitation allows them - "${m.ai?.quote}"`);
+      else if (type === "written_questions") say("AI TOOLS: the invitation does not say. These are written application questions, answered the way the application's own were: from your resume.");
+      else say("AI TOOLS: the invitation does not say. Treated as your own work: nothing is drafted or taken for you.");
+      if (a.drafts?.length && (stance === "permitted" || (type === "written_questions" && stance !== "prohibited"))) {
         say();
-        say("DRAFTS, written from your resume and the posting because the invitation allows it. They are yours to check, change and send; nothing has been submitted.");
+        say("DRAFTS, written from your resume alone. They are yours to check, change and send; nothing has been submitted.");
         for (const d of a.drafts) {
           say();
           say(`Q: ${d.question}`);
           say(d.answer);
         }
       }
-    } else if (stance === "prohibited") {
-      say(`AI TOOLS: the invitation rules them out - "${m.ai?.quote}" Nothing is drafted for this one.`);
-    } else {
-      say("AI TOOLS: the invitation does not say. Treated as your own work: nothing is drafted or taken for you.");
+      if (type === "recorded_interview" || type === "skills_exam" || type === "personality" || type === "unknown") {
+        say();
+        say("It measures you, so it is yours to take. What is done for you is this page: what it is, when it is due, and how to be ready.");
+      }
     }
-    say();
-    say("It is yours to take. What is done for you is this page: what it is, when it is due, and how to be ready.");
     mail();
-    return { subject: `ApplyPilot: assessment to take${m.due ? `, due ${m.due}` : ""} - ${role}`.slice(0, 150), body: L.join("\n"), event: null };
+    const lead = mine ? "a questionnaire is being filled for you" : type === "written_questions" ? "written questions to answer" : type === "screening_questionnaire" ? "a questionnaire to fill" : `${name} to take`;
+    return { subject: `ApplyPilot: ${lead}${m.due ? `, due ${m.due}` : ""} - ${role}`.slice(0, 150), body: L.join("\n"), event: null };
   }
 
   say(`An offer: ${role}.`);

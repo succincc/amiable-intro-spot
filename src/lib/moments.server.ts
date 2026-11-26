@@ -126,7 +126,32 @@ export async function tellOwner(supabase: any, now = new Date()): Promise<{ told
     // AI tools may be used, and only from the owner's own resume. They go to
     // the owner to check and send; nothing is submitted to anyone.
     let drafts: Array<{ question: string; answer: string }> | null = null;
-    if (moment.kind === "assessment" && moment.ai?.stance === "permitted" && moment.questions?.length && process.env["GEMINI_API_KEY"]) {
+    // A questionnaire of facts is a form like the application was: it is
+    // handed to the applier, which fills it from the profile and saved
+    // answers and stops at anything nothing on file answers.
+    let queued = false;
+    if (moment.kind === "assessment" && moment.type === "screening_questionnaire" && moment.link && moment.ai?.stance !== "prohibited") {
+      const { error: notQueued } = await supabase.from("jobs").upsert(
+        {
+          url: moment.link,
+          apply_url: moment.link,
+          title: `Follow-up questionnaire: ${job?.title ?? String(e.subject ?? "from an employer")}`.slice(0, 200),
+          company: job?.company ?? String(e.from_addr ?? "").split("@")[1]?.split(".")[0] ?? "an employer",
+          description: String(e.body ?? "").slice(0, 4000),
+          source: "questionnaire",
+          remote: true,
+          posted_at: new Date().toISOString(),
+          score: 10,
+          status: "queued",
+        },
+        { onConflict: "url", ignoreDuplicates: true },
+      );
+      queued = !notQueued;
+    }
+    const mayDraft =
+      moment.kind === "assessment" && Boolean(moment.questions?.length) &&
+      (moment.ai?.stance === "permitted" || (moment.type === "written_questions" && moment.ai?.stance !== "prohibited"));
+    if (moment.kind === "assessment" && mayDraft && moment.questions?.length && process.env["GEMINI_API_KEY"]) {
       try {
         const { callGemini } = await import("@/lib/gemini.server");
         const raw = await callGemini({
@@ -134,7 +159,7 @@ export async function tellOwner(supabase: any, now = new Date()): Promise<{ told
           temperature: 0.3,
           maxTokens: 1400,
           prompt:
-            `An employer has asked a candidate written questions and has said in the invitation that AI tools may be used. ` +
+            `An employer has asked a candidate written questions as part of an application. ` +
             `Draft an answer to each, in the first person, 60 to 120 words, plain and specific. Use ONLY what the resume below shows: ` +
             `never invent an employer, a title, a date, a number, a degree or a skill. Where the resume shows nothing for a question, ` +
             `write exactly "[yours to write: the resume shows nothing for this]".\n\n` +
@@ -155,7 +180,7 @@ export async function tellOwner(supabase: any, now = new Date()): Promise<{ told
       }
     }
 
-    const note = noticeFor({ moment, job, from: e.from_addr, subject: e.subject, body: e.body, zone, resume: profile.resume_text, kind, clash, openTimes, drafts });
+    const note = noticeFor({ moment, job, from: e.from_addr, subject: e.subject, body: e.body, zone, resume: profile.resume_text, kind, clash, openTimes, drafts, queued });
     let sent: { ok: boolean; error?: string };
     if (note.event) {
       if (to === undefined) to = await ownAddress(supabase);
