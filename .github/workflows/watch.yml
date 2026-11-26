@@ -47,11 +47,11 @@ on:
     types: [tick]
   # The way back in if the chain breaks: hourly, off the hour, for whenever
   # GitHub does start it.
-  # Every three hours, with the rounds. Each run costs a minute of the
-  # account's allowance, so it is not run more often than there is a round
-  # to start.
+  # Every hour, with the rounds. The repository is public, so a runner's
+  # minutes cost nothing; and a month of three-hourly rounds used under half
+  # of the database credits the plan already includes.
   schedule:
-    - cron: "44 */3 * * *"
+    - cron: "44 * * * *"
 
 permissions:
   actions: write
@@ -90,18 +90,19 @@ jobs:
           # optionally, the one hour of the day (UTC) it may be started in.
           # The summary is a morning email: twelve UTC is seven Eastern.
           #
-          # The intervals are multiples of three hours on purpose. Jobs that
-          # come due together run together, the database is awake for that
-          # one stretch, and asleep — and unbilled — until the next.
+          # Finding, measuring and applying come round every hour, so a new
+          # posting is applied to within about an hour of appearing. The
+          # slower jobs keep intervals that are whole hours, so what comes
+          # due together runs together and the database sleeps between.
           # The sweep leads each round and hands on: what it finds is measured
           # as it ends, and applied to as the measuring ends. Measuring and
           # applying are listed here with longer intervals than the round, so
           # that this starts them only when that hand-off has not happened.
           jobs_list="
-          sweep.yml|3|-
-          tailor.yml|3|-
-          measure.yml|4|apply=true,then_apply=true
-          apply.yml|5|as_scheduled=true,max_jobs=60
+          sweep.yml|1|-
+          tailor.yml|1|-
+          measure.yml|2|apply=true,then_apply=true
+          apply.yml|2|as_scheduled=true,max_jobs=60
           oracle.yml|6|apply=true
           feeds.yml|12|apply=true
           successfactors.yml|6|apply=true
