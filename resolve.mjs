@@ -303,10 +303,27 @@ async function waysIn(page) {
     .catch(() => []);
 }
 
+/**
+ * For a system with no reader yet, the address that says which of its
+ * tenants this employer is: the next thing a reader for it needs, and not
+ * something its bare host tells.
+ */
+const WAY_IN = {
+  adp: /[?&]cid=[0-9a-f-]{8,}|myjobs\.adp\.com\/[^/?#]+/i,
+  avature: /avature\.net\/[^/?#]+/i,
+  taleo: /careersection\/[^/?#]+/i,
+  brassring: /partnerid=\d+[^#]*siteid=\d+|siteid=\d+[^#]*partnerid=\d+/i,
+  dayforce: /dayforcehcm\.com\/(?:[a-z]{2}-[A-Z]{2}\/[^/?#]+\/[^/?#]+|CandidatePortal\/[a-z]{2}-[A-Z]{2}\/[^/?#]+)/i,
+  ukg: /JobBoard\/[0-9a-f-]{36}/i,
+  cornerstone: /careersite\/\d+/i,
+  jobvite: /jobs\.jobvite\.com\/[^/?#]+/i,
+};
+
 /** What a set of addresses says: feeds we can pull, and systems we can only name. */
 function readAddresses(urls) {
   const feeds = new Map();
   const others = new Map();
+  const ways = new Map();
   // Where each such system lives for this employer: the next thing anyone
   // building for it needs. A careers host, not a tracking or asset one.
   const hosts = new Map();
@@ -318,9 +335,10 @@ function readAddresses(urls) {
       const prev = hosts.get(t.other);
       const careersy = (h) => /^careers?[-.]|jobs|recruit/.test(h);
       if (!prev || (careersy(t.host) && !careersy(prev)) || (t.host.includes("/sites/") && !prev.includes("/sites/"))) hosts.set(t.other, t.host);
+      if (WAY_IN[t.other]?.test(url) && !ways.has(t.other)) ways.set(t.other, String(url).split("#")[0].slice(0, 200));
     } else feeds.set(`${t.ats}|${t.token}|${t.pod ?? ""}|${t.site ?? ""}`, t);
   }
-  return { feeds: [...feeds.values()], others, hosts };
+  return { feeds: [...feeds.values()], others, hosts, ways };
 }
 
 /**
@@ -483,7 +501,7 @@ async function look(browser, name, careersUrl) {
 
   const visited = [];
   let blocked = null;
-  const result = { feeds: [], others: new Map(), hosts: new Map(), pages: 0, final: careersUrl, blocked: null };
+  const result = { feeds: [], others: new Map(), hosts: new Map(), ways: new Map(), pages: 0, final: careersUrl, blocked: null };
 
   const settle = async (page) => {
     await page.waitForLoadState("domcontentloaded", { timeout: 20_000 }).catch(() => {});
@@ -498,6 +516,7 @@ async function look(browser, name, careersUrl) {
     }
     for (const [k, n] of seen.others) result.others.set(k, Math.max(result.others.get(k) ?? 0, n));
     for (const [k, h] of seen.hosts) if (!result.hosts.has(k)) result.hosts.set(k, h);
+    for (const [k, w] of seen.ways ?? []) if (!result.ways.has(k)) result.ways.set(k, w);
     return result.feeds.length > 0;
   };
 
@@ -850,7 +869,7 @@ if (process.env.RESOLVE_IMPORT_ONLY !== "1") {
         const READ = READ_SYSTEMS.includes(top);
         await save(c, {
           status: READ ? "ok" : "failed", resolved_url: seen.final,
-          note: `browser: runs on ${top}${at ? ` at ${at}` : ""}${READ ? ", read by its own job" : ", which the applier does not handle yet"}`,
+          note: `browser: runs on ${top}${at ? ` at ${at}` : ""}${READ ? ", read by its own job" : ", which the applier does not handle yet"}${seen.ways?.get(top) ? `; way in ${seen.ways.get(top)}` : ""}`.slice(0, 380),
         });
         continue;
       }
