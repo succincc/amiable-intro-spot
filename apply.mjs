@@ -3638,7 +3638,10 @@ async function oracleRepair(page, form, profile, job, onlyReport = false, lookup
                   const keep = all.find((b) => KEEP.test(words(b)));
                   if (keep) {
                     keep.scrollIntoView({ block: "center" });
-                    keep.click();
+                    // Marked, and pressed from outside with a real press of
+                    // the mouse: pressed from in here, "ADD EXPERIENCE" took
+                    // the press and kept nothing.
+                    keep.setAttribute("data-applypilot-keep", "1");
                     return { pressed: words(keep).slice(0, 24), names: all.map((b) => words(b).slice(0, 24)).filter(Boolean).slice(0, 12) };
                   }
                   if (all.length >= 8) break;
@@ -3649,7 +3652,35 @@ async function oracleRepair(page, form, profile, job, onlyReport = false, lookup
           : null;
         buttons = pressed?.names ?? [];
         if (pressed?.pressed) {
-          await page.waitForTimeout(3000);
+          // Away from the last box first, so that what was typed in it has
+          // been taken before the entry is kept.
+          await page.keyboard.press("Tab").catch(() => {});
+          await page.waitForTimeout(600);
+          const keep = await form.$('[data-applypilot-keep="1"]').catch(() => null);
+          if (keep) {
+            await keep.scrollIntoViewIfNeeded({ timeout: 2500 }).catch(() => {});
+            await keep.click({ timeout: 4000 }).catch(() => keep.click({ timeout: 4000, force: true }).catch(() => {}));
+            await keep.evaluate((n) => n.removeAttribute("data-applypilot-keep")).catch(() => {});
+          }
+          await page.waitForTimeout(3500);
+          // What the entry says about itself if it is still open.
+          const says = await form
+            .evaluate(() => {
+              const shown = (e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+              const anchor = Array.from(document.querySelectorAll('input[id^="employerName-"]')).filter(shown).pop();
+              if (!anchor) return null;
+              let box = anchor.parentElement;
+              for (let k = 0; k < 12 && box && !/add experience|save/i.test(box.innerText || ""); k++) box = box.parentElement;
+              const out = [];
+              for (const e of Array.from((box ?? document).querySelectorAll('[class*="validation" i], [class*="error" i], [role=alert], [aria-invalid="true"]')).filter(shown)) {
+                const t = ((e.innerText || "") || `${e.tagName}#${String(e.id || "").replace(/\d+/g, "N")}`).replace(/\s+/g, " ").trim();
+                if (t && t.length < 120 && !out.includes(t)) out.push(t);
+                if (out.length >= 6) break;
+              }
+              return out;
+            })
+            .catch(() => null);
+          if (says) console.log(`    oracle work history: the entry is still open and says ${JSON.stringify(says)}`);
           // Kept, when the employer's box is no longer on the screen.
           let still = false;
           for (const c of await form.$$('input[id^="employerName-"]').catch(() => [])) if (await c.isVisible().catch(() => false)) still = true;
