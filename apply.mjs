@@ -313,6 +313,19 @@ function livesInListedState(label, p) {
   return listed.length ? (listed.includes(code) ? "Yes" : "No") : null;
 }
 
+/** "Yes" or "No" to being eighteen, from a date of birth on file; null without one. */
+function ageSays(p) {
+  const m = String(p?.date_of_birth ?? "").trim().match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$|^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (!m) return null;
+  const [y, mo, d] = m[3] ? [Number(m[3]), Number(m[1]), Number(m[2])] : [Number(m[4]), Number(m[5]), Number(m[6])];
+  const born = new Date(Date.UTC(y, mo - 1, d));
+  if (Number.isNaN(born.getTime()) || y < 1900) return null;
+  const now = new Date();
+  let age = now.getUTCFullYear() - y;
+  if (now.getUTCMonth() + 1 < mo || (now.getUTCMonth() + 1 === mo && now.getUTCDate() < d)) age--;
+  return age >= 18 ? "Yes" : "No";
+}
+
 /** Questions the form is ASKING. Checked before field-name matching. */
 function answerQuestion(label, p) {
   // "Veteran employment support agency" asks which agency sent a veteran, not
@@ -328,7 +341,7 @@ function answerQuestion(label, p) {
   // settles it; nothing else is taken as proof.
   if (has(label, "18 years", "over 18", "age of majority", "at least 18", "18 or over", "18 or older", "18 and over", "18 and older", "18+", "eighteen",
                  "age of 18", "18 or above", "18 and above", "under 18", "legal working age")) {
-    const over = p.over_18 ?? (/\b(bachelor|associate|master)('?s)?\b|\bB\.?[AS]\.?\b|\bA\.?[AS]\.?\b/.test(String(p.resume_text ?? "")) ? "Yes" : null);
+    const over = p.over_18 ?? ageSays(p) ?? (/\b(bachelor|associate|master)('?s)?\b|\bB\.?[AS]\.?\b|\bA\.?[AS]\.?\b/.test(String(p.resume_text ?? "")) ? "Yes" : null);
     // "Are you under the age of 18?" is the same question turned round.
     if (over != null && /\b(under|younger than|below|less than)\b[^.?]{0,24}\b(18|eighteen)\b/i.test(String(label))) {
       return /^(y|true)/i.test(String(over)) ? "No" : "Yes";
@@ -391,9 +404,24 @@ function answerQuestion(label, p) {
   // the word race nor the word ethnicity, and those were the only two this
   // knew. Two rounds went into widget theories — a multi-select, an array
   // field — for a question the answer table had simply never matched.
+  // Hispanic or Latino is its own question on most forms, and the race on
+  // file does not answer it. From the owner's own answer in the profile:
+  // a yes or a no where that is what is asked, the form's usual wording
+  // where it offers a list of its own.
+  if (p.hispanic_latino && has(label, "hispanic", "latino", "ethnicity") && !has(label, "race", "racial")) {
+    const own = String(p.hispanic_latino);
+    if (/^decline/i.test(own)) return "Decline to self-identify";
+    const asksYesNo = /^\s*(are you|is your|do you)\b[^?]*\b(hispanic|latino)/i.test(String(label));
+    if (asksYesNo) return /^y/i.test(own) ? "Yes" : "No";
+    return /^y/i.test(own) ? "Hispanic or Latino" : "Not Hispanic or Latino";
+  }
   if (has(label, "race", "racial", "ethnic", "ethnicity", "ethnic background",
                  "hispanic", "latino", "heritage")) {
     return p.race_ethnicity;
+  }
+  // "Are you a United States citizen?" from the citizenship in the profile.
+  if (p.citizenship && /\b(u\.?s\.?a?\.?|united states)\s+citizen\b|\bcitizen of the (u\.?s\.?a?\.?|united states)\b/i.test(String(label))) {
+    return /^united states/i.test(String(p.citizenship)) ? "Yes" : "No";
   }
   // "Do you meet all of the basic qualifications for this role as specified
   // in the job description?" Applying is that assertion, and nothing reaches
@@ -7846,7 +7874,9 @@ async function applyToJobOnce(context, job, profile, answers) {
                 ? whole.slice(0, whole.length - seen.own.length)
                 : whole
               ).trim().slice(0, 200);
-              const saved = String(lookupSaved(q) ?? "").trim().toLowerCase();
+              // One citizenship and no other is "none of the above" to a
+              // list of other countries; that much the profile can say.
+              const saved = String(lookupSaved(q) ?? (/^united states only$/i.test(String(profile.citizenship ?? "")) ? "none of the above" : "")).trim().toLowerCase();
               if (!saved) {
                 if (!unknown.some((u) => u.question === q)) unknown.push({ question: q, type: "select", options: seen.all });
               } else if (seen.own && (saved === seen.own.toLowerCase() || (/^none\b/.test(saved) && /^none\b/i.test(seen.own)))) {

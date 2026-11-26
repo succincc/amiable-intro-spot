@@ -115,11 +115,16 @@ const TEXT_FIELDS: Array<[keyof Profile, string]> = [
   ["linkedin_url", "linkedin url"], ["github_url", "github url"], ["portfolio_url", "portfolio url"],
   ["target_role", "target role"], ["years_experience", "years experience"], ["education_level", "education level"],
   ["earliest_start", "earliest start"],
+  // Used only to work out an age for "are you over 18". Never typed into a form.
+  ["date_of_birth", "date of birth (MM/DD/YYYY)"],
 ];
 const SELECTS: Array<[keyof Profile, string, string[]]> = [
   ["work_authorized", "work authorized", ["Yes", "No"]],
   ["needs_sponsorship", "needs sponsorship", ["No", "Yes"]],
   ["over_18", "over 18", ["Yes", "No"]],
+  // "Which, if any, of these countries are you a citizen of" can only be
+  // answered "none" by someone with the one citizenship.
+  ["citizenship", "citizenship", ["United States only", "United States and another country", "Another country"]],
   ["can_background_check", "can pass background check", ["Yes", "No"]],
   ["willing_to_relocate", "willing to relocate", ["No", "Yes"]],
   ["veteran_status", "veteran status", ["I am not a protected veteran", "I am a protected veteran", "I do not wish to answer"]],
@@ -131,6 +136,7 @@ const SELECTS: Array<[keyof Profile, string, string[]]> = [
     "Yes, I have a disability, or have had one in the past",
   ]],
   ["gender", "gender", ["Decline to self-identify", "Male", "Female", "Non-binary"]],
+  ["hispanic_latino", "hispanic or latino", ["No", "Yes", "Decline to self-identify"]],
   ["race_ethnicity", "race / ethnicity", ["Decline to self-identify", "American Indian or Alaska Native", "Asian", "Black or African American", "Hispanic or Latino", "Native Hawaiian or Other Pacific Islander", "White", "Two or More Races"]],
 ];
 

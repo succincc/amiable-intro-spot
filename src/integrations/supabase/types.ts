@@ -622,6 +622,9 @@ export type Database = {
           id: number
           linkedin_url: string | null
           needs_sponsorship: string | null
+          citizenship: string | null
+          date_of_birth: string | null
+          hispanic_latino: string | null
           over_18: string | null
           phone: string | null
           portfolio_url: string | null
@@ -668,6 +671,9 @@ export type Database = {
           id?: number
           linkedin_url?: string | null
           needs_sponsorship?: string | null
+          citizenship?: string | null
+          date_of_birth?: string | null
+          hispanic_latino?: string | null
           over_18?: string | null
           phone?: string | null
           portfolio_url?: string | null
@@ -714,6 +720,9 @@ export type Database = {
           id?: number
           linkedin_url?: string | null
           needs_sponsorship?: string | null
+          citizenship?: string | null
+          date_of_birth?: string | null
+          hispanic_latino?: string | null
           over_18?: string | null
           phone?: string | null
           portfolio_url?: string | null
