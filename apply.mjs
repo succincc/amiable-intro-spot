@@ -66,7 +66,7 @@ export function originOf(outcome) {
   if (/already applied/.test(note)) return "already applied";
   if (why === "owner_signin" || why === "assessment" || why === "private_detail") return "the owner's own step";
   if (why === "login" || why === "email_verification" || why === "registered") return "signing in to the portal";
-  if (/http 4(0[13]|29)|refused|access denied|blocked/.test(note)) return "the provider refused";
+  if (/http 4(0[13]|29)|refused|access denied|blocked|try again later|temporarily unavailable|too many requests/.test(note)) return "the provider refused";
   if (why === "unknown_question") return "a question nothing on file answers";
   // What a form said it still wanted, by name: a required box with nothing
   // on file to put in it is the owner's fact to give, once.
@@ -8146,7 +8146,9 @@ async function applyToJobOnce(context, job, profile, answers) {
     }
 
     // iCIMS asks for an email before it shows anything else.
-    if (/(^|\.)icims\.com$/i.test(hostOf(page.url()) ?? "") || page.frames().some((f) => /icims\.com/i.test(f.url()))) {
+    // Known by the screen itself, whatever address serves it: employers put
+    // this portal behind their own names.
+    {
       const door = await icimsDoor(page, profile);
       if (door.stop) return door.stop;
       if (door.passed) {
