@@ -2,7 +2,7 @@ name: watch
 
 # The clock for everything else.
 #
-# Ten things run here on a timer — finding jobs, measuring, scoring, writing
+# Thirteen things run here on a timer — finding jobs, measuring, scoring, writing
 # resumes, applying, reading mail, following up — and GitHub's own timer turns
 # out to start them rarely: over one day "every three hours" ran three times,
 # and across every job in this repository it had fired twenty-two times in
@@ -100,6 +100,9 @@ jobs:
           apply.yml|3|as_scheduled=true,max_jobs=60
           oracle.yml|6|apply=true
           feeds.yml|12|apply=true
+          successfactors.yml|6|apply=true
+          jobposting.yml|12|apply=true
+          icims.yml|12|apply=true
           resolve.yml|24|apply=true,max=150
           outreach.yml|6|mode=send
           summary.yml|20|dry=false|12
