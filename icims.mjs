@@ -1,7 +1,7 @@
 // Postings from employers whose careers portal is iCIMS.
 //
-// The resolver found about thirty employers on iCIMS, among them the hospital
-// systems nearest Princeton. The panel's discovery does not know iCIMS, and
+// The resolver found about thirty employers on iCIMS. The panel's discovery
+// does not know iCIMS, and
 // teaching it would need a change to the panel; this reads the portals from
 // a runner instead and puts what it finds in the same queue, as postings like
 // any other — scored, measured for distance and held to the fourteen-day rule
@@ -103,6 +103,53 @@ export function wanted(title, titles, excludes) {
   });
 }
 
+const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+const strip = (html) =>
+  String(html ?? "")
+    .replace(/<(script|style)[\s\S]*?<\/\1>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&#39;|&rsquo;/g, "'")
+    .replace(/\s+/g, " ")
+    .trim();
+
+/**
+ * What kind of page this is, when it is not a list: said in a word, because
+ * an empty list, a page that wants a script run, a human check and a refusal
+ * all count the same and call for different things.
+ */
+export function kindOfPage(text) {
+  const t = String(text ?? "").toLowerCase();
+  if (/captcha|are you a human|verify you are human|not a robot|human verification/.test(t)) return "a human check";
+  if (/access denied|forbidden|request blocked|unusual traffic|you have been blocked|incident id/.test(t)) return "a refusal";
+  if (/enable javascript|javascript is (required|disabled)|requires javascript/.test(t)) return "wants a script run";
+  if (/no (jobs|positions|openings|results)|0 (jobs|results)|did not match|try (another|a different) search/.test(t)) return "an empty list";
+  if (/cookie/.test(t) && t.length < 600) return "a cookie notice";
+  return t.length < 40 ? "almost nothing" : "something else";
+}
+
+/** The listing rows in the portal's own page, as served: no browser. */
+export function rowsIn(html, host) {
+  const out = [];
+  const seen = new Set();
+  const src = String(html ?? "");
+  const re = /<a\b[^>]*href="([^"]*\/jobs\/(\d+)\/[^"?#]*\/job)[^"]*"[^>]*>([\s\S]*?)<\/a>/gi;
+  for (const m of src.matchAll(re)) {
+    if (seen.has(m[2])) continue;
+    const title = strip(m[3]).replace(/^title\s*/i, "").slice(0, 160) || strip((m[0].match(/title="([^"]+)"/) ?? [])[1] ?? "");
+    if (!title) continue;
+    seen.add(m[2]);
+    // The row's own words: what surrounds the link, up to the next posting.
+    const from = Math.max(0, m.index - 900);
+    const rest = src.slice(m.index + m[0].length, m.index + m[0].length + 1800).split(/<a\b[^>]*href="[^"]*\/jobs\/\d+\//i)[0];
+    const text = `${strip(src.slice(from, m.index)).slice(-300)} ${title} ${strip(rest)}`.slice(0, 600);
+    const href = m[1].startsWith("http") ? m[1] : `https://${host}${m[1].startsWith("/") ? "" : "/"}${m[1]}`;
+    out.push({ id: m[2], href, title, text });
+  }
+  return out;
+}
+
 /** The listing rows on whatever frame holds them. */
 async function rowsOn(page) {
   const out = [];
@@ -198,7 +245,7 @@ if (process.env.ICIMS_IMPORT_ONLY !== "1") {
     .catch(() => {});
 
   const started = Date.now();
-  const tally = { employers: 0, rows: 0, wanted: 0, fresh: 0, saved: 0, empty: 0 };
+  const tally = { employers: 0, rows: 0, wanted: 0, fresh: 0, saved: 0, empty: 0, plain: 0 };
   let sampled = 0;
   let looked = 0;
 
@@ -215,10 +262,31 @@ if (process.env.ICIMS_IMPORT_ONLY !== "1") {
       const url =
         `https://${e.host}/jobs/search?ss=1&in_iframe=1` +
         (term ? `&searchKeyword=${encodeURIComponent(term)}` : "");
+      // Asked for plainly first: the portal's page as served carries the
+      // list, and a plain request is all it takes where that is so.
+      let plainSaid = "";
       try {
-        await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30_000 });
+        const res = await fetch(url, { headers: { "User-Agent": UA, Accept: "text/html" }, redirect: "follow", signal: AbortSignal.timeout(20_000) });
+        const html = await res.text();
+        const got = rowsIn(html, e.host);
+        for (const r of got) if (!seen.has(r.id)) seen.set(r.id, r);
+        plainSaid = `HTTP ${res.status}, ${html.length} bytes, ${got.length} row(s), ${got.length ? "a list" : kindOfPage(strip(html))}`;
+        if (got.length) {
+          tally.plain++;
+          continue;
+        }
+      } catch (err) {
+        plainSaid = String(err?.message ?? err).slice(0, 40);
+      }
+      try {
+        const res = await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30_000 });
         await page.waitForTimeout(2500);
         for (const r of await rowsOn(page)) if (!seen.has(r.id)) seen.set(r.id, r);
+        if (!term && !seen.size && looked < 6) {
+          const words = [];
+          for (const frame of page.frames()) words.push(await frame.evaluate(() => (document.body?.innerText || "").slice(0, 3000)).catch(() => ""));
+          console.log(`  asked ${e.host} plainly: ${plainSaid}; with a browser: HTTP ${res?.status() ?? "?"}, ${page.frames().length} frame(s), ${kindOfPage(words.join(" "))}`);
+        }
         // What the portal actually served, for the first few that read as
         // empty: an empty list, a different link shape and a refusal all
         // look the same from the count alone.
