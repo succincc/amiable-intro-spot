@@ -2345,6 +2345,90 @@ async function signInAfterReset(page, profile, job) {
  * and the typing is done once more if none come. The zip goes first because
  * its suggestion writes the city and state as the portal spells them.
  */
+/**
+ * Choose from one of Oracle's own lists, and know that it was chosen.
+ *
+ * Text typed into these boxes is not a choice: the box "holds a value" and
+ * the form still says the field is required. A choice has been made when the
+ * list has closed and the box shows the clear button it only shows for a
+ * chosen value. This types, reads the rows whatever they are built from,
+ * takes the matching one by key and then by click, and says which worked.
+ */
+async function oracleChoose(page, form, box, typed, wantRe, what) {
+  const state = async () =>
+    await box
+      .evaluate((n) => {
+        const shown = (e) => { if (!e) return false; const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+        const wrap = n.closest(".cx-select-container, .cx-select, .input-row") ?? n.parentElement;
+        return {
+          holds: String(n.value ?? "").length,
+          open: n.getAttribute("aria-expanded"),
+          clear: shown(wrap?.querySelector('.icon-clear, [class*="clear" i]')),
+          marked: n.getAttribute("aria-invalid"),
+        };
+      })
+      .catch(() => null);
+  const chosen = (st) => !!st && st.holds > 0 && st.open !== "true" && st.clear;
+  const before = await state();
+  if (chosen(before) && before.marked !== "true") {
+    console.log(`    oracle ${what}: already chosen ${JSON.stringify(before)}`);
+    return true;
+  }
+  await box.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
+  await box.click({ timeout: 3000 }).catch(() => {});
+  await box.fill("", { timeout: 3000 }).catch(() => {});
+  await box.type(String(typed), { delay: 70 }).catch(() => {});
+  const listId = String((await box.getAttribute("aria-controls").catch(() => null)) ?? "").replace(/["\\]/g, "");
+  const rows = async () => {
+    const sel = listId
+      ? ["li", "[role=row]", "[role=option]", ".cx-select__list-item", "[role=gridcell]"].map((r) => `[id="${listId}"] ${r}`).join(", ")
+      : "[role=listbox] [role=option], ul[role=listbox] li, .cx-select__list-item";
+    const out = [];
+    for (const it of await form.$$(sel).catch(() => [])) {
+      if (!(await it.isVisible().catch(() => false))) continue;
+      const t = ((await it.innerText().catch(() => "")) || "").replace(/\s+/g, " ").trim();
+      if (!t || /loading|searching/i.test(t)) continue;
+      out.push({ el: it, text: t });
+      if (out.length >= 30) break;
+    }
+    return out;
+  };
+  const list = (await until(async () => { const l = await rows(); return l.length ? l : null; }, 9000, 400)) ?? [];
+  const made = await Promise.all(list.slice(0, 3).map((r) => r.el.evaluate((n) => `${n.tagName}[${n.getAttribute("role") ?? ""}].${(typeof n.className === "string" ? n.className : "").trim().split(/\s+/)[0]}`).catch(() => "?")));
+  const hit = list.find((r) => wantRe.test(r.text.toLowerCase()));
+  let how = "nothing matched";
+  if (hit) {
+    // By key first: the list's own way of taking a row.
+    const at = list.indexOf(hit);
+    const distinct = [...new Set(list.map((r) => r.text))];
+    const steps = Math.max(1, distinct.indexOf(hit.text) + 1);
+    for (let k = 0; k < steps; k++) await page.keyboard.press("ArrowDown").catch(() => {});
+    await page.keyboard.press("Enter").catch(() => {});
+    await page.waitForTimeout(900);
+    how = "by key";
+    if (!chosen(await state())) {
+      await hit.el.click({ timeout: 3000 }).catch(() => hit.el.click({ timeout: 3000, force: true }).catch(() => {}));
+      await page.waitForTimeout(900);
+      how = "by click";
+    }
+    if (!chosen(await state())) {
+      // The innermost thing in the row, pressed as a person presses it.
+      await hit.el.evaluate((n) => {
+        const leaf = Array.from(n.querySelectorAll("*")).filter((c) => !c.children.length).pop() ?? n;
+        for (const type of ["mousedown", "mouseup", "click"]) leaf.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
+      }).catch(() => {});
+      await page.waitForTimeout(900);
+      how = "by a pressed leaf";
+    }
+    void at;
+  } else {
+    await page.keyboard.press("Escape").catch(() => {});
+  }
+  const after = await state();
+  console.log(`    oracle ${what}: ${list.length} row(s) made of ${JSON.stringify(made)}; ${hit ? `taken ${how}` : how}; now ${JSON.stringify(after)}`);
+  return chosen(after);
+}
+
 async function oracleAddress(page, form, profile) {
   let done = 0;
   // The country leads: the zip and street suggestions are looked up within
@@ -2379,8 +2463,14 @@ async function oracleAddress(page, form, profile) {
     // text in the box and nothing chosen: the box "held a value" and the
     // form said "The Country field is required" at the end, and redrawing
     // the address under it unsettled the phone number as well.
-    if (stem === "country" && held && (await box.getAttribute("aria-invalid").catch(() => null)) !== "true") {
-      console.log("    oracle: country is already set by the portal and not marked; left as it is");
+    if (stem === "country") {
+      const ok = await oracleChoose(page, form, box, "United States", /^united states( of america)?$/, "country");
+      if (ok) {
+        await box.evaluate((n) => n.setAttribute("data-applypilot-chosen", "1")).catch(() => {});
+        done++;
+      }
+      // Choosing the country redraws the address section under it.
+      await page.waitForTimeout(3500);
       continue;
     }
 
@@ -2430,6 +2520,13 @@ async function oracleAddress(page, form, profile) {
     const kept = String(await box.inputValue().catch(() => "")).trim();
     console.log(`    oracle: ${stem} ${took ? `chose 1 of ${found.length} suggestion(s)` : `had ${found.length} suggestion(s), none chosen`}; ${kept ? "holds a value" : "is empty"}`);
     if (kept) done++;
+  }
+  // The dialling code beside the phone number: chosen, or the number under
+  // it cannot be judged — "Phone Number Country code: Enter a valid number."
+  for (const c of await form.$$('input[id^="country-codes-dropdown"]').catch(() => [])) {
+    if (!(await c.isVisible().catch(() => false))) continue;
+    await oracleChoose(page, form, c, "United States", /united states(?!.*(minor|virgin|outlying))|^\+?1$/, "dialling code");
+    break;
   }
   // The phone number as the ten digits and nothing else. The portal reads
   // one in from the resume with its punctuation, or with the country's 1 in
@@ -3274,6 +3371,17 @@ async function oracleRepair(page, form, profile, job, onlyReport = false, lookup
         // that had been accepted was refused afterwards.
         const marked = (await el.getAttribute("aria-invalid").catch(() => null)) === "true";
         if (!marked) continue;
+      }
+      {
+        // Chosen the one way that is known to register, and checked.
+        const ok = await oracleChoose(
+          page, form, el, "United States",
+          code ? /united states(?!.*(minor|virgin|outlying))|^\+?1$/ : /^united states( of america)?$/,
+          code ? "dialling code, at the form's request" : "country, at the form's request",
+        );
+        if (ok) fixed++;
+        if (ok && !code) await oracleAddress(page, form, profile);
+        continue;
       }
       const listId = String((await el.getAttribute("aria-controls").catch(() => null)) ?? "").replace(/["\\]/g, "");
       const rows = async () =>
