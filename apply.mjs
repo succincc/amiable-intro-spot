@@ -3591,6 +3591,28 @@ async function oracleRepair(page, form, profile, job, onlyReport = false, lookup
           break;
         }
       }
+      // This portal asks for the month and the year apart, each from a list
+      // of its own. Only what the resume gives is chosen: a year with no
+      // month stays a year with no month.
+      const pickDate = async (stem, typed, re, what) => {
+        if (!typed) return false;
+        for (const c of await form.$$(`input[id^="${stem}-"]`).catch(() => [])) {
+          if (!(await c.isVisible().catch(() => false))) continue;
+          return await oracleChoose(page, form, c, typed, re, what);
+        }
+        return false;
+      };
+      const monthRe = (m) => new RegExp(`^${String(m).toLowerCase().slice(0, 3)}`);
+      did.start = [
+        await pickDate("month-startDate", role.start_month, monthRe(role.start_month), "work entry, month started"),
+        await pickDate("year-startDate", role.start_year, new RegExp(`^${role.start_year}$`), "work entry, year started"),
+      ];
+      if (!role.current && role.end_year) {
+        did.end = [
+          await pickDate("month-endDate", role.end_month, monthRe(role.end_month), "work entry, month ended"),
+          await pickDate("year-endDate", role.end_year, new RegExp(`^${role.end_year}$`), "work entry, year ended"),
+        ];
+      }
       const saved = await oracleSave(page, form);
       console.log(`    oracle work history: the most recent job entered by hand ${JSON.stringify(did)}; ${saved ? "saved" : "not saved"}; the entry is made of ${JSON.stringify(asks).slice(0, 900)}`);
       if (saved) fixed++;
@@ -3802,6 +3824,18 @@ async function oracleRepair(page, form, profile, job, onlyReport = false, lookup
         await page.waitForTimeout(1000);
       }
     }
+  }
+  // The country and the dialling code, last of all. Opening, saving or
+  // removing an entry in the sections below redraws the form above them, and
+  // those two boxes come back empty: they stood correct before the first
+  // submit, correct after it was refused, and empty after the repairs —
+  // sixteen rounds ended on "The Country field is required" for that. So
+  // they are seen to once every entry has been dealt with, and nothing is
+  // touched after them but the submit.
+  if (!onlyReport) {
+    await page.waitForTimeout(1500);
+    await oracleAddress(page, form, profile);
+    await oracleProbe(form, "at the end of the repairs");
   }
   console.log(`    oracle issue stops: ${JSON.stringify(Array.from(new Set(report)).slice(0, 10))}`);
   if (issueWords.length) console.log(`    oracle issues, in the form's words: ${JSON.stringify(issueWords.slice(0, 12))}`);
