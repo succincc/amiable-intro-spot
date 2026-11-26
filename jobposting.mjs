@@ -364,9 +364,10 @@ if (process.env.JOBPOSTING_IMPORT_ONLY !== "1") {
       return { name, url };
     }).filter((x) => x.name && /^https?:\/\//.test(x.url ?? ""));
   } else {
-    // The ones no taught portal covers, longest-unread first by rotation.
+    // The ones no taught portal covers — and the ones whose portal has a
+    // reader that could not read their list — longest-unread first.
     const rows =
-      (await db(`company_candidates?status=eq.failed&select=name,careers_url,resolved_url,note&order=checked_at.asc.nullsfirst&limit=1000`)) ?? [];
+      (await db(`company_candidates?or=(status.eq.failed,note.ilike.*list%20not%20read*)&select=name,careers_url,resolved_url,note&order=checked_at.asc.nullsfirst&limit=1000`)) ?? [];
     const turn = Math.floor(Date.now() / (6 * 3_600_000));
     const startAt = rows.length ? (turn * MAX_EMPLOYERS) % rows.length : 0;
     employers = [...rows.slice(startAt), ...rows.slice(0, startAt)]

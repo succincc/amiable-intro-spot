@@ -265,7 +265,7 @@ if (process.env.SF_IMPORT_ONLY !== "1") {
     NEAR = nearPattern(home);
     state = stateName(home) ?? "";
     const found =
-      (await db(`company_candidates?note=ilike.*runs%20on%20successfactors*&select=name,careers_url,resolved_url&order=checked_at.desc.nullslast&limit=${MAX}`)) ?? [];
+      (await db(`company_candidates?note=ilike.*runs%20on%20successfactors*&select=id,name,note,careers_url,resolved_url&order=checked_at.desc.nullslast&limit=${MAX}`)) ?? [];
     for (const r of found) {
       // The page the resolver ended on is the employer's own careers site,
       // which is where the search page lives; SAP's own hosts are where the
@@ -274,7 +274,7 @@ if (process.env.SF_IMPORT_ONLY !== "1") {
         try {
           const u = new URL(raw);
           if (/successfactors\.|sapsf\.|jobs2web\./i.test(u.hostname)) continue;
-          employers.push({ name: r.name, origin: u.origin });
+          employers.push({ name: r.name, origin: u.origin, id: r.id, note: String(r.note ?? "") });
           break;
         } catch {
           /* try the other */
@@ -285,6 +285,16 @@ if (process.env.SF_IMPORT_ONLY !== "1") {
   hideNames(employers.map((e) => e.name));
   console.log(`${employers.length} employer(s) on SuccessFactors with a site of their own; ${titles.length} title(s); ${APPLY ? "saving postings" : "report only"}.`);
 
+  // An employer whose list this cannot read is said so on its record, so
+  // that the reader of employers' own pages takes it up instead of nobody
+  // doing so; and unsaid the day the list reads.
+  const UNREAD = "; list not read";
+  const mark = async (e, read) => {
+    if (!APPLY || !e.id || read === !e.note.includes(UNREAD)) return;
+    const note = read ? e.note.replace(UNREAD, "") : `${e.note}${UNREAD}`.slice(0, 380);
+    await db(`company_candidates?id=eq.${e.id}`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ note }) }).catch(() => {});
+  };
+
   const started = Date.now();
   const tally = { employers: 0, answered: 0, bySearchPage: 0, byService: 0, read: 0, wanted: 0, near: 0, fresh: 0, saved: 0 };
   let sampled = 0;
@@ -294,10 +304,12 @@ if (process.env.SF_IMPORT_ONLY !== "1") {
     const seen = await read(e.origin, state).catch((err) => ({ how: null, rows: [], notes: [String(err?.message ?? err).slice(0, 60)] }));
     if (!seen.rows.length) {
       console.log(`  ?  ${e.name} (${new URL(e.origin).hostname}) — nothing read; ${seen.notes.join("; ").slice(0, 300)}`);
+      await mark(e, false);
       await pause(400);
       continue;
     }
     tally.answered++;
+    await mark(e, true);
     if (seen.how === "service") tally.byService++;
     else tally.bySearchPage++;
     tally.read += seen.rows.length;

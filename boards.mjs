@@ -313,7 +313,7 @@ if (process.env.BOARDS_IMPORT_ONLY !== "1") {
   const names = Object.keys(SYSTEMS);
   const found =
     (await db(
-      `company_candidates?or=(${names.map((n) => `note.ilike.*runs%20on%20${n}%20at*`).join(",")})&select=name,note,careers_url,resolved_url&limit=1000`,
+      `company_candidates?or=(${names.map((n) => `note.ilike.*runs%20on%20${n}%20at*`).join(",")})&select=id,name,note,careers_url,resolved_url&limit=1000`,
     )) ?? [];
   const boards = new Map();
   for (const r of found) {
@@ -326,18 +326,27 @@ if (process.env.BOARDS_IMPORT_ONLY !== "1") {
     for (const h of hosts) {
       const b = boardOf(h);
       if (b) placed = true;
-      if (b && !boards.has(b.host)) { boards.set(b.host, { ...b, name: r.name }); break; }
+      if (b && !boards.has(b.host)) { boards.set(b.host, { ...b, name: r.name, id: r.id, note: String(r.note ?? "") }); break; }
     }
     // Eightfold is often served from the employer's own careers address,
     // and answers there the same way.
     const own = (String(r.note).match(/runs on eightfold at ([a-z0-9.-]+\.[a-z]{2,})/i) ?? [])[1]?.toLowerCase();
-    if (!placed && own && !boards.has(own)) boards.set(own, { ats: "eightfold", sub: own.split(".").slice(-2, -1)[0] ?? "", host: own, name: r.name });
+    if (!placed && own && !boards.has(own)) boards.set(own, { ats: "eightfold", sub: own.split(".").slice(-2, -1)[0] ?? "", host: own, name: r.name, id: r.id, note: String(r.note ?? "") });
   }
   const list = [...boards.values()].slice(0, MAX_EMPLOYERS);
   hideNames(list.map((e) => e.name));
   const by = {};
   for (const e of list) by[e.ats] = (by[e.ats] ?? 0) + 1;
   console.log(`${found.length} employer(s) placed on these systems; ${list.length} board(s) to read ${JSON.stringify(by)}; ${titles.length} title(s) wanted; ${APPLY ? "saving postings" : "report only"}.`);
+
+  // An employer whose list cannot be read here is said so on its record,
+  // so that the reader of employers' own pages takes it up instead.
+  const UNREAD = "; list not read";
+  const mark = async (e, read) => {
+    if (!APPLY || !e.id || read === !e.note.includes(UNREAD)) return;
+    const note = read ? e.note.replace(UNREAD, "") : `${e.note}${UNREAD}`.slice(0, 380);
+    await db(`company_candidates?id=eq.${e.id}`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ note }) }).catch(() => {});
+  };
 
   const started = Date.now();
   const tally = { boards: 0, unreadable: 0, read: 0, wanted: 0, near: 0, fresh: 0, saved: 0 };
@@ -381,9 +390,11 @@ if (process.env.BOARDS_IMPORT_ONLY !== "1") {
       tally.unreadable++;
       sys.failed++;
       console.log(`  ?  ${e.name} (${e.ats}) — list not read: ${String(err?.message ?? err).slice(0, 60)}`);
+      await mark(e, false);
       await pause(600);
       continue;
     }
+    await mark(e, true);
     tally.read += rows.length;
     sys.read += rows.length;
     if (rows.length && !sampled.has(e.ats)) {

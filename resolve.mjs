@@ -421,12 +421,13 @@ export const READ_SYSTEMS = ["oracle", "successfactors", "icims", "bamboohr", "j
  * only: which employers they are is not said.
  */
 export function census(rows) {
-  const out = { total: rows.length, found: {}, waiting: 0, not_found: {} };
+  const out = { total: rows.length, found: {}, unreadable: {}, waiting: 0, not_found: {} };
   const add = (bag, k) => (bag[k] = (bag[k] ?? 0) + 1);
   for (const r of rows) {
     const note = String(r.note ?? "");
     const on = (note.match(/runs on ([a-z0-9]+)/i) ?? [])[1]?.toLowerCase();
-    if (r.status === "ok") add(out.found, r.ats ?? on ?? "other");
+    if (r.status === "ok" && /list not read/i.test(note)) add(out.unreadable, on ?? "other");
+    else if (r.status === "ok") add(out.found, r.ats ?? on ?? "other");
     else if (r.status === "pending") out.waiting++;
     else if (on) add(out.not_found, `on ${on}, no reader`);
     else if (/refused the visit/i.test(note)) add(out.not_found, `refused (${(note.match(/HTTP (\d{3})/) ?? note.match(/(ERR_[A-Z0-9_]+)/) ?? note.match(/(timeout)/i) ?? [])[1] ?? "other"})`);
