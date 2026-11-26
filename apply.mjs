@@ -4537,8 +4537,29 @@ async function findSubmit(page, frame) {
       }
     }
   }
+  // SuccessFactors draws its "Apply" as a link or a span, not a button the
+  // usual search knows. By its exact word, then; and where even that finds
+  // nothing, what the page does offer is written down once.
+  if (/successfactors\.|sapsf\./i.test(hostOf(page.url()) ?? "")) {
+    const offered = [];
+    for (const root of [frame, page]) {
+      for (const el of (await root.$$('button, a, input[type=button], input[type=submit], [role=button], span[onclick]').catch(() => [])).slice(0, 160)) {
+        if (!(await el.isVisible().catch(() => false))) continue;
+        const text = ((await el.innerText().catch(() => "")) || (await el.getAttribute("value").catch(() => "")) || (await el.getAttribute("title").catch(() => "")) || "").replace(/\s+/g, " ").trim();
+        if (!text || text.length > 30) continue;
+        if (/^(apply|apply now|submit|submit application|send application|finish)$/i.test(text)) return el;
+        if (!offered.includes(text)) offered.push(text);
+      }
+    }
+    const here = page.url();
+    if (!SF_SAID.has(here)) {
+      SF_SAID.add(here);
+      console.log(`    successfactors: no button to send the form by; the page offers ${JSON.stringify(offered.slice(-24))}`);
+    }
+  }
   return null;
 }
+const SF_SAID = new Set();
 
 // Workday names its wizard button in markup; everyone else only in words.
 const NEXT_SELECTORS = [
