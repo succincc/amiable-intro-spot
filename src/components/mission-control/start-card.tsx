@@ -20,14 +20,15 @@ export function StartCard() {
     queryKey: ["start"],
     refetchInterval: 60_000,
     queryFn: async () => {
-      const [p, c, m, a] = await Promise.all([
+      const [p, c, m, a, r] = await Promise.all([
         supabase.from("profile").select("*").eq("id", 1).maybeSingle(),
         supabase.from("search_config").select("titles").eq("id", 1).maybeSingle(),
         supabase.from("email_sync").select("last_run_at").eq("id", 1).maybeSingle(),
         supabase.from("answers").select("id", { count: "exact", head: true }).eq("confirmed", false).eq("answer", ""),
+        supabase.from("jobs").select("id", { count: "exact", head: true }).eq("status", "review"),
       ]);
       if (p.error) throw p.error;
-      return { profile: (p.data ?? null) as Record<string, unknown> | null, titles: c.data?.titles ?? [], mailLastRun: m.data?.last_run_at ?? null, waiting: a.count ?? 0 };
+      return { profile: (p.data ?? null) as Record<string, unknown> | null, titles: c.data?.titles ?? [], mailLastRun: m.data?.last_run_at ?? null, waiting: a.count ?? 0, reviewing: r.count ?? 0 };
     },
   });
 

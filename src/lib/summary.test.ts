@@ -88,3 +88,16 @@ describe("a reply to an interview request with no model", () => {
     expect(await draftReply({ email: { ...email, from_addr: "no-reply@acme.com" }, category: "interview", job, profile, apiKey: "" })).toBeNull();
   });
 });
+
+describe("the summary's week ahead and month behind", () => {
+  const base = { sent: [], replies: [], stuck: [], ready: 0, review: 0, followUps: 0 };
+  it("opens with the interviews booked for the week", () => {
+    const s = composeSummary({ ...base, coming: [{ when: "Tuesday, December 1 at 10:00 AM EST", what: "Store Manager at Example Co" }] });
+    expect(s.body.split("\n").slice(0, 2)).toEqual(["COMING UP: 1 interview this week", "  Tuesday, December 1 at 10:00 AM EST - Store Manager at Example Co"]);
+  });
+  it("says how the month has been answered, once there is enough to say", () => {
+    expect(composeSummary({ ...base, month: { sent: 400, interviews: 6, offers: 1, rejected: 40 } }).body).toContain("LAST 30 DAYS: 400 sent. 6 asked to interview (1.5%), 1 offer, 40 turned down, 353 no word yet.");
+    expect(composeSummary({ ...base, month: { sent: 4, interviews: 0, offers: 0, rejected: 0 } }).body).not.toContain("LAST 30 DAYS");
+    expect(composeSummary(base).body.startsWith("The last 24 hours.")).toBe(true);
+  });
+});

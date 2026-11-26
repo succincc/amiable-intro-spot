@@ -30,6 +30,12 @@ describe("the setup list", () => {
     expect(steps.filter((s) => !s.done).map((s) => s.key)).toEqual(["facts", "windows", "answers"]);
     expect(steps.find((s) => s.key === "answers")?.label).toBe("3 questions waiting for you");
   });
+  it("says when postings are being held for a yes, and never blocks on it", () => {
+    const steps = setupSteps({ ...full, reviewing: 16 });
+    expect(steps.at(-1)).toMatchObject({ key: "review", label: "16 postings held for your yes", done: false, required: false });
+    expect(readyToStart(steps)).toBe(true);
+    expect(setupSteps({ ...full, reviewing: 0 }).some((s) => s.key === "review")).toBe(false);
+  });
   it("counts as started only with applying and replying both on", () => {
     expect(isStarted({ autopilot: true, auto_reply: true })).toBe(true);
     expect(isStarted({ autopilot: true, auto_reply: false })).toBe(false);

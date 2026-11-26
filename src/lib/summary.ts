@@ -48,10 +48,19 @@ export function composeSummary(d: {
   followUps: number;
   /** Questions employers asked that nothing on file answers yet. */
   questions?: number;
+  /** Interviews booked for the week ahead, already worded: when, and what for. */
+  coming?: Array<{ when: string; what: string }>;
+  /** How the last thirty days of applications have been answered. */
+  month?: { sent: number; interviews: number; offers: number; rejected: number };
 }): { subject: string; body: string } {
   const lines: string[] = [];
   const say = (s = "") => lines.push(s);
 
+  if (d.coming?.length) {
+    say(`COMING UP: ${d.coming.length} interview${d.coming.length === 1 ? "" : "s"} this week`);
+    for (const c of d.coming.slice(0, 10)) say(`  ${c.when} - ${short(c.what, 70)}`);
+    say();
+  }
   say("The last 24 hours.");
   say();
   say(`SENT: ${d.sent.length}${d.sent.length ? `  (${tally(d.sent, (r) => String(r.ats ?? "employer's own site"))})` : ""}`);
@@ -88,6 +97,13 @@ export function composeSummary(d: {
   say(`WAITING: ${d.ready} ready to apply, ${d.review} held for review.`);
   if (d.questions) say(`QUESTIONS: ${d.questions} that employers asked and nothing on file answers. Answer each once on the Answers page and it is never asked again.`);
   if (d.followUps) say(`FOLLOW-UP EMAILS SENT: ${d.followUps}`);
+  if (d.month && d.month.sent >= 10) {
+    const m = d.month;
+    const heard = m.interviews + m.offers + m.rejected;
+    const pct = (n: number) => `${Math.round((n / m.sent) * 1000) / 10}%`;
+    say();
+    say(`LAST 30 DAYS: ${m.sent} sent. ${m.interviews} asked to interview (${pct(m.interviews)}), ${m.offers} offer${m.offers === 1 ? "" : "s"}, ${m.rejected} turned down, ${m.sent - heard} no word yet.`);
+  }
   say();
   say("This is sent because the daily summary is switched on in settings. Switch it off there to stop it.");
 

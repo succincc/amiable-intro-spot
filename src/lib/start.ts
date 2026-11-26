@@ -13,6 +13,8 @@ export function setupSteps(s: {
   titles: unknown;
   mailLastRun: string | null | undefined;
   waiting: number;
+  /** Postings scored in the middle band, held for the owner's yes. */
+  reviewing?: number;
   now: Date;
 }): Step[] {
   const p = s.profile ?? {};
@@ -29,6 +31,9 @@ export function setupSteps(s: {
     { key: "facts", label: "citizenship and ethnicity", done: has("citizenship") && has("hispanic_latino"), required: false, hint: "asked on most forms; never guessed, so unanswered they come to you", to: "/settings" },
     { key: "windows", label: "interview windows marked", done: windows > 0 || has("availability"), required: false, hint: "the times offered when an employer asks", to: "/settings" },
     { key: "answers", label: s.waiting ? `${s.waiting} question${s.waiting === 1 ? "" : "s"} waiting for you` : "no questions waiting", done: s.waiting === 0, required: false, hint: "answered once, reused on every form after", to: "/answers" },
+    ...(s.reviewing
+      ? [{ key: "review", label: `${s.reviewing} posting${s.reviewing === 1 ? "" : "s"} held for your yes`, done: false, required: false, hint: "set the auto-apply score down to the review score and they go without asking", to: "/settings" as const }]
+      : []),
   ];
 }
 

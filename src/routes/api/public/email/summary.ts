@@ -55,8 +55,39 @@ export const Route = createFileRoute("/api/public/email/summary")({
             supabaseAdmin.from("answers").select("id", { count: "exact", head: true }).eq("confirmed", false).eq("answer", ""),
           ]);
 
+          // The week's booked interviews, and how the month has been answered.
+          const coming: Array<{ when: string; what: string }> = [];
+          let month: { sent: number; interviews: number; offers: number; rejected: number } | undefined;
+          try {
+            const { cleanHolds } = await import("@/lib/availability");
+            const { sayWhen } = await import("@/lib/moments");
+            const { data: p } = await supabaseAdmin.from("profile").select("interview_holds, timezone").eq("id", 1).maybeSingle();
+            const zone = String(p?.timezone ?? "").trim() || "America/New_York";
+            const now = new Date();
+            const booked = cleanHolds(p?.interview_holds, now)
+              .filter((h) => h.state === "booked" && new Date(h.start).getTime() < now.getTime() + 7 * DAY)
+              .sort((a, b) => a.start.localeCompare(b.start));
+            const ids = booked.map((h) => h.ref).filter((r) => /^[0-9a-f-]{36}$/i.test(r));
+            const { data: named } = ids.length ? await supabaseAdmin.from("jobs").select("id, title, company").in("id", ids) : { data: [] };
+            for (const h of booked) {
+              const j = (named ?? []).find((x: any) => x.id === h.ref);
+              coming.push({ when: sayWhen(new Date(h.start), zone), what: j ? `${j.title} at ${j.company}` : "an interview" });
+            }
+            const since30 = new Date(Date.now() - 30 * DAY).toISOString();
+            const count = (status?: string) => {
+              const q = supabaseAdmin.from("jobs").select("id", { count: "exact", head: true }).gte("applied_at", since30);
+              return status ? q.eq("status", status) : q;
+            };
+            const [all, iv, of, rj] = await Promise.all([count(), count("interview"), count("offer"), count("rejected")]);
+            month = { sent: all.count ?? 0, interviews: iv.count ?? 0, offers: of.count ?? 0, rejected: rj.count ?? 0 };
+          } catch {
+            /* the summary goes out without them */
+          }
+
           const { composeSummary } = await import("@/lib/summary");
           const made = composeSummary({
+            coming,
+            ...(month ? { month } : {}),
             sent: sent.data ?? [],
             replies: replies.data ?? [],
             stuck: stuck.data ?? [],
