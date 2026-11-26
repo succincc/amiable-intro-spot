@@ -10,6 +10,7 @@
 // Free: a public-repo runner and a public feed.
 
 import { guardLogs, hideNames, shape } from "./quiet.mjs";
+import { nearPattern } from "./near.mjs";
 // Nothing this prints names an employer, a posting or a place: see quiet.mjs.
 guardLogs();
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -21,7 +22,8 @@ const TITLES_PER_EMPLOYER = Number(process.env.TITLES_PER_EMPLOYER || 6);
 const BUDGET_MS = Number(process.env.BUDGET_MINUTES || 30) * 60_000;
 // Postings are kept only where the owner could work: these states, or remote.
 // Distance from home is measured afterwards like everything else.
-const NEAR = /,\s*(NJ|NY|PA|CT)\b|\bnew jersey\b|\bnew york\b|\bpennsylvania\b|\bremote\b|\bvirtual\b/i;
+// Made from the owner's state once the profile is read.
+let NEAR = nearPattern(process.env.HOME_STATE);
 
 let ACCESS = "";
 let REFRESH = "";
@@ -141,7 +143,8 @@ if (process.env.ORACLE_IMPORT_ONLY !== "1") {
   hideNames(employers.map((e) => e.name));
   console.log(`${employers.length} employer(s) on Oracle with a known site; ${titles.length} title(s); ${APPLY ? "saving postings" : "report only"}.`);
 
-  const [prof] = (await db("profile?id=eq.1&select=home_lat,home_lon")) ?? [];
+  const [prof] = (await db("profile?id=eq.1&select=home_lat,home_lon,state,home_state")) ?? [];
+  NEAR = nearPattern(prof?.home_state || prof?.state || process.env.HOME_STATE);
   const home = prof?.home_lat != null && prof?.home_lon != null ? { lat: prof.home_lat, lon: prof.home_lon, miles: 50 } : null;
   let geoOk = null;
 

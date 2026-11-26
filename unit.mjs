@@ -21,6 +21,7 @@ const feeds = await import("./feeds.mjs");
 const pretailor = await import("./pretailor.mjs");
 const sf = await import("./successfactors.mjs");
 const quiet = await import("./quiet.mjs");
+const near = await import("./near.mjs");
 process.env.BOARDS_IMPORT_ONLY = "1";
 const boards = await import("./boards.mjs");
 process.env.MEASURE_IMPORT_ONLY = "1";
@@ -327,6 +328,9 @@ Microsoft Power BI`;
   check("quiet: the system's own addresses and file names are left", quiet.scrubPlaces("https://abc.supabase.co/rest/v1/jobs apply.mjs resume.pdf e.message"), "https://abc.supabase.co/rest/v1/jobs apply.mjs resume.pdf e.message");
 quiet.hideJob({ company: "ZQ" });
   check("quiet: a two-letter employer is hidden as written, and only standing alone", [/^ok employer-[0-9a-f]{5} read$/.test(quiet.asPrinted("ok ZQ read")), quiet.asPrinted("the zq and AZQ1")], [true, "the zq and AZQ1"]);
+  check("near: a state, the ones that touch it, and remote", ["Trenton, NJ", "Albany, New York", "Dover, DE, US", "Remote - US", "Austin, TX", "Portland, Oregon"].map((w) => near.nearPattern("New Jersey").test(w)), [true, true, true, true, false, false]);
+  check("near: every border is kept from both sides", Object.entries(near.BORDERS).flatMap(([a, list]) => list.filter((b) => !near.BORDERS[b]?.includes(a)).map((b) => `${a}-${b}`)), []);
+  check("near: with no state known, nothing is thrown away", [near.nearPattern(null).test("Austin, TX"), near.stateCode("nj"), near.stateName("NJ"), near.stateCode("Narnia")], [true, "NJ", "New Jersey", null]);
     check("quiet: the same employer, the same alias", [quiet.aliasFor("Garden State Foods") === quiet.aliasFor("garden state  foods!"), /^employer-[0-9a-f]{5}$/.test(quiet.aliasFor("Garden State Foods"))], [true, true]);
   check("quiet: a record's shape and none of its words", quiet.shape({ Title: "Manager", n: 3, tags: ["a"], x: null }), { Title: "text of 7", n: "number", tags: "list of 1", x: "empty" });
   {

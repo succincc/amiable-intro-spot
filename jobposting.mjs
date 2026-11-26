@@ -19,6 +19,7 @@
 // Free: a public-repo runner and public pages.
 
 import { guardLogs, hideNames } from "./quiet.mjs";
+import { nearPattern } from "./near.mjs";
 // Nothing this prints names an employer, a posting or a place: see quiet.mjs.
 guardLogs();
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -31,7 +32,8 @@ const PAGES_PER_EMPLOYER = Number(process.env.PAGES_PER_EMPLOYER || 14);
 const BUDGET_MS = Number(process.env.BUDGET_MINUTES || 25) * 60_000;
 const ONLY = String(process.env.ONLY_URLS || "").trim(); // Name|https://…,Name|https://…
 
-const NEAR = /,\s*(NJ|NY|PA|CT)\b|\bnew jersey\b|\bnew york\b|\bpennsylvania\b|\bconnecticut\b|\bremote\b|\bvirtual\b/i;
+// Made from the owner's state once the profile is read.
+let NEAR = nearPattern(process.env.HOME_STATE);
 
 let ACCESS = "";
 let REFRESH = "";
@@ -349,6 +351,9 @@ if (process.env.JOBPOSTING_IMPORT_ONLY !== "1") {
   await auth({ email: AP_EMAIL, password: AP_PASSWORD }, "password");
 
   const [cfg] = (await db("search_config?id=eq.1&select=titles,exclude_titles")) ?? [{}];
+  // The owner's state, for keeping what is nearby. Never printed.
+  const [home] = (await db("profile?id=eq.1&select=state,home_state").catch(() => [])) ?? [];
+  NEAR = nearPattern(home?.home_state || home?.state || process.env.HOME_STATE);
   const titles = (cfg?.titles ?? []).filter(Boolean);
   const excludes = (cfg?.exclude_titles ?? []).filter(Boolean);
 

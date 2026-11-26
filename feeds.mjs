@@ -412,7 +412,7 @@ if (process.env.FEEDS_IMPORT_ONLY !== "1") {
   const excludes = (cfg?.exclude_titles ?? []).filter(Boolean);
   // The town is the owner's; it is used in the request and not printed.
   const [prof] = (await db("profile?id=eq.1&select=city,state")) ?? [];
-  const where = prof?.city && prof?.state ? `${prof.city}, ${prof.state}` : "New Jersey";
+  const where = prof?.city && prof?.state ? `${prof.city}, ${prof.state}` : String(prof?.state ?? "");
 
   const tally = { read: 0, errors: [] };
   const hits = [];
