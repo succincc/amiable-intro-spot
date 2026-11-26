@@ -310,6 +310,10 @@ function livesInListedState(label, p) {
 
 /** Questions the form is ASKING. Checked before field-name matching. */
 function answerQuestion(label, p) {
+  // "Veteran employment support agency" asks which agency sent a veteran, not
+  // whether the applicant is one. The saved veteran answer is not an answer
+  // to it, and no agency sent anyone.
+  if (/veteran[^?]{0,40}\b(agency|organi[sz]ation|representative|program)\b/i.test(String(label))) return null;
   if (has(label, "authorized to work", "legally authorized", "work authorization",
                  "legal authorization", "authorization to work", "authorised to work",
                  "eligible to work", "right to work")) return p.work_authorized;
@@ -392,7 +396,7 @@ function answerQuestion(label, p) {
   // "Were you referred by a current Carvana employee?" is yes or no. It was
   // being read as "how did you hear about us" and offered "Company website"
   // against Yes / No. Nobody referred an application found by a search.
-  if (/\b(were|was|are|have) you (been )?referred\b|referred by (a|an) (current|existing)/i.test(String(label))) {
+  if (/\b(were|was|are|have) you (been )?referred\b|referred by (a|an) (current|existing)|encouraged? or refer(red)? you|refer(red)? you to apply/i.test(String(label))) {
     return "No";
   }
   // Asked a dozen ways, each naming the employer: "have you ever worked for
@@ -8974,7 +8978,7 @@ async function applyToJobOnce(context, job, profile, answers) {
               // the…" — the opposite, on a question about the owner. Where a
               // question of that kind holds anything but the answer given, it
               // is emptied, and the application is not sent until it is right.
-              if (after && has(label, "race", "ethnic", "gender", "veteran", "disab", "hispanic", "latino")) {
+              if (after && has(label, "race", "ethnic", "gender", "veteran", "disab", "hispanic", "latino") && !/veteran[^?]{0,40}\b(agency|organi[sz]ation|representative|program)\b/i.test(label)) {
                 const flat = (t) => String(t).toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
                 const a = flat(after);
                 const w = flat(want);
