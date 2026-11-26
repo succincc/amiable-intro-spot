@@ -252,6 +252,8 @@ export type Database = {
           is_read: boolean | null
           job_id: string | null
           message_id: string
+          moment: string | null
+          notified_at: string | null
           received_at: string | null
           replied_at: string | null
           reply_draft: string | null
@@ -274,6 +276,8 @@ export type Database = {
           is_read?: boolean | null
           job_id?: string | null
           message_id: string
+          moment?: string | null
+          notified_at?: string | null
           received_at?: string | null
           replied_at?: string | null
           reply_draft?: string | null
@@ -296,6 +300,8 @@ export type Database = {
           is_read?: boolean | null
           job_id?: string | null
           message_id?: string
+          moment?: string | null
+          notified_at?: string | null
           received_at?: string | null
           replied_at?: string | null
           reply_draft?: string | null
@@ -618,6 +624,8 @@ export type Database = {
           full_name: string | null
           gender: string | null
           github_url: string | null
+          health_notified_at: string | null
+          health_state: string | null
           hispanic_latino: string | null
           home_city: string | null
           home_lat: number | null
@@ -627,6 +635,7 @@ export type Database = {
           interview_holds: Json
           linkedin_url: string | null
           needs_sponsorship: string | null
+          notify_moments: boolean
           over_18: string | null
           phone: string | null
           portfolio_url: string | null
@@ -669,6 +678,8 @@ export type Database = {
           full_name?: string | null
           gender?: string | null
           github_url?: string | null
+          health_notified_at?: string | null
+          health_state?: string | null
           hispanic_latino?: string | null
           home_city?: string | null
           home_lat?: number | null
@@ -678,6 +689,7 @@ export type Database = {
           interview_holds?: Json
           linkedin_url?: string | null
           needs_sponsorship?: string | null
+          notify_moments?: boolean
           over_18?: string | null
           phone?: string | null
           portfolio_url?: string | null
@@ -720,6 +732,8 @@ export type Database = {
           full_name?: string | null
           gender?: string | null
           github_url?: string | null
+          health_notified_at?: string | null
+          health_state?: string | null
           hispanic_latino?: string | null
           home_city?: string | null
           home_lat?: number | null
@@ -729,6 +743,7 @@ export type Database = {
           interview_holds?: Json
           linkedin_url?: string | null
           needs_sponsorship?: string | null
+          notify_moments?: boolean
           over_18?: string | null
           phone?: string | null
           portfolio_url?: string | null
