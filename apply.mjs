@@ -8256,8 +8256,28 @@ async function applyToJobOnce(context, job, profile, answers) {
             }
           }
 
+          // "Other Agency", beside a list of veterans' or disability
+          // employment agencies: the name of an agency that sent the
+          // applicant. None did, so it stays empty — and whatever an earlier
+          // attempt wrote there is taken out, since a sentence in that box
+          // is refused for its length and the whole form with it.
+          if (/\bother agency\b|employment support agency/i.test(String(label))) {
+            const held = String(await el.inputValue().catch(() => "")).trim();
+            if (held && (await el.getAttribute("role").catch(() => null)) !== "combobox") await el.fill("", { timeout: 3000 }).catch(() => {});
+            continue;
+          }
+
           // text-ish
           const existing = await el.inputValue().catch(() => "");
+          // Something already there that is longer than the box allows was
+          // put there by an earlier attempt, and the form will refuse it.
+          {
+            const max = Number(await el.getAttribute("maxlength").catch(() => "")) || 0;
+            if (existing && max > 0 && existing.length > max) {
+              await el.fill("", { timeout: 3000 }).catch(() => {});
+              continue;
+            }
+          }
           if (existing && existing.trim()) { skips.prefilled++; continue; }
           const want =
             answerQuestion(label, profile) ??
