@@ -1,0 +1,40 @@
+name: usajobs
+
+# Federal postings from USAJOBS's own search service: see usajobs.mjs.
+# Does nothing until the owner's free key is set as two repository secrets,
+# USAJOBS_KEY and USAJOBS_EMAIL (the address the key was issued to).
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: "Save postings (true), or only report (false)"
+        required: false
+        default: "false"
+
+concurrency:
+  group: applypilot-usajobs
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  usajobs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Read USAJOBS
+        env:
+          SUPABASE_URL: https://inqhfkshqndkxyztzita.supabase.co
+          SUPABASE_ANON_KEY: sb_publishable_QK4kidijM8nk46uK6L22Qw_XA0RQu5U
+          APPLYPILOT_EMAIL: ${{ secrets.APPLYPILOT_EMAIL }}
+          APPLYPILOT_PASSWORD: ${{ secrets.APPLYPILOT_PASSWORD }}
+          USAJOBS_KEY: ${{ secrets.USAJOBS_KEY }}
+          USAJOBS_EMAIL: ${{ secrets.USAJOBS_EMAIL }}
+          APPLY: ${{ github.event.inputs.apply == 'true' }}
+        run: node usajobs.mjs

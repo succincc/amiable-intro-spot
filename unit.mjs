@@ -22,6 +22,8 @@ const pretailor = await import("./pretailor.mjs");
 const sf = await import("./successfactors.mjs");
 const quiet = await import("./quiet.mjs");
 const near = await import("./near.mjs");
+process.env.USAJOBS_IMPORT_ONLY = "1";
+const usajobs = await import("./usajobs.mjs");
 process.env.BOARDS_IMPORT_ONLY = "1";
 const boards = await import("./boards.mjs");
 process.env.MEASURE_IMPORT_ONLY = "1";
@@ -338,6 +340,10 @@ quiet.hideJob({ company: "ZQ" });
   check("near: with no state known, nothing is thrown away", [near.nearPattern(null).test("Austin, TX"), near.stateCode("nj"), near.stateName("NJ"), near.stateCode("Narnia")], [true, "NJ", "New Jersey", null]);
   check("quiet: a town with its state is not printed, nor a firm's other names", [quiet.asPrinted("based? Remote US Lincoln, NE (Hybrid) New Brunswick, NJ ok"), quiet.asPrinted("worked for employer-1a2b3 or any of acmef; next")], ["based? Remote US [a place] (Hybrid) [a place] ok", "worked for employer-1a2b3 or any of [its companies]; next"]);
   check("quiet: the owner's state is not printed in a reason", quiet.asPrinted('{"workday / outside NJ":33,"greenhouse / CA is far beyond 29 mi":51}'), '{"workday / outside the state":33,"greenhouse / another state, far beyond the radius":51}');
+  check("usajobs: a search answer as postings", usajobs.readSearch({ SearchResult: { SearchResultItems: [
+    { MatchedObjectDescriptor: { PositionTitle: "Supply Technician", PositionURI: "https://www.usajobs.gov/job/100", ApplyURI: ["https://www.usajobs.gov/job/100?apply"], OrganizationName: "Example Agency", PositionLocation: [{ CityName: "Exampleton, New Jersey", CountrySubDivisionCode: "New Jersey", Latitude: 40.2, Longitude: -74.7 }], PositionRemuneration: [{ MinimumRange: "45000", MaximumRange: "58000", Description: "Per Year" }], PublicationStartDate: "2026-11-20T00:00:00", ApplicationCloseDate: "2026-12-05T00:00:00", UserArea: { Details: { JobSummary: "<p>Keep the stock.</p>" } } } },
+    { MatchedObjectDescriptor: { PositionTitle: "", PositionURI: "x" } },
+  ] } }).map((r) => [r.title, r.company, r.location, r.lat, r.salary_text, r.posted_at?.slice(0, 10), r.description, r.apply_url]), [["Supply Technician", "Example Agency", "Exampleton, New Jersey", 40.2, "$45000 - $58000 per year", "2026-11-20", "Keep the stock.", "https://www.usajobs.gov/job/100?apply"]]);
     check("quiet: the same employer, the same alias", [quiet.aliasFor("Garden State Foods") === quiet.aliasFor("garden state  foods!"), /^employer-[0-9a-f]{5}$/.test(quiet.aliasFor("Garden State Foods"))], [true, true]);
   check("quiet: a record's shape and none of its words", quiet.shape({ Title: "Manager", n: 3, tags: ["a"], x: null }), { Title: "text of 7", n: "number", tags: "list of 1", x: "empty" });
   {

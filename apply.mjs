@@ -51,6 +51,29 @@ export function shardFor(company, n) {
   for (const ch of String(company ?? "").toLowerCase().trim()) h = ((h << 5) + h + ch.charCodeAt(0)) >>> 0;
   return h % n;
 }
+/**
+ * Where an application that did not go was stopped. Five different causes
+ * used to read as one count of "need you", and they call for five different
+ * things: a fix here, an account, nothing at all, a different way in, or the
+ * owner's own hand. Told apart by what was actually seen, and anything not
+ * shown to be somebody else's is counted as this program's to fix.
+ */
+export function originOf(outcome) {
+  const why = String(outcome?.help_reason ?? "");
+  const note = String(outcome?.note ?? outcome?.skip_reason ?? "").toLowerCase();
+  if (why === "captcha") return "a human check, seen on the page";
+  if (/no longer|closed|expired|not accepting|been filled|taken down|older than \d+ days|posting is gone/.test(note)) return "the listing has gone";
+  if (/already applied/.test(note)) return "already applied";
+  if (why === "owner_signin" || why === "assessment" || why === "private_detail") return "the owner's own step";
+  if (why === "login" || why === "email_verification" || why === "registered") return "signing in to the portal";
+  if (/http 4(0[13]|29)|refused|access denied|blocked/.test(note)) return "the provider refused";
+  if (why === "unknown_question") return "a question nothing on file answers";
+  if (why === "dry_run") return "a rehearsal";
+  if (outcome?.status === "skipped") return "passed over by a rule";
+  return "this program's to fix";
+}
+const ORIGINS = {};
+
 const SHARD = shardOf(process.env.ATS_ONLY);
 if (SHARD) process.env.ATS_ONLY = SHARD.lane;
 /** The one runner in a round that does what is done once a round. */
@@ -7919,8 +7942,11 @@ async function applyToJobOnce(context, job, profile, answers) {
     // The posting, then the resume written to it, before anything reads the
     // resume: the answers, the work history and the attached file all come
     // from the same text.
-    await readPosting(page, job);
-    await ensureTailored(job, profile);
+    const FOLLOW_UP = job.source === "questionnaire";
+    if (!FOLLOW_UP) {
+      await readPosting(page, job);
+      await ensureTailored(job, profile);
+    }
 
     // A SuccessFactors posting's Apply button opens a small menu first —
     // apply, apply with LinkedIn, apply with another site — and the entry
@@ -8050,6 +8076,14 @@ async function applyToJobOnce(context, job, profile, answers) {
       await page.waitForSelector('input[id^="lastName"], input[type=file]', { state: "attached", timeout: 15000 }).catch(() => {});
       await page.waitForTimeout(2500);
       form = (await richestFrame(page)).frame;
+    }
+
+    // A federal application goes through the applicant's own government
+    // sign-in, with a code from their phone. Seen on the page, that
+    // application is the owner's to open; it is filed as that and not tried
+    // again, and the posting stays where the owner can see it.
+    if (/(^|\.)login\.gov$/i.test(hostOf(page.url()) ?? "") || (/(^|\.)usajobs\.gov$/i.test(hostOf(page.url()) ?? "") && /\/(applicant|account|login)/i.test(page.url()))) {
+      return { status: "needs_help", help_reason: "owner_signin", note: "This one is sent through USAJOBS with your own login.gov sign-in. Open it to apply; the posting and its closing date are kept here." };
     }
 
     // iCIMS asks for an email before it shows anything else.
@@ -10345,7 +10379,9 @@ async function applyToJobOnce(context, job, profile, answers) {
     // one field, pressed the button beside it and reported an unconfirmed
     // application. An application takes a name and an email at the least, or
     // a resume, so anything short of that is not pressed at all.
-    if (filled < 3 && !/attached/.test(String(resumeNote))) {
+    // (A follow-up questionnaire an employer sent is exactly a few boxes and
+    // no resume, and is what it says it is.)
+    if (filled < 3 && !/attached/.test(String(resumeNote)) && !(job.source === "questionnaire" && filled >= 1)) {
       return {
         status: "needs_help",
         help_reason: "no_form",
@@ -11171,19 +11207,19 @@ const main = async () => {
   const FRESH_SINCE = new Date(Date.now() - FRESH_DAYS * 86_400_000).toISOString().slice(0, 19) + "Z";
 
   // Employers whose portal has asked for a human check on the last attempts.
-  // Judged employer by employer, on what happened: two in a week and the
-  // rest of that employer's postings wait a week before one is tried again,
-  // instead of each of them being walked into the same wall.
+  // Judged employer by employer, on what happened, and only briefly: each
+  // application is its own attempt, and a portal that asks one visitor to
+  // prove themselves often lets the next through.
   const CHECKED = new Map();
   {
-    const since = new Date(Date.now() - 7 * 24 * 3600_000).toISOString().slice(0, 19) + "Z";
+    const since = new Date(Date.now() - 3 * 24 * 3600_000).toISOString().slice(0, 19) + "Z";
     const rows = (await db(`jobs?help_reason=eq.captcha&updated_at=gte.%22${since}%22&select=company&limit=1000`).catch(() => null)) ?? [];
     for (const r of rows) {
       const k = String(r.company ?? "").toLowerCase().trim();
       if (k) CHECKED.set(k, (CHECKED.get(k) ?? 0) + 1);
     }
-    const walled = [...CHECKED.values()].filter((n) => n >= 2).length;
-    if (walled) console.log(`employers whose portal asked for a human check twice this week, resting: ${walled}`);
+    const walled = [...CHECKED.values()].filter((n) => n >= 3).length;
+    if (walled) console.log(`employers whose portal asked for a human check three times in three days, resting until one of those days has passed: ${walled}`);
   }
 
   // Applications already sent to each employer today.
@@ -11518,8 +11554,11 @@ const main = async () => {
               // while one is in flight costs nothing and removes the question.
               // Another runner's employer.
               if (SHARD && shardFor(companyOf(row), SHARD.n) !== SHARD.i) continue;
-              // This employer's portal has asked for a person twice this week.
-              if ((CHECKED.get(companyOf(row)) ?? 0) >= 2) continue;
+              // This employer's portal has asked for a person three times in
+              // three days, and has sent nothing through in that time. Its
+              // postings stay queued and are tried again as those days pass;
+              // every other employer goes on as before.
+              if ((CHECKED.get(companyOf(row)) ?? 0) >= 3 && !(SENT_TO.get(companyOf(row)) > 0)) continue;
               if (BUSY_COMPANIES.has(companyOf(row)) || CLAIMING.has(companyOf(row))) continue;
               // An employer whose form stopped one application in this run
               // will stop the next for the same reason — and a portal that
@@ -11708,6 +11747,10 @@ const main = async () => {
       }
       tally[outcome.status] = (tally[outcome.status] ?? 0) + 1;
       console.log(`    -> ${outcome.status}${outcome.note ? ": " + outcome.note : ""}`);
+      if (outcome.status !== "applied") {
+        const origin = originOf(outcome);
+        ORIGINS[origin] = (ORIGINS[origin] ?? 0) + 1;
+      }
       recap.push(
         `${outcome.status}${outcome.help_reason ? "/" + outcome.help_reason : ""} | ` +
           `${String(job.company ?? "?").slice(0, 22)} | ${String(outcome.note ?? "").split("\n")[0].slice(0, 170)}` +
@@ -11770,6 +11813,7 @@ const main = async () => {
       }),
     }).catch(() => {});
     if (recap.length) console.log("recap:\n" + recap.map((r) => "  " + r).join("\n"));
+    if (Object.keys(ORIGINS).length) console.log(`why each one did not go: ${JSON.stringify(ORIGINS)}`);
 
     // Where things stand, at the end where it is read: what is still waiting
     // within reach and fresh, by portal and by employer, and what has gone
