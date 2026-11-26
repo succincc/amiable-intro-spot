@@ -4109,7 +4109,7 @@ async function oracleStart(page, profile, job) {
   const body = ((await page.innerText("body").catch(() => "")) || "").toLowerCase();
   if ((await codeBox()) && /code|verif|pin/.test(body)) {
     console.log("    oracle: the portal emailed a code; reading it from the inbox");
-    const code = await waitForVerificationCode(host, job.company, 6, 10_000, askedAt);
+    const code = await waitForVerificationCode(host, job.company, 10, 10_000, askedAt);
     if (!code) {
       await say("code never arrived");
       return { stop: { status: "needs_help", help_reason: "email_verification", note: "Oracle emailed a verification code and it could not be read from the inbox." } };
@@ -4127,6 +4127,13 @@ async function oracleStart(page, profile, job) {
     await page.waitForTimeout(5000);
   }
   await say(`after "${went ?? "no next button"}"`);
+  // "You already applied for this job." in place of the form: the
+  // application is with them, whichever run sent it.
+  const now = ((await page.innerText("body").catch(() => "")) || "").toLowerCase();
+  if (/you('ve| have)? already applied|already applied (for|to) this/.test(now)) {
+    console.log("    oracle: the portal says this job has already been applied for");
+    return { stop: { status: "applied", note: "already applied previously" } };
+  }
   return { ok: true };
 }
 
@@ -4485,7 +4492,7 @@ async function advanceStep(page, form, stepNo) {
           tag: n.tagName,
           id: n.getAttribute("data-automation-id") ?? n.id ?? null,
           role: n.getAttribute("role") ?? n.getAttribute("aria-haspopup") ?? null,
-          shows: (n.innerText ?? "").replace(/\s+/g, " ").trim().slice(0, 40),
+          shows: (n.innerText ?? "").replace(/\s+/g, " ").trim().slice(0, n.id === "errorHeading" ? 160 : 40),
           // What is INSIDE it. A pass written for role="radio" found nothing
           // in the group this portal keeps rejecting and could not say what
           // it had instead, so describe the children rather than guess a
@@ -7555,6 +7562,36 @@ async function applyToJobOnce(context, job, profile, answers) {
             // above" at the end, and a follow-up for anyone who ticked
             // something else. Two Databricks applications stopped on it.
             // None is the answer unless something on file says otherwise.
+            // "Please indicate which, if any, of these countries you are a
+            // citizen of" — a few countries and "None of the above". A fact
+            // about the person, so never assumed: the saved answer is the
+            // box ticked, and where there is none the panel is asked, once,
+            // with the form's own options.
+            if (/\bcitizen/i.test(String(asks)) && /which, if any|any of the following|all that apply/i.test(String(asks))) {
+              const seen = await el
+                .evaluate((n) => {
+                  const byFor = n.id ? document.querySelector(`label[for="${CSS.escape(n.id)}"]`) : null;
+                  const own = (byFor?.innerText || n.labels?.[0]?.innerText || n.getAttribute("aria-label") || "").replace(/\s+/g, " ").trim();
+                  const all = Array.from((n.closest("fieldset") ?? n.parentElement?.parentElement)?.querySelectorAll("label") ?? [])
+                    .map((l) => (l.innerText || "").replace(/\s+/g, " ").trim())
+                    .filter((t) => t && t.length < 60);
+                  return { own: own.length < 80 ? own : "", all: Array.from(new Set(all)).slice(0, 12) };
+                })
+                .catch(() => ({ own: "", all: [] }));
+              const whole = String(asks).replace(/\s+/g, " ").trim();
+              const q = (seen.own && whole.toLowerCase().endsWith(seen.own.toLowerCase())
+                ? whole.slice(0, whole.length - seen.own.length)
+                : whole
+              ).trim().slice(0, 200);
+              const saved = String(lookupSaved(q) ?? "").trim().toLowerCase();
+              if (!saved) {
+                if (!unknown.some((u) => u.question === q)) unknown.push({ question: q, type: "select", options: seen.all });
+              } else if (seen.own && (saved === seen.own.toLowerCase() || (/^none\b/.test(saved) && /^none\b/i.test(seen.own)))) {
+                if (!(await el.isChecked().catch(() => false)) && (await checkBox(el, label))) filled++;
+              }
+              continue;
+            }
+
             if (
               /appl(y|ies) to you|select all that apply|prior question|previous question|any of the (below|following)/i.test(String(asks)) &&
               /^(none of the above|none of these|none apply|none|not applicable|n\/?a)\b/i.test(String(label ?? "").trim())
@@ -8993,7 +9030,7 @@ async function applyToJobOnce(context, job, profile, answers) {
       if (moved.ok) await page.waitForTimeout(2500);
       if (moved.rejected?.length) {
         blockedBy = moved.rejected
-          .map((r) => r.label || r.id || r.shows)
+          .map((r) => (r.id === "errorHeading" && r.shows ? r.shows : r.label || r.id || r.shows))
           .filter(Boolean)
           .slice(0, 4);
       }
@@ -9331,7 +9368,10 @@ async function applyToJobOnce(context, job, profile, answers) {
         const looksLikeWall = await page
           .evaluate(() => /sign ?in|log ?in|create account/i.test(document.title ?? ""))
           .catch(() => false);
-        if (looksLikeWall) {
+        // Not when a screen of the application has just refused to move on:
+        // that is a step with nothing but buttons on it, well past any
+        // sign-in, and what it said is the thing to report.
+        if (looksLikeWall && !blockedBy.length) {
           console.log(
             `    the page is a sign-in wall with no fields rendered; ` +
               `account creation is ${profile.create_accounts === true ? "on" : "OFF"}`,
