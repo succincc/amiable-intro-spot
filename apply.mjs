@@ -1494,6 +1494,59 @@ async function successFactorsAccount(page, profile, job) {
   return { ok: true, created: true };
 }
 
+/**
+ * The first screen of an iCIMS application: one box for an email, a tick to
+ * accept the privacy notice, and "Next". It is a step of the application,
+ * not the application — two attempts were filed as "not an application
+ * form" for stopping here without ever pressing Next. It is filled and sent.
+ * Where the portal then asks for a human to prove themselves, that
+ * application stops there and is the owner's; the next is tried on its own
+ * merits.
+ */
+async function icimsDoor(page, profile) {
+  for (let turn = 0; turn < 2; turn++) {
+    let frame = null;
+    let box = null;
+    for (const f of page.frames()) {
+      const b = await f.$('input[name="css_loginName"], input[id*="loginName" i], form[action*="login" i] input[type=email]').catch(() => null);
+      if (b && (await b.isVisible().catch(() => false))) { frame = f; box = b; break; }
+    }
+    if (!box) return { passed: turn > 0 };
+    // With a password box beside it, it is a sign-in, and the wall below
+    // has its own way with those.
+    const pw = await frame.$("input[type=password]").catch(() => null);
+    if (pw && (await pw.isVisible().catch(() => false))) return { passed: turn > 0 };
+    await box.fill(String(profile.email ?? ""), { timeout: 4000 }).catch(() => {});
+    for (const tick of await frame.$$('input[type=checkbox][name*="gdpr" i], input[type=checkbox][name*="accept" i], input[type=checkbox][id*="accept" i]').catch(() => [])) {
+      await tick.check({ timeout: 2000 }).catch(() => tick.check({ force: true, timeout: 2000 }).catch(() => {}));
+    }
+    const next =
+      (await frame.$('input[type=submit], button[type=submit]').catch(() => null)) ??
+      (await frame.$('button:has-text("Next"), button:has-text("Continue"), a:has-text("Next")').catch(() => null));
+    if (!next) {
+      console.log("    icims: the email step has no button to send it by");
+      return { passed: false };
+    }
+    await Promise.all([
+      page.waitForLoadState("domcontentloaded", { timeout: 15000 }).catch(() => {}),
+      next.click({ timeout: 5000 }).catch(() => next.click({ force: true, timeout: 5000 }).catch(() => {})),
+    ]);
+    await page.waitForTimeout(3500);
+    if (await visibleCaptcha(page)) {
+      console.log("    icims: after the email step the portal asks for a human check; this application waits for the owner");
+      return { stop: { status: "needs_help", help_reason: "captcha", note: "Entered the email on the portal's first step; it then asked for a human check. Open it to finish — the resume for this posting is ready." } };
+    }
+    const still = await frame.$('input[name="css_loginName"], input[id*="loginName" i]').catch(() => null);
+    if (!still || !(await still.isVisible().catch(() => false))) {
+      console.log("    icims: the email step was accepted");
+      return { passed: true };
+    }
+    const says = ((await frame.evaluate(() => (document.querySelector('[class*="error" i], [role=alert]')?.innerText ?? "").replace(/\s+/g, " ").trim().slice(0, 80)).catch(() => "")) || "").length;
+    console.log(`    icims: the email step is still up after Next (${says ? `it shows a message of ${says} letters` : "it says nothing"})`);
+  }
+  return { passed: false };
+}
+
 async function ensureAccount(page, profile, job) {
   const host = hostOf(page.url());
   if (!host) return { ok: false, reason: "no host" };
@@ -7999,6 +8052,17 @@ async function applyToJobOnce(context, job, profile, answers) {
       form = (await richestFrame(page)).frame;
     }
 
+    // iCIMS asks for an email before it shows anything else.
+    if (/(^|\.)icims\.com$/i.test(hostOf(page.url()) ?? "") || page.frames().some((f) => /icims\.com/i.test(f.url()))) {
+      const door = await icimsDoor(page, profile);
+      if (door.stop) return door.stop;
+      if (door.passed) {
+        revealed = await revealForm(page);
+        form = revealed.frame;
+        page = revealed.page;
+      }
+    }
+
     // The sign-in wall is checked HERE, after the clicks, not before them.
     //
     // It used to be checked against the job description page, where there is
@@ -11106,6 +11170,22 @@ const main = async () => {
   // the last two weeks are applied to.
   const FRESH_SINCE = new Date(Date.now() - FRESH_DAYS * 86_400_000).toISOString().slice(0, 19) + "Z";
 
+  // Employers whose portal has asked for a human check on the last attempts.
+  // Judged employer by employer, on what happened: two in a week and the
+  // rest of that employer's postings wait a week before one is tried again,
+  // instead of each of them being walked into the same wall.
+  const CHECKED = new Map();
+  {
+    const since = new Date(Date.now() - 7 * 24 * 3600_000).toISOString().slice(0, 19) + "Z";
+    const rows = (await db(`jobs?help_reason=eq.captcha&updated_at=gte.%22${since}%22&select=company&limit=1000`).catch(() => null)) ?? [];
+    for (const r of rows) {
+      const k = String(r.company ?? "").toLowerCase().trim();
+      if (k) CHECKED.set(k, (CHECKED.get(k) ?? 0) + 1);
+    }
+    const walled = [...CHECKED.values()].filter((n) => n >= 2).length;
+    if (walled) console.log(`employers whose portal asked for a human check twice this week, resting: ${walled}`);
+  }
+
   // Applications already sent to each employer today.
   const PER_EMPLOYER_DAILY = Math.max(1, Number(process.env.PER_EMPLOYER_DAILY || 5));
   const SENT_TO = new Map();
@@ -11438,6 +11518,8 @@ const main = async () => {
               // while one is in flight costs nothing and removes the question.
               // Another runner's employer.
               if (SHARD && shardFor(companyOf(row), SHARD.n) !== SHARD.i) continue;
+              // This employer's portal has asked for a person twice this week.
+              if ((CHECKED.get(companyOf(row)) ?? 0) >= 2) continue;
               if (BUSY_COMPANIES.has(companyOf(row)) || CLAIMING.has(companyOf(row))) continue;
               // An employer whose form stopped one application in this run
               // will stop the next for the same reason — and a portal that

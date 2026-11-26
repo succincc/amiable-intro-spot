@@ -277,12 +277,18 @@ if (process.env.ICIMS_IMPORT_ONLY !== "1") {
     .route("**/*", (r) => (["image", "media", "font"].includes(r.request().resourceType()) ? r.abort() : r.continue()))
     .catch(() => {});
 
-  // Ones saved before that was known are taken out of the queue.
+  // Postings that were set aside on the strength of two attempts that had
+  // not in fact been stopped by the portal are put back.
   if (APPLY) {
-    await db("jobs?ats=eq.icims&status=in.(new,review,queued,needs_help)", {
+    await db("jobs?ats=eq.icims&status=eq.skipped&skip_reason=like.its%20portal%20asks%20for%20a%20human%20check*", {
       method: "PATCH",
       headers: { Prefer: "return=minimal" },
-      body: JSON.stringify({ status: "skipped", skip_reason: "its portal asks for a human check before applying; open it to apply by hand" }),
+      body: JSON.stringify({ status: "new", skip_reason: null, attempts: 0 }),
+    }).catch(() => {});
+    await db("jobs?ats=eq.icims&status=eq.needs_help&help_reason=eq.no_form", {
+      method: "PATCH",
+      headers: { Prefer: "return=minimal" },
+      body: JSON.stringify({ status: "queued", help_reason: null, attempts: 0 }),
     }).catch(() => {});
   }
 
@@ -458,12 +464,9 @@ if (process.env.ICIMS_IMPORT_ONLY !== "1") {
         source: "icims",
         ats: "icims",
         posted_at: r.posted_at,
-        // Found, and kept where the owner can see them — but not queued:
-        // applying goes through the portal, which asks a runner to prove it
-        // is a person before showing a form, and that is not got past. Two
-        // attempts ended on that page. They are the owner's to send by hand.
-        status: "skipped",
-        skip_reason: "its portal asks for a human check before applying; open it to apply by hand",
+        // Queued like any other. Whether a portal lets an application
+        // through is found out one application at a time.
+        status: "new",
       });
     }
     try {
