@@ -2825,6 +2825,61 @@ async function listsBehindDrawnOnes(form, profile, lookupSaved) {
   return done;
 }
 
+/**
+ * A search-and-pick box for the phone's country code, left empty. Each form
+ * words the United States differently — "United States (+1)", "US +1",
+ * "+1" — so it is found by what it is, not by one spelling. Only for a
+ * number that is a US number.
+ */
+async function phoneCodeBoxes(page, form) {
+  let done = 0;
+  for (const el of await form.$$('input[role=combobox]').catch(() => [])) {
+    try {
+      if (!(await el.isVisible().catch(() => false))) continue;
+      const label = String((await el.evaluate(readLabel).catch(() => "")) || "").toLowerCase();
+      if (!/country code|dial(l?ing)? code|phone code/.test(label)) continue;
+      if (String(await el.inputValue().catch(() => "")).trim()) continue;
+      const drawn = await el
+        .evaluate((n) => {
+          let box = n.parentElement;
+          for (let d = 0; box && d < 3; d++, box = box.parentElement) if ((box.innerText ?? "").trim().length > 0 && box.querySelector("button, svg")) return true;
+          return false;
+        })
+        .catch(() => false);
+      if (drawn) continue;
+      const US = /united states(?!.*(minor|virgin|outlying))|\(\+1\)|^\+?1$|^us\b|\busa\b/i;
+      let said = "no options shown";
+      for (const typed of ["United States", "+1", ""]) {
+        await el.click({ timeout: 3000 }).catch(() => {});
+        await el.fill("", { timeout: 2000 }).catch(() => {});
+        if (typed) await el.type(typed, { delay: 40 }).catch(() => {});
+        await page.waitForTimeout(900);
+        const options = [];
+        for (const o of await form.$$("[role=option]").catch(() => [])) {
+          if (await o.isVisible().catch(() => false)) options.push(o);
+          if (options.length >= 300) break;
+        }
+        said = `${options.length} option(s) under "${typed}"`;
+        for (const o of options) {
+          const text = ((await o.innerText().catch(() => "")) || "").replace(/\s+/g, " ").trim();
+          if (!US.test(text)) continue;
+          await o.click({ timeout: 3000 }).catch(() => o.click({ force: true, timeout: 3000 }).catch(() => {}));
+          await page.waitForTimeout(500);
+          done++;
+          said = "chosen";
+          break;
+        }
+        if (said === "chosen") break;
+      }
+      if (said !== "chosen") await page.keyboard.press("Escape").catch(() => {});
+      console.log(`    phone country code: ${said}`);
+    } catch {
+      /* one box failing is not the form failing */
+    }
+  }
+  return done;
+}
+
 /** Which self-identification a set of boxes is asking for, or null. */
 export function selfIdTopic(text) {
   const t = String(text ?? "").toLowerCase();
@@ -9439,11 +9494,13 @@ async function applyToJobOnce(context, job, profile, answers) {
 
       const pickers = [];
       for (const b of (
-        await form.$$('button[aria-haspopup="listbox"], [role=listbox]').catch(() => [])
+        await form.$$('button[aria-haspopup="listbox"], [role=button][aria-haspopup="listbox"], div[role=combobox][aria-haspopup="listbox"], [role=listbox]').catch(() => [])
       ).slice(0, 60)) {
         if (!(await b.isVisible().catch(() => false))) continue;
         const shown = ((await b.innerText().catch(() => "")) || "").replace(/\s+/g, " ").trim();
-        if (shown && !/^select one$/i.test(shown)) continue;
+        // Unanswered is empty, or a prompt to choose in any of its dresses:
+        // "Select One", "–Select–", "Please select…", "Choose an option".
+        if (shown && !/^[-–—\s]*(please )?(select|choose)( one| an option| \.\.\.|…)?[-–—\s]*$/i.test(shown)) continue;
         pickers.push(b);
       }
 
@@ -9700,6 +9757,7 @@ async function applyToJobOnce(context, job, profile, answers) {
     if (!/myworkdayjobs\.com|myworkdaysite\.com|oraclecloud\.com|greenhouse\.io/i.test(hostOf(page.url()) ?? "")) {
       filled += await selfIdGroups(form, profile, lookupSaved).catch(() => 0);
       filled += await listsBehindDrawnOnes(form, profile, lookupSaved).catch(() => 0);
+      filled += await phoneCodeBoxes(page, form).catch(() => 0);
     }
 
     // Is the form actually complete before anything is clicked?
