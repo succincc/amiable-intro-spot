@@ -106,6 +106,10 @@ async function tick() {
         } catch {
           /* the employers named in alerts are a bonus, never a reason to fail */
         }
+      } else {
+        // An empty inbox was still read: say so, or a quiet night looks to
+        // the health check like a mailbox nobody is reading.
+        await ingestMessages(supabase, []);
       }
       // Mail filed under interviews by an older reading is read again by
       // the current one, so a receipt that was called an interview stops
