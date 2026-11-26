@@ -2432,7 +2432,8 @@ async function oracleAddress(page, form, profile) {
         if (!(await box.isVisible().catch(() => false))) continue;
         const held = String(await box.inputValue().catch(() => ""));
         const marked = (await box.getAttribute("aria-invalid").catch(() => null)) === "true";
-        if (held === ten && !marked) continue;
+        // Ten digits the form does not mark are left exactly as they are.
+        if (!marked && held.replace(/\D+/g, "").replace(/^1(?=\d{10}$)/, "").length === 10) continue;
         await box.click({ timeout: 3000 }).catch(() => {});
         await box.fill("", { timeout: 3000 }).catch(() => {});
         await box.type(ten, { delay: 40 }).catch(() => {});
@@ -3282,8 +3283,10 @@ async function oracleRepair(page, form, profile, job, onlyReport = false, lookup
       await page.waitForTimeout(code ? 800 : 3000);
       const bad = (await el.getAttribute("aria-invalid").catch(() => null)) === "true";
       console.log(`    oracle ${code ? "dialling code" : "country"}: ${took ? "chosen from the list" : `not chosen (the list showed ${seen} row(s)${listId ? "" : ", and names no list"})`}; the form ${bad ? "still marks it" : "does not mark it"}`);
-      // Choosing a country redraws the address under it, empty.
-      if (took && !code) await oracleAddress(page, form, profile);
+      // Nothing more here. The country the form marks at this point is an
+      // entry's own — the country a school or an employer is in — and the
+      // address above it is untouched. Going over the address again retyped
+      // a phone number the form had accepted, and it was refused afterwards.
       if (took && !bad) fixed++;
       continue;
     }
@@ -9298,6 +9301,22 @@ async function applyToJobOnce(context, job, profile, answers) {
             return { status: "applied", filled: filled + fixed };
           }
           console.log(`    oracle: still refused after ${fixed} repair(s)`);
+          {
+            // In the form's own words: every message it is showing, once each.
+            const says = await form
+              .evaluate(() => {
+                const shown = (e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+                const out = [];
+                for (const e of Array.from(document.querySelectorAll('[class*="validation" i], [class*="error" i], [role=alert]')).filter(shown)) {
+                  const t = (e.innerText || "").replace(/\s+/g, " ").trim();
+                  if (t && t.length < 110 && !out.includes(t)) out.push(t);
+                  if (out.length >= 8) break;
+                }
+                return out;
+              })
+              .catch(() => []);
+            console.log(`    oracle: what the form says at the end: ${JSON.stringify(says)}`);
+          }
           await oracleRepair(page, form, profile, job, true, lookupSaved);
         }
       }
