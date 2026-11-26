@@ -234,6 +234,11 @@ Microsoft Power BI`;
     "hiringOrganization":{"name":"Acme Co."},"description":"&lt;p&gt;Sell things&lt;/p&gt;","url":"/jobs/123"}]}</script>
     <a href="/careers/jobs/senior-account-manager-99">Senior Account Manager</a><a href="/about">About</a><a href="/jobs/1">Intern, Account Manager</a>
     <a href="/jobs/100%-remote-account-manager">Account Manager</a>`;
+  check("page reader: the way in to the list is the plainest such link, and never a taught portal's", [
+    jobposting.listLink('<a href="/about">About</a><a href="/careers/search">Search Jobs</a><a href="/x">View all of our current openings</a>', "https://acme.com/careers"),
+    jobposting.listLink('<a href="https://acme.wd5.myworkdayjobs.com/x">Search jobs</a><a href="/news">News</a>', "https://acme.com/careers"),
+  ], ["https://acme.com/careers/search", null]);
+  check("page reader: site maps named in a robots file", jobposting.sitemapsIn("User-agent: *\nDisallow: /x\nSitemap: https://acme.com/jobs/sitemap.xml\nsitemap: https://acme.com/sitemap_index.xml"), ["https://acme.com/jobs/sitemap.xml", "https://acme.com/sitemap_index.xml"]);
   const found = jobposting.postingsIn(html);
   check("posting: found inside a graph", found.length, 1);
   const j = jobposting.shape(found[0], "https://acme.com/careers", "Acme");

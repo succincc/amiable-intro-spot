@@ -244,12 +244,49 @@ export function jobLinks(html, base, titles, excludes) {
   return [...seen.entries()].sort((a, b) => b[1] - a[1]).map(([u]) => u);
 }
 
+/**
+ * The link on a careers page that leads to the list itself: "search jobs",
+ * "view all openings". A landing page is mostly pictures; the postings are
+ * one press further in.
+ */
+export function listLink(html, base) {
+  const re = /<a\b[^>]*href=["']([^"'#]+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+  let best = null;
+  let m;
+  while ((m = re.exec(html))) {
+    const text = plain(m[2]).slice(0, 80).toLowerCase();
+    if (!/\b(search (all |our |open )?(jobs|careers|openings|positions|roles)|(view|see|browse|explore|find) (all |our |open |current )?(jobs|openings|positions|opportunities|roles|careers)|all (jobs|openings|positions)|open (positions|roles|jobs)|job (search|openings|opportunities|listings)|current (openings|opportunities|vacancies)|find (a|your) (job|role)|search and apply)\b/.test(text)) continue;
+    let url;
+    try {
+      url = new URL(m[1].replace(/&amp;/g, "&"), base);
+    } catch {
+      continue;
+    }
+    if (!/^https?:$/.test(url.protocol)) continue;
+    // The shorter wording is the plainer link; a link out to a taught portal
+    // is the resolver's to follow, not this reader's.
+    if (/myworkdayjobs|greenhouse\.io|lever\.co|icims\.com|linkedin\.com|indeed\.com|glassdoor/i.test(url.hostname)) continue;
+    if (!best || text.length < best.text.length) best = { url: url.href, text };
+  }
+  return best?.url ?? null;
+}
+
+/** Sitemaps a site names in its robots file. */
+export function sitemapsIn(robots) {
+  return [...String(robots ?? "").matchAll(/^\s*sitemap:\s*(\S+)/gim)].map((m) => m[1]).slice(0, 6);
+}
+
 /** Job addresses named in the site's own map, where it has one. */
 async function fromSitemap(origin, titles, excludes) {
   const out = [];
   const queue = [`${origin}/sitemap.xml`];
+  try {
+    for (const u of sitemapsIn((await getText(`${origin}/robots.txt`)).text)) if (!queue.includes(u)) queue.push(u);
+  } catch {
+    /* no robots file is no news */
+  }
   let fetched = 0;
-  while (queue.length && fetched < 4) {
+  while (queue.length && fetched < 8) {
     const u = queue.shift();
     fetched++;
     let xml;
@@ -319,9 +356,46 @@ async function readEmployer(e, titles, excludes, tally) {
   }
   if (!start) return { found: [], note: `could not open (${why})`, pages };
 
+  // One press further in, where the page offers a way to the list itself.
+  if (!found.size && !links.length) {
+    const list = listLink(start.text, start.final);
+    if (list && list !== start.final) {
+      try {
+        let page = await getText(list).catch(() => null);
+        let got = page ? jobLinks(page.text, page.final, titles, excludes) : [];
+        if (page) take(page.text, page.final);
+        if (!got.length && !found.size && USE_BROWSER && browserUsed < BROWSER_SITES) {
+          browserUsed++;
+          page = await withBrowser(list).catch(() => page);
+          if (page) {
+            viaBrowser = true;
+            take(page.text, page.final);
+            got = jobLinks(page.text, page.final, titles, excludes);
+          }
+        }
+        if (page) {
+          pages++;
+          tally.furtherIn = (tally.furtherIn ?? 0) + 1;
+          links = got;
+          start = page;
+        }
+      } catch {
+        /* the landing page stands */
+      }
+    }
+  }
+
   const origin = new URL(start.final).origin;
   if (links.length < PAGES_PER_EMPLOYER) {
-    for (const u of await fromSitemap(origin, titles, excludes)) if (!links.includes(u)) links.push(u);
+    // The site's own map, and those of its jobs and careers addresses.
+    const base = new URL(origin).hostname.replace(/^(www|careers?|jobs?)\./, "");
+    const origins = [origin, ...[`https://careers.${base}`, `https://jobs.${base}`].filter((o) => o !== origin)];
+    for (const o of origins) {
+      const before = links.length;
+      for (const u of await fromSitemap(o, titles, excludes)) if (!links.includes(u)) links.push(u);
+      if (links.length > before) tally.fromMap = (tally.fromMap ?? 0) + 1;
+      if (links.length >= PAGES_PER_EMPLOYER) break;
+    }
   }
   for (const u of links.slice(0, (viaBrowser ? Math.min(8, PAGES_PER_EMPLOYER) : PAGES_PER_EMPLOYER) - 1)) {
     try {
