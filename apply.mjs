@@ -195,6 +195,32 @@ async function requeueStaleParked() {
   }
 }
 
+/**
+ * Jobs parked because an emailed link or code had not arrived in time.
+ *
+ * The mail usually lands a minute after the run has moved on, and nothing
+ * ever went back for it: the account sat registered and unverified, the
+ * posting sat parked. Half an hour later the mail is in the inbox, so the
+ * job is put back — with its count of attempts left as it is, so one that
+ * keeps failing this way stops at three.
+ */
+async function requeueAwaitingMail() {
+  const before = new Date(Date.now() - 30 * 60_000).toISOString();
+  const rows = await db(
+    `jobs?status=eq.needs_help&help_reason=eq.email_verification&attempts=lt.3` +
+      `&updated_at=lt.${encodeURIComponent(before)}&select=id&limit=50`,
+  ).catch(() => null);
+  if (!rows?.length) return;
+  const ok = await db(`jobs?id=in.(${rows.map((r) => r.id).join(",")})`, {
+    method: "PATCH",
+    headers: { Prefer: "return=minimal" },
+    body: JSON.stringify({ status: "queued", help_reason: null, updated_at: new Date().toISOString() }),
+  })
+    .then(() => true)
+    .catch(() => false);
+  if (ok) console.log(`Requeued ${rows.length} job(s) that were waiting on an emailed link or code.`);
+}
+
 const heartbeat = (patch) =>
   db("agent?id=eq.1", {
     method: "PATCH",
@@ -9342,7 +9368,10 @@ async function applyToJobOnce(context, job, profile, answers) {
       const list = [...new Set(missing)].slice(0, 5).join("; ");
       return {
         status: "needs_help",
-        help_reason: "incomplete",
+        // A form that will not go without part of a social security number
+        // or a birth date is never completed by this system, so it is not
+        // one of the kinds tried again after each change.
+        help_reason: /social security|\bssn\b|date of birth|birth ?date/i.test(missing.join("; ")) ? "private_detail" : "incomplete",
         filled,
         note:
           `Filled ${filled} fields, but ${missing.length} required item` +
@@ -9361,6 +9390,28 @@ async function applyToJobOnce(context, job, profile, answers) {
       // 25 Workday postings look like one problem when they were another.
       const controls = await form.$$("input, textarea, select").catch(() => []);
       if (controls.length === 0) {
+        // A step that is nothing but "Take Assessment": the employer's own
+        // test, which is the applicant's to sit. Everything before it is
+        // filled in and kept by the portal.
+        const assessment = await page
+          .evaluate(() =>
+            Array.from(document.querySelectorAll("a, button, [role=button]")).some((b) =>
+              /^(take|start|begin|launch|continue) (the |your )?assessments?\b/i.test((b.innerText ?? "").replace(/\s+/g, " ").trim()),
+            ),
+          )
+          .catch(() => false);
+        if (assessment) {
+          console.log("    the next step is an assessment the employer sets; that one is the applicant's own");
+          return {
+            status: "needs_help",
+            help_reason: "assessment",
+            filled,
+            note:
+              "Everything up to the employer's assessment is filled in and saved in the portal. " +
+              "The assessment itself is yours: open the posting, sign in with the account in " +
+              "Settings, and press Take Assessment.",
+          };
+        }
         // A page titled "Sign In" with nothing on it is a wall that did not
         // render, not a posting without a form. Registering is the answer to
         // that, and reporting "no fields at all" sent six of them to the
@@ -9376,6 +9427,21 @@ async function applyToJobOnce(context, job, profile, answers) {
             `    the page is a sign-in wall with no fields rendered; ` +
               `account creation is ${profile.create_accounts === true ? "on" : "OFF"}`,
           );
+          // A page read while it was still being drawn looks the same. Give
+          // it a few seconds; fields that turn up mean there was no wall.
+          const late = await until(
+            async () => ((await form.$$("input, textarea, select").catch(() => [])).length > 0 ? true : null),
+            8000,
+            1000,
+          );
+          if (late) {
+            console.log("    fields appeared a moment later — the page was still loading; requeued");
+            return {
+              status: "queued",
+              help_reason: "registered",
+              note: "The page was still being drawn when it was read. Requeued to apply.",
+            };
+          }
           if (profile.create_accounts === true) {
             const account = await ensureAccount(page, profile, job);
             console.log(
@@ -10286,6 +10352,7 @@ const main = async () => {
 
   try {
     await requeueStaleParked();
+    await requeueAwaitingMail();
 
     // What is actually in the queue, by portal and by status.
     //
