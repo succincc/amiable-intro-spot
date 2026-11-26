@@ -2422,6 +2422,29 @@ async function oracleAddress(page, form, profile) {
     console.log(`    oracle: ${stem} ${took ? `chose 1 of ${found.length} suggestion(s)` : `had ${found.length} suggestion(s), none chosen`}; ${kept ? "holds a value" : "is empty"}`);
     if (kept) done++;
   }
+  // The phone number as the ten digits and nothing else. The portal reads
+  // one in from the resume with its punctuation, or with the country's 1 in
+  // front, and then refuses its own reading: "Enter a valid number."
+  {
+    const ten = String(profile?.phone ?? "").replace(/\D+/g, "").replace(/^1(?=\d{10}$)/, "");
+    if (ten.length === 10) {
+      for (const box of await form.$$('input[type="tel"]').catch(() => [])) {
+        if (!(await box.isVisible().catch(() => false))) continue;
+        const held = String(await box.inputValue().catch(() => ""));
+        const marked = (await box.getAttribute("aria-invalid").catch(() => null)) === "true";
+        if (held === ten && !marked) continue;
+        await box.click({ timeout: 3000 }).catch(() => {});
+        await box.fill("", { timeout: 3000 }).catch(() => {});
+        await box.type(ten, { delay: 40 }).catch(() => {});
+        await page.keyboard.press("Tab").catch(() => {});
+        await page.waitForTimeout(500);
+        const after = (await box.getAttribute("aria-invalid").catch(() => null)) === "true";
+        console.log(`    oracle: phone number set as ten digits (it held ${held.replace(/\D+/g, "").length} digit(s) in ${held.length} character(s)); the form ${after ? "still marks it" : "does not mark it"}`);
+        if (!after) done++;
+        break;
+      }
+    }
+  }
   return done;
 }
 
@@ -3052,6 +3075,21 @@ async function oracleEducation(page, form, profile, resume, tileText = "") {
       })
       .catch(() => null);
     console.log(`    oracle education: no degree box was found; beside the word "Degree": ${JSON.stringify(near).slice(0, 400)}`);
+    // Everything the open entry is made of, by kind and by its own label.
+    const made = await form
+      .evaluate(() => {
+        const shown = (e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+        const save = Array.from(document.querySelectorAll("button")).filter(shown).filter((b) => /^save$/i.test((b.innerText || "").trim())).pop();
+        let box = save?.parentElement ?? null;
+        for (let n = 0; n < 12 && box && !/degree/i.test(box.innerText || ""); n++) box = box.parentElement;
+        if (!box) return null;
+        return Array.from(box.querySelectorAll("input, select, textarea, button, [role=combobox], [role=listbox], [role=radio], label"))
+          .filter(shown)
+          .slice(0, 46)
+          .map((c) => `${c.tagName}${c.getAttribute("role") ? `[${c.getAttribute("role")}]` : ""}${c.getAttribute("type") ? `:${c.getAttribute("type")}` : ""}#${String(c.id || "").replace(/\d+/g, "N").slice(0, 26)}.${(typeof c.className === "string" ? c.className : "").trim().split(/\s+/)[0].slice(0, 26)}${c.tagName === "LABEL" || c.tagName === "BUTTON" ? `"${(c.innerText || "").replace(/\s+/g, " ").trim().slice(0, 22)}"` : ""}`);
+      })
+      .catch(() => null);
+    console.log(`    oracle education: the open entry is made of ${JSON.stringify(made).slice(0, 1500)}`);
   }
   // This entry's own degree where it was matched; the resume's highest only
   // when there is a single school.
