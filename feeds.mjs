@@ -15,13 +15,14 @@
 // read from, and applied for on, the employer's own portal.
 //
 // Sources:
-//   Remotive, Jobicy — public, no key. (The Muse's feed is not answering.)
+//   Remotive, Jobicy, Remote OK, Himalayas, We Work Remotely, Working Nomads
+//            — public, no key. (The Muse's feed is not answering.)
 //   Adzuna   — free key (ADZUNA_APP_ID / ADZUNA_APP_KEY); skipped without one.
 //   Jooble   — free key (JOOBLE_KEY); skipped without one.
 //
 // Free: a public-repo runner and public feeds.
 
-import { guardLogs, hideNames } from "./quiet.mjs";
+import { guardLogs, hideNames, shape } from "./quiet.mjs";
 // Nothing this prints names an employer, a posting or a place: see quiet.mjs.
 guardLogs();
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -188,6 +189,130 @@ async function fromJobicy(titles, excludes, tally) {
   return out;
 }
 
+// A feed's first record, by field name and size only: enough to see from a
+// run's log whether the feed still has the fields this reads.
+const SHAPES_SHOWN = new Set();
+function showShape(label, row) {
+  if (!row || SHAPES_SHOWN.has(label)) return;
+  SHAPES_SHOWN.add(label);
+  console.log(`${label}: a record is made of ${JSON.stringify(shape(row)).slice(0, 500)}`);
+}
+const US_OR_ANYWHERE = /\b(usa?|u\.s\.a?\.?|united states|america|north america|americas|worldwide|anywhere|global|remote)\b/i;
+
+/** Remote OK: every remote job it lists, in one request. Public, no key. */
+async function fromRemoteOk(titles, excludes, tally) {
+  const out = [];
+  let j;
+  try {
+    j = await getJson("https://remoteok.com/api");
+  } catch (e) {
+    tally.errors.push(`remoteok: ${String(e?.message ?? e).slice(0, 30)}`);
+    return out;
+  }
+  // The first item is the feed's own notice, not a job.
+  const rows = (Array.isArray(j) ? j : []).filter((r) => r && (r.position || r.title));
+  showShape("remoteok", rows[0]);
+  tally.read += rows.length;
+  for (const r of rows) {
+    if (!fresh14(r.date)) continue;
+    const where = String(r.location ?? "");
+    if (where && !US_OR_ANYWHERE.test(where)) continue;
+    if (!wanted(r.position ?? r.title, titles, excludes)) continue;
+    if (r.company) out.push({ name: r.company, source: "remoteok" });
+  }
+  return out;
+}
+
+/** Himalayas: remote jobs, twenty to a page. Public, no key. */
+async function fromHimalayas(titles, excludes, tally) {
+  const out = [];
+  for (let offset = 0; offset < 400; offset += 20) {
+    let j;
+    try {
+      j = await getJson(`https://himalayas.app/jobs/api?limit=20&offset=${offset}`);
+    } catch (e) {
+      tally.errors.push(`himalayas @${offset}: ${String(e?.message ?? e).slice(0, 30)}`);
+      break;
+    }
+    const rows = j?.jobs ?? [];
+    if (!rows.length) break;
+    showShape("himalayas", rows[0]);
+    tally.read += rows.length;
+    let old = 0;
+    for (const r of rows) {
+      const at = Number(r.pubDate) > 1e9 ? new Date(Number(r.pubDate) * (Number(r.pubDate) > 1e12 ? 1 : 1000)).toISOString() : r.pubDate;
+      if (!fresh14(at)) { old++; continue; }
+      const places = Array.isArray(r.locationRestrictions) ? r.locationRestrictions.join(" ") : String(r.locationRestrictions ?? "");
+      if (places && !US_OR_ANYWHERE.test(places)) continue;
+      if (!wanted(r.title, titles, excludes)) continue;
+      if (r.companyName) out.push({ name: r.companyName, source: "himalayas" });
+    }
+    // Newest first: a page that is all older than two weeks ends it.
+    if (old === rows.length) break;
+    await pause(1200);
+  }
+  return out;
+}
+
+/** We Work Remotely: its public feed, where a title reads "Company: Role". */
+async function fromWeWorkRemotely(titles, excludes, tally) {
+  const out = [];
+  let xml;
+  try {
+    const res = await fetch("https://weworkremotely.com/remote-jobs.rss", {
+      signal: AbortSignal.timeout(25_000),
+      headers: { "User-Agent": "applypilot-feeds/1.0", Accept: "application/rss+xml, application/xml, text/xml" },
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    xml = await res.text();
+  } catch (e) {
+    tally.errors.push(`weworkremotely: ${String(e?.message ?? e).slice(0, 30)}`);
+    return out;
+  }
+  const items = xml.split(/<item>/i).slice(1);
+  tally.read += items.length;
+  const tag = (item, name) => {
+    const m = item.match(new RegExp(`<${name}>(?:<!\\[CDATA\\[)?([\\s\\S]*?)(?:\\]\\]>)?</${name}>`, "i"));
+    return m ? m[1].trim() : "";
+  };
+  for (const item of items) {
+    if (!fresh14(tag(item, "pubDate"))) continue;
+    const region = tag(item, "region");
+    if (region && !US_OR_ANYWHERE.test(region)) continue;
+    const full = tag(item, "title").replace(/&amp;/g, "&");
+    const cut = full.indexOf(":");
+    if (cut < 2) continue;
+    const company = full.slice(0, cut).trim();
+    const role = full.slice(cut + 1).trim();
+    if (!wanted(role, titles, excludes)) continue;
+    out.push({ name: company, source: "weworkremotely" });
+  }
+  return out;
+}
+
+/** Working Nomads: its public list of remote jobs. No key. */
+async function fromWorkingNomads(titles, excludes, tally) {
+  const out = [];
+  let j;
+  try {
+    j = await getJson("https://www.workingnomads.com/api/exposed_jobs/");
+  } catch (e) {
+    tally.errors.push(`workingnomads: ${String(e?.message ?? e).slice(0, 30)}`);
+    return out;
+  }
+  const rows = Array.isArray(j) ? j : [];
+  showShape("workingnomads", rows[0]);
+  tally.read += rows.length;
+  for (const r of rows) {
+    if (!fresh14(r.pub_date)) continue;
+    const where = String(r.location ?? "");
+    if (where && !US_OR_ANYWHERE.test(where)) continue;
+    if (!wanted(r.title, titles, excludes)) continue;
+    if (r.company_name) out.push({ name: r.company_name, source: "workingnomads" });
+  }
+  return out;
+}
+
 /** Adzuna: by title, within about forty miles of home, posted in two weeks. */
 async function fromAdzuna(titles, excludes, where, tally) {
   const id = process.env.ADZUNA_APP_ID;
@@ -271,6 +396,10 @@ if (process.env.FEEDS_IMPORT_ONLY !== "1") {
     // runs; it is kept in the file and left out of the round until it returns.
     ["remotive", () => fromRemotive(titles, excludes, tally)],
     ["jobicy", () => fromJobicy(titles, excludes, tally)],
+    ["remoteok", () => fromRemoteOk(titles, excludes, tally)],
+    ["himalayas", () => fromHimalayas(titles, excludes, tally)],
+    ["weworkremotely", () => fromWeWorkRemotely(titles, excludes, tally)],
+    ["workingnomads", () => fromWorkingNomads(titles, excludes, tally)],
     ["adzuna", () => fromAdzuna(titles, excludes, where, tally)],
     ["jooble", () => fromJooble(titles, excludes, where, tally)],
   ]) {
