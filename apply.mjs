@@ -1540,9 +1540,21 @@ async function icimsDoor(page, profile) {
     const pw = await frame.$("input[type=password]").catch(() => null);
     if (pw && (await pw.isVisible().catch(() => false))) return { passed: turn > 0 };
     await box.fill(String(profile.email ?? ""), { timeout: 4000 }).catch(() => {});
-    for (const tick of await frame.$$('input[type=checkbox][name*="gdpr" i], input[type=checkbox][name*="accept" i], input[type=checkbox][id*="accept" i]').catch(() => [])) {
-      await tick.check({ timeout: 2000 }).catch(() => tick.check({ force: true, timeout: 2000 }).catch(() => {}));
+    // Some portals ask for a phone number on the same screen.
+    const phone = await frame.$('input[name*="phoneNumber" i], input[id*="phoneNumber" i]').catch(() => null);
+    if (phone && (await phone.isVisible().catch(() => false)) && !(await phone.inputValue().catch(() => ""))) {
+      await phone.fill(String(profile.phone ?? "").replace(/[^0-9]/g, "").slice(-10), { timeout: 3000 }).catch(() => {});
     }
+    // The notice to accept is worded and named differently on each: it is
+    // the tick box on this screen, whatever it is called.
+    let ticked = 0;
+    for (const tick of await frame.$$("input[type=checkbox]").catch(() => [])) {
+      const shown = (await tick.isVisible().catch(() => false)) || (await tick.evaluate((n) => !!(n.closest("label") || (n.id && document.querySelector(`label[for="${CSS.escape(n.id)}"]`)))).catch(() => false));
+      if (!shown) continue;
+      await tick.check({ timeout: 2000 }).catch(() => tick.check({ force: true, timeout: 2000 }).catch(() => {}));
+      if (await tick.isChecked().catch(() => false)) ticked++;
+    }
+    console.log(`    icims: the first step — email entered${phone ? ", phone entered" : ""}, ${ticked} notice(s) accepted`);
     const next =
       (await frame.$('input[type=submit], button[type=submit]').catch(() => null)) ??
       (await frame.$('button:has-text("Next"), button:has-text("Continue"), a:has-text("Next")').catch(() => null));
@@ -3063,6 +3075,49 @@ async function workFromBoxes(page, form, profile) {
       }
       if (!/chosen$/.test(said)) await page.keyboard.press("Escape").catch(() => {});
       console.log(`    where to work from: ${said}`);
+    } catch {
+      /* one box failing is not the form failing */
+    }
+  }
+  return done;
+}
+
+/**
+ * A veteran question in a search-and-pick box that did not keep its answer.
+ * Chosen again from the open list without typing into it. Only a plain
+ * denial is chosen this way, and only when a denial is the answer on file;
+ * anything else is left for the ordinary path or the owner.
+ */
+async function veteranBoxes(page, form, profile, lookupSaved) {
+  let done = 0;
+  for (const el of await form.$$('input[role=combobox]').catch(() => [])) {
+    try {
+      if (!(await el.isVisible().catch(() => false))) continue;
+      const label = String((await el.evaluate(readLabel).catch(() => "")) || "");
+      if (!/veteran/i.test(label) || /agency|organi[sz]ation|program/i.test(label)) continue;
+      if (String(await el.inputValue().catch(() => "")).trim()) continue;
+      const words = await el.evaluate((n) => (n.parentElement?.parentElement?.innerText ?? "").trim().length).catch(() => 0);
+      if (words > 0) continue;
+      const want = String(lookupSaved(label) ?? answerQuestion(label, profile) ?? "");
+      if (!/\b(not|no)\b/i.test(want) || /prefer|decline|choose not/i.test(want)) continue;
+      await el.click({ timeout: 3000 }).catch(() => {});
+      await page.waitForTimeout(900);
+      let said = "the list did not open";
+      const options = [];
+      for (const o of await form.$$("[role=option]").catch(() => [])) if (await o.isVisible().catch(() => false)) options.push(o);
+      if (options.length) said = `${options.length} option(s), none a plain denial`;
+      for (const o of options) {
+        const text = ((await o.innerText().catch(() => "")) || "").replace(/\s+/g, " ").trim();
+        if (!/\b(not|neither)\b/i.test(text) || /identify as|choose not|decline|prefer not/i.test(text)) continue;
+        await o.click({ timeout: 3000 }).catch(() => o.click({ force: true, timeout: 3000 }).catch(() => {}));
+        await page.waitForTimeout(600);
+        const kept = await el.evaluate((n) => (n.value || n.parentElement?.parentElement?.innerText || "").trim().length).catch(() => 0);
+        said = kept ? "chosen again, and kept" : "chosen again, not kept";
+        if (kept) done++;
+        break;
+      }
+      if (!/kept$/.test(said) || /not kept/.test(said)) await page.keyboard.press("Escape").catch(() => {});
+      console.log(`    veteran question: ${said}`);
     } catch {
       /* one box failing is not the form failing */
     }
@@ -9977,6 +10032,7 @@ async function applyToJobOnce(context, job, profile, answers) {
       filled += await selfIdGroups(form, profile, lookupSaved).catch(() => 0);
       filled += await listsBehindDrawnOnes(form, profile, lookupSaved).catch(() => 0);
       filled += await phoneCodeBoxes(page, form).catch(() => 0);
+      filled += await veteranBoxes(page, form, profile, lookupSaved).catch(() => 0);
       filled += await placeGroups(form, profile).catch(() => 0);
     }
     // Where the owner would work from, asked as a search-and-pick box whose
