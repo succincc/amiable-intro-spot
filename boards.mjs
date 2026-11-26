@@ -17,6 +17,7 @@
 // Free: public addresses, and a runner in a public repository.
 
 import { guardLogs, hideNames, shape, STATES } from "./quiet.mjs";
+import { nearPattern, stateName } from "./near.mjs";
 // Nothing this prints names an employer, a posting or a place: see quiet.mjs.
 guardLogs();
 
@@ -301,6 +302,11 @@ if (process.env.BOARDS_IMPORT_ONLY !== "1") {
   const [cfg] = (await db("search_config?id=eq.1&select=titles,exclude_titles")) ?? [{}];
   const titles = (cfg?.titles ?? []).filter(Boolean);
   const excludes = (cfg?.exclude_titles ?? []).filter(Boolean);
+  // The owner's state: large boards are asked for postings there, and what
+  // is plainly somewhere else is not saved. Never printed.
+  const [prof] = (await db("profile?id=eq.1&select=state,home_state").catch(() => [])) ?? [];
+  const HOME = prof?.home_state || prof?.state || process.env.HOME_STATE || "";
+  const NEAR = nearPattern(HOME);
 
   // Every employer the resolver has placed on one of these systems. Its note
   // carries the board's host.
@@ -334,7 +340,7 @@ if (process.env.BOARDS_IMPORT_ONLY !== "1") {
   console.log(`${found.length} employer(s) placed on these systems; ${list.length} board(s) to read ${JSON.stringify(by)}; ${titles.length} title(s) wanted; ${APPLY ? "saving postings" : "report only"}.`);
 
   const started = Date.now();
-  const tally = { boards: 0, unreadable: 0, read: 0, wanted: 0, fresh: 0, saved: 0 };
+  const tally = { boards: 0, unreadable: 0, read: 0, wanted: 0, near: 0, fresh: 0, saved: 0 };
   const perSystem = {};
   const sampled = new Set();
   for (const e of list) {
@@ -356,9 +362,12 @@ if (process.env.BOARDS_IMPORT_ONLY !== "1") {
         const page = await (await get(`https://${e.host}/careers`, "text/html")).text();
         const domain = eightfoldDomain(page) ?? `${e.sub}.com`;
         e.domain = domain;
+        // Asked for the owner's state where one is known: a large employer's
+        // newest three hundred, taken from everywhere, may hold none nearby.
+        const there = stateName(HOME) ? `&location=${encodeURIComponent(stateName(HOME))}` : "";
         let total = Infinity;
         for (let start = 0; start < Math.min(total, 300); ) {
-          const j = await (await get(`https://${e.host}/api/apply/v2/jobs?domain=${encodeURIComponent(domain)}&start=${start}&num=50&sort_by=timestamp`, "application/json")).json();
+          const j = await (await get(`https://${e.host}/api/apply/v2/jobs?domain=${encodeURIComponent(domain)}${there}&start=${start}&num=50&sort_by=timestamp`, "application/json")).json();
           const got = readEightfold(j, e.host);
           if (start === 0 && !got.length) console.log(`     eightfold answered ${JSON.stringify(shape(j)).slice(0, 300)}; domain ${eightfoldDomain(page) ? "stated on the page" : "guessed"}`);
           if (!got.length) break;
@@ -387,6 +396,10 @@ if (process.env.BOARDS_IMPORT_ONLY !== "1") {
       if (r.country && !/^(US|USA|UNITED STATES)$/i.test(r.country)) continue;
       if (!wanted(r.title, titles, excludes)) continue;
       tally.wanted++;
+      // A place that is stated and plainly elsewhere; one with no place is
+      // kept and read from its own page.
+      if (r.location && !r.remote && !NEAR.test(r.location)) continue;
+      tally.near++;
       if (r.posted_at && new Date(r.posted_at).getTime() < Date.now() - 14 * 86_400_000) continue;
       keep.push(r);
     }
