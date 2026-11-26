@@ -39,6 +39,10 @@ concurrency:
   group: applypilot-sweep
   cancel-in-progress: false
 
+permissions:
+  actions: write
+  contents: read
+
 jobs:
   sweep:
     runs-on: ubuntu-latest
@@ -132,3 +136,13 @@ jobs:
           # so a 200 is not automatically a success. A sweep in which nothing
           # worked is a failed sweep; one bad round among good ones is not.
           [ "${good}" -gt 0 ]
+
+      # What was just found is measured and applied to now, not a round from
+      # now. Each job used to wait for the clock: a posting found at noon was
+      # measured at three and applied to at six. Handing on costs the database
+      # nothing extra — it is awake for this stretch already.
+      - name: Hand on to measuring
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run measure.yml --repo "${{ github.repository }}" -f apply=true -f then_apply=true || echo "could not start measuring"

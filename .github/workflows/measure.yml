@@ -16,6 +16,10 @@ on:
         description: "Write the distances and skip jobs beyond the radius (true), or only report (false)"
         required: false
         default: "false"
+      then_apply:
+        description: "Start an application round when this ends (set by the sweep; leave false)"
+        required: false
+        default: "false"
   schedule:
     # Every two hours: discovery now brings postings in six times a day, and
     # one that has not been measured cannot be applied to.
@@ -24,6 +28,10 @@ on:
 concurrency:
   group: applypilot-measure
   cancel-in-progress: false
+
+permissions:
+  actions: write
+  contents: read
 
 jobs:
   measure:
@@ -42,3 +50,8 @@ jobs:
           APPLYPILOT_PASSWORD: ${{ secrets.APPLYPILOT_PASSWORD }}
           APPLY: ${{ github.event_name == 'schedule' || github.event.inputs.apply == 'true' }}
         run: node measure.mjs
+      - name: Hand on to applying
+        if: always() && github.event.inputs.then_apply == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run apply.yml --repo "${{ github.repository }}" -f as_scheduled=true -f max_jobs=60 || echo "could not start applying"

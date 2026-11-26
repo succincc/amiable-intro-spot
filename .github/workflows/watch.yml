@@ -93,11 +93,15 @@ jobs:
           # The intervals are multiples of three hours on purpose. Jobs that
           # come due together run together, the database is awake for that
           # one stretch, and asleep — and unbilled — until the next.
+          # The sweep leads each round and hands on: what it finds is measured
+          # as it ends, and applied to as the measuring ends. Measuring and
+          # applying are listed here with longer intervals than the round, so
+          # that this starts them only when that hand-off has not happened.
           jobs_list="
-          measure.yml|3|apply=true
-          sweep.yml|6|-
+          sweep.yml|3|-
           tailor.yml|3|-
-          apply.yml|3|as_scheduled=true,max_jobs=60
+          measure.yml|4|apply=true,then_apply=true
+          apply.yml|5|as_scheduled=true,max_jobs=60
           oracle.yml|6|apply=true
           feeds.yml|12|apply=true
           successfactors.yml|6|apply=true
