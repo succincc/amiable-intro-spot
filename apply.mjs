@@ -2808,7 +2808,7 @@ async function listsBehindDrawnOnes(form, profile, lookupSaved) {
 export function selfIdTopic(text) {
   const t = String(text ?? "").toLowerCase();
   if (/transgender/.test(t)) return "transgender";
-  if (/sexual orientation|lgbt/.test(t)) return "sexual orientation";
+  if (/sexual ?orientation|lgbt/.test(t)) return "sexual orientation";
   if (/gender|pronoun|\bsex\b/.test(t)) return "gender";
   if (/hispanic|latino/.test(t) && !/race/.test(t)) return "hispanic or latino";
   if (/race|ethnic/.test(t)) return "race or ethnicity";
@@ -9273,7 +9273,12 @@ async function applyToJobOnce(context, job, profile, answers) {
                 const flat = (t) => String(t).toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
                 const a = flat(after);
                 const w = flat(want);
-                const same = a === w || a.startsWith(w.slice(0, 14)) || w.startsWith(a.slice(0, 14));
+                // "I am neither a protected nor a non-protected veteran" is
+                // "I am not a protected veteran" in another list's words: a
+                // plain denial on both sides, and not one that identifies as
+                // anything.
+                const denies = (t) => /\b(not|neither)\b/.test(t) && !/\bidentify as\b/.test(t);
+                const same = a === w || a.startsWith(w.slice(0, 14)) || w.startsWith(a.slice(0, 14)) || (/veteran/i.test(label) && denies(a) && denies(w));
                 if (!same) {
                   await node.click({ timeout: 2000 }).catch(() => {});
                   await node.fill("", { timeout: 3000 }).catch(() => {});
