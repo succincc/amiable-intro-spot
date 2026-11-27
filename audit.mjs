@@ -39,7 +39,7 @@ async function db(path) {
 async function main() {
   await signIn();
 
-  const sent = await db("jobs?status=in.(applied,interview,offer,rejected)&select=id,status,ats,company,title,location,url,score,posted_at,applied_at,confirm_state,ats_match,tailored_resume&limit=3000");
+  const sent = await db("jobs?status=in.(applied,interview,offer,rejected)&select=id,status,ats,company,title,location,url,score,posted_at,applied_at,confirm_state,ats_match,tailored_resume,source&limit=3000");
   for (const j of sent) { j.has_tailored = Boolean(j.tailored_resume); delete j.tailored_resume; }
   const tried = (await db("jobs?status=in.(needs_help,failed)&select=ats,status,help_reason&limit=5000").catch(() => [])) ?? [];
   // The finer kind is a newer column; without it the subject stands in.

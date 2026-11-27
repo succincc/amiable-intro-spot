@@ -21,6 +21,15 @@ const GOOD = new Set(["interview", "offer"]);
 /** The fewest applications in a group before a percentage is worth printing. */
 export const ENOUGH = 20;
 
+const FAMILIES = [
+  ["analyst", /\banalyst|analytics\b/], ["engineer or developer", /\bengineer|developer|programmer|architect\b/],
+  ["marketing", /\bmarketing|brand|content|seo|social media|communications\b/], ["sales or account", /\bsales|account (executive|manager)|business development\b/],
+  ["operations", /\boperations|logistics|supply chain|procurement\b/], ["project or program", /\bproject|program|scrum|product (manager|owner)\b/],
+  ["customer or support", /\bcustomer|support|success|service\b/], ["finance or accounting", /\bfinanc|account(ant|ing)|payroll|audit\b/],
+  ["people or recruiting", /\bhuman resources|\bhr\b|recruit|talent\b/], ["coordinator or assistant", /\bcoordinator|assistant|administrat|associate\b/],
+  ["manager or director", /\bmanager|director|lead|head of|supervisor\b/], ["specialist", /\bspecialist\b/],
+];
+
 const bucket = {
   system: (j) => j.ats ?? "own site",
   "posting age when sent": (j) => {
@@ -31,6 +40,17 @@ const bucket = {
   },
   "scorer's rating": (j) => (j.score == null ? "unscored" : j.score >= 8 ? "8-10" : j.score >= 6 ? "6-7" : "1-5"),
   "match to requirements": (j) => (j.ats_match == null ? "not measured" : j.ats_match >= 80 ? "80%+" : j.ats_match >= 60 ? "60-79%" : "under 60%"),
+  // The kind of work, by the plain word in the title. Generic words only,
+  // so the list says nothing about who is looking.
+  "kind of job": (j) => {
+    const t = String(j.title ?? "").toLowerCase();
+    for (const [name, re] of FAMILIES) if (re.test(t)) return name;
+    return t ? "other" : "untitled";
+  },
+  "where the posting was found": (j) => String(j.source ?? "not recorded").toLowerCase().slice(0, 24),
+  // Per employer would name them; what matters is whether writing to one
+  // employer many times does better or worse than writing once.
+  "applications to the same employer": (j) => (j.employer_count == null ? "not counted" : j.employer_count === 1 ? "the only one" : j.employer_count <= 3 ? "2-3" : "4 or more"),
   resume: (j) => (j.has_tailored ?? Boolean(j.tailored_resume) ? "written for the posting" : "the general one"),
 };
 
@@ -40,6 +60,12 @@ const bucket = {
  */
 export function outcomes(rows) {
   const sent = (rows ?? []).filter((j) => SENT.has(j.status));
+  {
+    const per = {};
+    const key = (j) => String(j.company ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+    for (const j of sent) if (key(j)) per[key(j)] = (per[key(j)] ?? 0) + 1;
+    for (const j of sent) if (key(j) && j.employer_count == null) j.employer_count = per[key(j)];
+  }
   const tally = (list) => {
     const n = list.length;
     const good = list.filter((j) => GOOD.has(j.status)).length;

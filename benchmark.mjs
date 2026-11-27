@@ -13,7 +13,8 @@
  * Run for each person by forusers.mjs.
  */
 import { guardLogs } from "./quiet.mjs";
-import { requirementReport, unsupportedClaims, writingFindings } from "./quality.mjs";
+import { requirementReport, unsupportedClaims, writingFindings, segmentPosting } from "./quality.mjs";
+import { requirementTerms, NAMED_TERMS } from "./ats.mjs";
 guardLogs();
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -62,6 +63,62 @@ export function compare(own, material, rows) {
   return out;
 }
 
+/**
+ * Where the missing share comes from. Every required term of every posting
+ * is put in exactly one place:
+ *   - not a qualification: a frequent word of the posting, not a named
+ *     skill, tool or credential (the reading of the posting is at fault);
+ *   - named, and in the written resume (covered);
+ *   - named, in the person's own material, left out of the written resume
+ *     (the tailoring is at fault);
+ *   - named, and nowhere in the person's material (the person does not
+ *     claim it: a matter of which jobs are chosen, or of a thin profile).
+ */
+export function whereItGoes(material, rows) {
+  const named = new Set(NAMED_TERMS.map((t) => String(t).toLowerCase()));
+  const mat = String(material ?? "").toLowerCase();
+  const o = { postings: 0, terms: 0, words: 0, wordsCovered: 0, named: 0, covered: 0, leftOut: 0, notClaimed: 0, marked: 0, byScore: {}, missingNamed: {}, commonWords: {} };
+  for (const j of rows) {
+    const posting = String(j.description ?? ""), written = String(j.tailored_resume ?? "").toLowerCase();
+    if (posting.length < 300 || written.length < 300) continue;
+    const seg = segmentPosting(posting);
+    const marked = seg.marked && Boolean(seg.required.trim());
+    const mustText = marked ? seg.required : `${seg.required}\n${seg.responsibilities}\n${seg.body}`;
+    const terms = requirementTerms(mustText, 30, j.company ?? "").map((t) => String(t.term).toLowerCase());
+    if (!terms.length) continue;
+    o.postings++; if (marked) o.marked++;
+    let n = 0, c = 0;
+    for (const t of terms) {
+      o.terms++;
+      if (!named.has(t)) { o.words++; if (written.includes(t)) o.wordsCovered++; else o.commonWords[t] = (o.commonWords[t] ?? 0) + 1; continue; }
+      o.named++; n++;
+      if (written.includes(t)) { o.covered++; c++; }
+      else if (mat.includes(t)) o.leftOut++;
+      else { o.notClaimed++; o.missingNamed[t] = (o.missingNamed[t] ?? 0) + 1; }
+    }
+    const band = j.score == null ? "unscored" : j.score >= 8 ? "8-10" : j.score >= 6 ? "6-7" : "1-5";
+    const b = (o.byScore[band] ??= { postings: 0, named: 0, covered: 0 });
+    b.postings++; b.named += n; b.covered += c;
+  }
+  return o;
+}
+
+export function whereLines(o) {
+  if (!o.terms) return [];
+  const pc = (a, b) => (b ? `${Math.round((100 * a) / b)}%` : "-");
+  const top = (m, k) => Object.entries(m).sort((a, b) => b[1] - a[1]).slice(0, k).map(([t, n]) => `${t} ${n}`).join(", ");
+  return [
+    `where the missing share comes from, over ${o.postings} posting(s) and ${o.terms} required term(s) (${o.marked} posting(s) set their requirements apart; the rest are read whole):`,
+    `  ${o.words} term(s) (${pc(o.words, o.terms)}) are frequent words of the posting, not named skills, tools or credentials; the written resume happens to hold ${pc(o.wordsCovered, o.words)} of them`,
+    `    the commonest of those it lacks: ${top(o.commonWords, 14)}`,
+    `  ${o.named} term(s) (${pc(o.named, o.terms)}) are named skills, tools or credentials. Of those:`,
+    `    in the written resume: ${o.covered} (${pc(o.covered, o.named)})`,
+    `    in the person's own material but left out of the written resume: ${o.leftOut} (${pc(o.leftOut, o.named)})`,
+    `    nowhere in the person's material: ${o.notClaimed} (${pc(o.notClaimed, o.named)}); the commonest: ${top(o.missingNamed, 14)}`,
+    `  named qualifications covered, by the scorer's rating of the job: ${Object.entries(o.byScore).map(([k, v]) => `${k}: ${pc(v.covered, v.named)} over ${v.postings}`).join("; ")}`,
+  ];
+}
+
 export function compareLines(o) {
   if (!o.read) return [`resume benchmark: no posting on record has both a written resume and requirements that could be read (${o.noRequirements} had no requirements to read)`];
   return [
@@ -83,8 +140,9 @@ async function main() {
   if (own.length < 300) { console.log("resume benchmark: no resume text on the profile to measure"); return; }
   const roles = (await db("experience?select=company,title,location,start_date,end_date,details&limit=40").catch(() => [])) ?? [];
   const material = [own, ...roles.map((r) => Object.values(r).join(" ")), ...Object.values(profile ?? {}).map(String)].join("\n");
-  const rows = await db("jobs?tailored_resume=not.is.null&description=not.is.null&select=company,description,tailored_resume&order=updated_at.desc&limit=120");
+  const rows = await db("jobs?tailored_resume=not.is.null&description=not.is.null&select=company,description,tailored_resume,score&order=updated_at.desc&limit=120");
   for (const l of compareLines(compare(own, material, rows))) console.log(l);
+  for (const l of whereLines(whereItGoes(material, rows))) console.log(l);
 }
 
 if (process.argv[1]?.endsWith("benchmark.mjs")) main().catch((e) => { console.error(`benchmark failed: ${String(e?.message ?? e).slice(0, 200)}`); process.exit(1); });
