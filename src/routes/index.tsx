@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { supabase } from "@/integrations/supabase/client";
+import { signupProblem, standing, standingMessage } from "@/lib/access";
 
 export const Route = createFileRoute("/")({
   ssr: false,
@@ -36,13 +37,30 @@ function LoginPage() {
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [checking, setChecking] = useState(true);
+  const [mode, setMode] = useState<"in" | "up">("in");
+  const [fullName, setFullName] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [notice, setNotice] = useState<string | null>(null);
+
+  // A login is let through only as the owner or once approved; anyone else
+  // is signed back out and told where their request stands.
+  async function enter(name = "") {
+    const s = await standing(name);
+    if (s === "owner" || s === "approved") {
+      void navigate({ to: "/dashboard", replace: true });
+      return;
+    }
+    await supabase.auth.signOut();
+    setNotice(standingMessage(s));
+    setChecking(false);
+  }
 
   useEffect(() => {
     let active = true;
     void supabase.auth.getSession().then(({ data }) => {
       if (!active) return;
       if (data.session) {
-        void navigate({ to: "/dashboard", replace: true });
+        void enter();
       } else {
         setChecking(false);
       }
@@ -55,13 +73,42 @@ function LoginPage() {
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
     setBusy(true);
+    setNotice(null);
+    if (mode === "up") {
+      const problem = signupProblem({ fullName, email, password, confirm });
+      if (problem) {
+        setBusy(false);
+        toast.error(problem);
+        return;
+      }
+      const made = await supabase.auth.signUp({ email: email.trim(), password, options: { data: { full_name: fullName.trim() } } });
+      if (made.error) {
+        setBusy(false);
+        toast.error(made.error.message);
+        return;
+      }
+      if (made.data.session) {
+        // Signed in at once: file the request, then out again until it is answered.
+        await standing(fullName.trim());
+        await supabase.auth.signOut();
+        setNotice("Sign-up request sent. Approval is decided by the owner.");
+      } else {
+        setNotice("Check your email to confirm your address, then sign in once here. That files your request; approval is decided by the owner.");
+      }
+      setBusy(false);
+      setMode("in");
+      setPassword("");
+      setConfirm("");
+      return;
+    }
     const { error } = await supabase.auth.signInWithPassword({ email, password });
-    setBusy(false);
     if (error) {
+      setBusy(false);
       toast.error(error.message);
       return;
     }
-    void navigate({ to: "/dashboard", replace: true });
+    await enter();
+    setBusy(false);
   }
 
   if (checking) {
@@ -88,6 +135,13 @@ function LoginPage() {
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4 rounded-lg border border-border bg-card p-5">
+          {notice ? <p className="rounded-md border border-border bg-background p-3 text-sm">{notice}</p> : null}
+          {mode === "up" ? (
+            <div className="space-y-2">
+              <Label htmlFor="fullName">Full name</Label>
+              <Input id="fullName" autoComplete="name" required value={fullName} onChange={(event) => setFullName(event.target.value)} />
+            </div>
+          ) : null}
           <div className="space-y-2">
             <Label htmlFor="email">Email</Label>
             <Input
@@ -104,17 +158,27 @@ function LoginPage() {
             <Input
               id="password"
               type="password"
-              autoComplete="current-password"
+              autoComplete={mode === "up" ? "new-password" : "current-password"}
               required
               value={password}
               onChange={(event) => setPassword(event.target.value)}
             />
           </div>
+          {mode === "up" ? (
+            <div className="space-y-2">
+              <Label htmlFor="confirm">Confirm password</Label>
+              <Input id="confirm" type="password" autoComplete="new-password" required value={confirm} onChange={(event) => setConfirm(event.target.value)} />
+            </div>
+          ) : null}
           <Button type="submit" className="w-full" disabled={busy}>
-            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : "Sign in"}
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : mode === "up" ? "Request access" : "Sign in"}
           </Button>
           <p className="text-center text-xs text-muted-foreground">
-            Single-operator panel. No signup.
+            {mode === "up" ? "Already approved? " : "No account? "}
+            <button type="button" className="underline" onClick={() => { setMode(mode === "up" ? "in" : "up"); setNotice(null); }}>
+              {mode === "up" ? "Sign in" : "Request access"}
+            </button>
+            {mode === "up" ? " Access is by the owner's approval." : ""}
           </p>
         </form>
       </div>

@@ -1,4 +1,5 @@
 import { CallingExtra } from "@/components/mission-control/calling-extra";
+import { PeopleAdmin } from "@/components/mission-control/people-admin";
 import { useEffect, useState, type ReactNode } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -108,6 +109,9 @@ function Settings() {
       <EmailBlock initial={q.data.profile} open={gmailBanner !== null} />
       <Block title="calling (optional extra)">
         <CallingExtra initial={q.data.profile as unknown as Record<string, unknown>} />
+      </Block>
+      <Block title="people (admin)">
+        <PeopleAdmin />
       </Block>
     </div>
   );
