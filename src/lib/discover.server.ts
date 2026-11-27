@@ -651,6 +651,22 @@ export async function runDiscover(supabase: any, opts: { since?: string | undefi
         status: "new",
       });
     }
+    // A round carries only so much. A new person's search has broad titles
+    // and no exclusions yet, so thousands of postings pass the tests above
+    // where the owner's pass a few dozen — each with its whole description —
+    // and the host ended those rounds before they could answer. The newest
+    // are carried; the rest belong to employers that are read again.
+    const ROUND_CARRIES = 400;
+    if (rows.length > ROUND_CARRIES) {
+      rows.sort((a, b) => String(b.posted_at ?? "").localeCompare(String(a.posted_at ?? "")));
+      const over = rows.length - ROUND_CARRIES;
+      rows.length = ROUND_CARRIES;
+      stats.filtered += over;
+      byReason["more than one round carries"] = (byReason["more than one round carries"] ?? 0) + over;
+    }
+    // The postings themselves are no longer needed, and they are the bulk
+    // of what a round holds in memory.
+    all.length = 0;
     // ----------------------------------------------------------------------
     // Distance
     // ----------------------------------------------------------------------
