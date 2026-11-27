@@ -1058,16 +1058,19 @@ export type Database = {
       user_keys: {
         Row: {
           gemini_key: string | null
+          groq_key: string | null
           updated_at: string
           user_id: string
         }
         Insert: {
           gemini_key?: string | null
+          groq_key?: string | null
           updated_at?: string
           user_id?: string
         }
         Update: {
           gemini_key?: string | null
+          groq_key?: string | null
           updated_at?: string
           user_id?: string
         }

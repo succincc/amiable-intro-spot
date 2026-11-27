@@ -1,0 +1,1 @@
+alter table public.user_keys add column if not exists groq_key text;
