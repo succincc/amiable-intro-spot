@@ -7232,6 +7232,8 @@ const selfIdSeen = new Set();
 const RADIO_PICKS = new Map();
 // Whether ADP's sign-in has been looked at in this run.
 const ADP_LOOKED = { done: false };
+// The postings on which ADP's sign-in has been gone through in this run.
+const ADP_SIGNED = new Set();
 // ADP and an email it already holds an account for: see adpAlias.
 const ADP_ALIAS = { use: false, tried: new Set() };
 /** name@gmail.com as name+jobs@gmail.com: the same mailbox, another address. */
@@ -11585,8 +11587,8 @@ async function applyToJobOnce(context, job, profile, answers) {
             const wasPutBack = /plus-address/.test(String(job.last_error ?? ""));
             // What ADP offers a person who does have an account: looked at
             // once a run, by shape, and nothing pressed beyond the way in.
-            if (!ADP_LOOKED.done) {
-              ADP_LOOKED.done = true;
+            if (!ADP_SIGNED.has(job.id)) {
+              ADP_SIGNED.add(job.id);
               const lay = (pg) =>
                 pg
                   .evaluate(() => {
@@ -11616,6 +11618,54 @@ async function applyToJobOnce(context, job, profile, answers) {
                   await way.click({ timeout: 5000 }).catch(() => {});
                   await page.waitForTimeout(5000);
                   console.log(`    ADP's sign-in screen: ${JSON.stringify(await lay(page))}`);
+                  // Its sign-in asks one thing first: the email or the mobile
+                  // number. The email is typed, key by key as ADP's boxes
+                  // need, and what it asks next is read by shape.
+                  const box = page.locator('input[type=text], input[type=email], input:not([type])').filter({ visible: true }).first();
+                  if (profile?.email && (await box.isVisible().catch(() => false))) {
+                    await box.click({ timeout: 4000 }).catch(() => {});
+                    await page.keyboard.press("Control+A").catch(() => {});
+                    await page.keyboard.type(profile.email, { delay: 35 });
+                    await page.waitForTimeout(500);
+                    const askedAt = Date.now();
+                    const go = page.locator("sdf-button, button").filter({ hasText: /^\s*(continue|next|sign in)\s*$/i }).filter({ visible: true }).first();
+                    if (await go.isVisible().catch(() => false)) await go.click({ timeout: 5000 }).catch(() => {});
+                    else await page.keyboard.press("Enter").catch(() => {});
+                    await page.waitForTimeout(6000);
+                    const next = await lay(page);
+                    console.log(`    after the email, ADP's sign-in asks: ${JSON.stringify(next)}`);
+                    const text = ((await page.evaluate(() => (document.body?.innerText ?? "").slice(0, 6000)).catch(() => "")) || "").replace(/\S+@\S+/g, "[address]").replace(/\d/g, "#").replace(/\s+/g, " ");
+                    console.log(`    it says: ${JSON.stringify((text.match(/[^.]{0,90}(code|password|verif|sent)[^.]{0,90}/gi) ?? []).slice(0, 4))}`);
+                    let inside = await adpVerify(page, job).catch(() => false);
+                    if (!inside) {
+                      // A code already sent, and a box waiting for it.
+                      const wantsPassword = await page.locator("input[type=password]").filter({ visible: true }).first().isVisible().catch(() => false);
+                      const codeBox = page.locator('input[type=text], input[type=tel], input[type=number], input:not([type])').filter({ visible: true }).first();
+                      if (!wantsPassword && /code/i.test(text) && (await codeBox.isVisible().catch(() => false))) {
+                        const code = await waitForVerificationCode(hostOf(page.url()), job.company, 9, 10_000, askedAt);
+                        if (code) {
+                          await codeBox.click({ timeout: 3000 }).catch(() => {});
+                          await page.keyboard.type(code, { delay: 60 });
+                          await page.waitForTimeout(600);
+                          const ok = page.locator("sdf-button, button").filter({ hasText: /^\s*(verify|submit|continue|confirm|next|sign in|done)\s*$/i }).filter({ visible: true }).first();
+                          if (await ok.isVisible().catch(() => false)) await ok.click({ timeout: 5000 }).catch(() => {});
+                          else await page.keyboard.press("Enter").catch(() => {});
+                          await page.waitForTimeout(6000);
+                          inside = true;
+                        } else {
+                          console.log("    ADP's sign-in code did not arrive in the mailbox");
+                        }
+                      } else if (wantsPassword) {
+                        console.log("    ADP's sign-in asks for the account's password");
+                      }
+                    }
+                    if (inside) {
+                      console.log(`    after its code, ADP shows: ${JSON.stringify(await lay(page))}`);
+                      // Signed in, in this same browser: the posting is taken
+                      // up again from the top.
+                      return await applyToJobOnce(context, job, profile, answers);
+                    }
+                  }
                 } else {
                   console.log("    ADP shows no plain sign-in on this screen");
                 }
