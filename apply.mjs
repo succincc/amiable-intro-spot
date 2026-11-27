@@ -11448,6 +11448,10 @@ async function refreshAnswers(profile) {
   const NEVER = /social security|\bssn\b|date of birth|birth ?date|birthday|\bdob\b|^pass(code|word)\b|^(prefix|suffix|title|salutation)\b/i;
   let answered = 0;
   let removed = 0;
+  let modelAsked = 0;
+  let modelFailed = 0;
+  const tallyHow = { rules: 0, declined: 0, assumed: 0, read: 0 };
+  const leftKinds = {};
   for (const row of rows) {
     const q = String(row.question ?? "").trim();
     try {
@@ -11459,23 +11463,57 @@ async function refreshAnswers(profile) {
       // The form's own words, without the plumbing some portals put in a
       // label ("no selection 155:_input").
       const plain = q.replace(/\bno selection\b/gi, " ").replace(/\b\d+:_?[a-z]*input\b/gi, " ").replace(/\s+/g, " ").trim();
-      let want = fromProfile(plain, profile) ?? answerQuestion(plain, profile) ?? livesInListedState(plain, profile);
-      if (want === null || want === undefined || String(want).trim() === "") continue;
-      want = String(want).trim();
       const options = Array.isArray(row.options) ? row.options.map(String).filter(Boolean) : [];
-      if (options.length) {
-        const w = flat(want);
-        const hit =
+      // The list's own line for an answer, or the answer itself where the
+      // question came with no list. Null where the list has no such line.
+      const fit = (v) => {
+        if (v === null || v === undefined || String(v).trim() === "") return null;
+        const t = String(v).trim();
+        if (!options.length) return t;
+        const w = flat(t);
+        return (
           options.find((o) => flat(o) === w) ??
           options.find((o) => flat(o).startsWith(`${w} `) || w.startsWith(`${flat(o)} `)) ??
-          (/^none\b/.test(w) ? options.find((o) => /^none\b/i.test(o.trim())) : undefined);
-        if (!hit) continue;
-        want = hit;
+          (/^none\b/.test(w) ? options.find((o) => /^none\b/i.test(o.trim())) : undefined) ??
+          null
+        );
+      };
+      let assumed = false;
+      let want = fit(fromProfile(plain, profile) ?? answerQuestion(plain, profile) ?? livesInListedState(plain, profile));
+      // Nothing on file says. The owner's instruction is that no question
+      // waits for them, so the same ladder a live form climbs is climbed
+      // here: who the applicant is, is declined in the list's own words and
+      // never guessed; a yes or a no comes from the resume and from what
+      // applying already claims; and a list is read against the resume by
+      // the model, whose reply counts only if it is one of the list's lines.
+      if (!want) {
+        const aboutThem = /disabilit|veteran|\brace\b|racial|ethnic|hispanic|latin[oax]|gender|\bsex\b|pronoun|orientation|lgbt|transgender|person of colou?r|identify as/i.test(plain);
+        if (aboutThem) {
+          want = options.find((o) => SELF_ID_DECLINE.test(o)) ?? null;
+          if (want) tallyHow.declined++;
+        } else {
+          want = fit(lastResort(plain, profile, null));
+          if (want) { assumed = true; tallyHow.assumed++; }
+          else if (options.length && options.length <= 40 && !NEVER_INFER.test(plain) && process.env.GEMINI_API_KEY && profile?.resume_text && modelAsked < 80 && modelFailed < 3) {
+            modelAsked++;
+            const reply = await chooseOption({ question: plain, options, resume: profile.resume_text, apiKey: process.env.GEMINI_API_KEY }).catch(() => { modelFailed++; return null; });
+            want = reply ? options.find((o) => norm(o) === norm(reply)) ?? null : null;
+            if (want) { assumed = true; tallyHow.read++; }
+          }
+        }
+      } else tallyHow.rules++;
+      if (!want) {
+        const kind = /disabilit|veteran|\brace\b|ethnic|hispanic|gender|\bsex\b|orientation/i.test(plain) ? "about the person, no decline offered"
+          : /sponsorship|\bvisa\b|authori[sz]ed to work/i.test(plain) ? "work status"
+          : /salary|compensation|pay\b|rate\b/i.test(plain) ? "pay"
+          : options.length ? `a list of ${options.length > 10 ? "many" : "a few"}` : plain.length > 80 ? "a long open question" : "a short open question";
+        leftKinds[kind] = (leftKinds[kind] ?? 0) + 1;
+        continue;
       }
       await db(`answers?id=eq.${row.id}`, {
         method: "PATCH",
         headers: { Prefer: "return=minimal" },
-        body: JSON.stringify({ answer: want, confirmed: true }),
+        body: JSON.stringify({ answer: want, confirmed: true, ...(assumed ? { generated: true } : {}) }),
       });
       answered++;
     } catch {
@@ -11483,6 +11521,7 @@ async function refreshAnswers(profile) {
     }
   }
   console.log(`Answers page: ${rows.length} question(s) were waiting; ${answered} answered from the profile and the rules, ${removed} removed as never askable, ${rows.length - answered - removed} left for the owner${brought ? `; ${brought} saved answer(s) brought in line with the profile` : ""}.`);
+  console.log(`Answers page: how they were answered ${JSON.stringify(tallyHow)}; the model was asked ${modelAsked} time(s), failed ${modelFailed}; what is left ${JSON.stringify(leftKinds)}`);
   if (answered || brought) await requeueForAnswers();
 }
 
