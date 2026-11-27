@@ -52,6 +52,11 @@ export function reply(call: Call, heard: string, job: CallJob, me: Me): Call {
   if (has(t, /\b(are you (a |an )?(robot|ai|bot|machine|real|recording|human|person)|is this (a |an )?(robot|ai|bot|recording|real person)|who (is|am i) (this|speaking|talking))\b/)) {
     return say(`I'm an AI assistant calling for ${name}; I'm not ${name}. I can pass on anything you'd like, or ${name} can call you directly.`);
   }
+  // Whose application it is: the name as it stands on the application.
+  if (has(t, /\b(what'?s|what is|what was|can i (get|have)|give me) (the|his|her|their|your) (full )?name|who applied|whose application|name on the application|under what name|what name (is it|should i look)\b/)) {
+    const full = String(me.full_name ?? "").trim();
+    return say(full ? `The name on the application is ${full}.` : `I'll have ${name} confirm the name on the application with you directly.`);
+  }
   // No, or not interested.
   if (has(t, /\b(not interested|no thank|don'?t call|do not call|stop calling|remove (us|this number)|we'?re not hiring|position (is|has been) filled|no longer (open|hiring))\b/)) {
     return say("Understood. Thank you for your time, and sorry to have troubled you.", { stage: "done", outcome: "declined" });

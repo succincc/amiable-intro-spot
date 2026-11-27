@@ -43,4 +43,8 @@ describe("the calling assistant", () => {
     expect(t.split("\n")[0]).toBe("Example Office Supply - Sales Associate (Exampleton, NJ)");
     expect(t).toContain("THEM: Have him come in Thursday at 2 pm for an interview.");
   });
+  it("gives the name on the application when asked for it", () => {
+    const c = reply(reply(start(job, me), "This is the manager.", job, me), "Sure, what's the name on the application?", job, me);
+    expect(c.lines.at(-1)?.said).toBe("The name on the application is Sam Sample.");
+  });
 });
