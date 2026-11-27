@@ -418,6 +418,14 @@ function answerQuestion(label, p) {
   // whether the applicant is one. The saved veteran answer is not an answer
   // to it, and no agency sent anyone.
   if (/veteran[^?]{0,40}\b(agency|organi[sz]ation|representative|program)\b/i.test(String(label))) return null;
+  // What the profile itself settles — citizenship in each shape it is asked
+  // in, the owner's links. The answers page was already answered this way;
+  // a live form was not, and one stopped on "which, if any, of these
+  // countries are you a citizen of" with the answer sitting in the profile.
+  {
+    const settled = fromProfile(label, p);
+    if (settled) return settled;
+  }
   if (has(label, "authorized to work", "legally authorized", "work authorization",
                  "legal authorization", "authorization to work", "authorised to work",
                  "eligible to work", "right to work")) return p.work_authorized;
@@ -6001,7 +6009,7 @@ function defaultYesNo(label, p) {
   const l = String(label ?? "").toLowerCase().replace(/\s+/g, " ");
   const resume = String(p?.resume_text ?? "").toLowerCase();
   // Two notices are worded as statements and still want a Yes or a No.
-  const STATED = /public accounting firm|immigration reform and control act|^(travel (domestically|internationally)|work a flexible schedule|consider part.time work)$/;
+  const STATED = /public accounting firm|immigration reform and control act|employees work a variety of (days|shifts|hours)|^(travel (domestically|internationally)|work a flexible schedule|consider part.time work)$/;
   if (!/\?|^(are|do|does|did|have|has|can|will|would|is|were) /.test(l) && !STATED.test(l)) return null;
   if (/\b(race|ethnic|gender|sex|veteran|disabilit|hispanic|latin|religion|orientation|pronoun)/.test(l)) return null;
   // "In accordance with the Immigration Reform and Control Act… you will be
@@ -6177,7 +6185,7 @@ function defaultYesNo(label, p) {
 
   // Able, willing, eligible, licensed, available: Yes. Applying for the job
   // is already a claim to these.
-  if (/\b(flexible schedule|part.time work|travel (domestically|internationally)|work (nights|weekends|holidays|overtime|evenings))\b/.test(l)) return "Yes";
+  if (/\b(flexible schedule|part.time work|travel (domestically|internationally)|work (nights|weekends|holidays|overtime|evenings)|variety of (days|shifts|hours))\b/.test(l)) return "Yes";
   if (/\b(able to|willing to|comfortable|available|can you|eligible|licen[sc]e|reliable transportation|at least \d+|years of age|background check|drug (test|screen)|lift|stand|on-?site|in-?person|shift|weekend|overtime|schedule|commute|travel|relocat|start|understand|agree|acknowledge|certify|confirm|hourly rate|pay rate|starting (pay|rate|salary)|salary range|compensation|within your|acceptable|meets? your|work for you|interested in)\b/.test(l)) {
     return "Yes";
   }
