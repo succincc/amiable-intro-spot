@@ -51,7 +51,28 @@ async function claim(supabase: any, name: string, everyMin: number): Promise<boo
   return (data?.length ?? 0) > 0;
 }
 
-async function tick() {
+/**
+ * Who is asking, and how long they will wait.
+ *
+ * The outside timer that keeps the rounds turning gives a request thirty
+ * seconds and then hangs up, and a request whose caller has hung up is ended
+ * by the host. A reading of the mailbox takes about forty. So the timer's
+ * call took the mailbox's turn — one statement, at once — began the reading,
+ * and was cut off partway: nothing recorded, no error, and the turn spent, so
+ * the runner that would have waited was told "not due". The mailbox read as
+ * hours stale while its turn was being taken every half hour.
+ *
+ * A caller now says whether it will wait. One that does not is given only
+ * the quick thing, waking the round; the mailbox, the health check and the
+ * calls are left for a caller that will — the runner the round starts.
+ *
+ *   patient: this caller waits; the slow turns may be taken.
+ *   rest:    the turn was taken a moment ago and ran out of room before
+ *            everyone was reached; carry on with whoever has waited longest.
+ */
+type Asking = { patient: boolean; rest: boolean };
+
+async function tick(asking: Asking = { patient: false, rest: false }) {
   const out: { ok: boolean; mail: string; watch: string; health?: string; calls?: string; people?: string; counts?: { read: number; stored?: number; drafted?: number; sent?: number; failed?: number; told?: number; booked?: number } } = {
     ok: true,
     mail: "not due",
@@ -69,7 +90,7 @@ async function tick() {
   // The watch first: it is one quick request, and must not wait behind a
   // slow mailbox.
   try {
-    if (await claim(supabase, "watch", WATCH_EVERY_MIN)) {
+    if (!asking.rest && (await claim(supabase, "watch", WATCH_EVERY_MIN))) {
       const token = process.env["GITHUB_TOKEN"];
       const repo = process.env["GITHUB_REPO"];
       if (!token || !repo) {
@@ -100,7 +121,10 @@ async function tick() {
   // ones it did not reach are first in line next time.
   const everybody = supabase;
   const began = Date.now();
-  const ROOM_MS = 25_000;
+  const ROOM_MS = asking.patient ? 40_000 : 25_000;
+  // A mailbox read within these minutes is not read again by a call that is
+  // only carrying on with the rest.
+  const FRESH_MS = 20 * 60_000;
   let people: string[] = [];
   let forUser: (admin: any, uid: string) => any = () => everybody;
   try {
@@ -196,11 +220,24 @@ async function tick() {
   };
 
   try {
-    if (await claim(everybody, "mail", MAIL_EVERY_MIN)) {
+    if (asking.patient && (asking.rest || (await claim(everybody, "mail", MAIL_EVERY_MIN)))) {
       let done = 0;
+      let skipped = 0;
       let firstFailure: string | null = null;
       for (const uid of people) {
         if (done > 0 && Date.now() - began > ROOM_MS) break;
+        if (asking.rest) {
+          // Carrying on: whoever was read a moment ago is passed over.
+          try {
+            const { data: was } = await forUser(everybody, uid).from("email_sync").select("last_run_at").eq("id", 1).maybeSingle();
+            if (was?.last_run_at && Date.now() - Date.parse(was.last_run_at) < FRESH_MS) {
+              skipped++;
+              continue;
+            }
+          } catch {
+            /* not knowing is no reason to pass anybody over */
+          }
+        }
         try {
           const counts = await mailFor(forUser(everybody, uid));
           // The counts reported are the first person's, as they always were.
@@ -222,7 +259,7 @@ async function tick() {
         done++;
       }
       out.mail = firstFailure ? `failed: ${firstFailure.slice(0, 80)}` : "done";
-      if (people.length > 1) out.people = `${done} of ${people.length}`;
+      if (people.length > 1) out.people = `${done + skipped} of ${people.length}`;
     }
   } catch (e) {
     out.mail = `failed: ${String((e as Error)?.message ?? e).slice(0, 80)}`;
@@ -231,7 +268,7 @@ async function tick() {
   // Its own turn, so that a mailbox that cannot be read — the commonest
   // thing to go wrong — does not also silence the check that would say so.
   try {
-    if (await claim(everybody, "health", MAIL_EVERY_MIN)) {
+    if (asking.patient && !asking.rest && (await claim(everybody, "health", MAIL_EVERY_MIN))) {
       const { healthCheck } = await import("@/lib/moments.server");
       let first = true;
       for (const uid of people) {
@@ -251,7 +288,7 @@ async function tick() {
   // them on. Every round, because a call placed last round is read back on
   // this one; without the accounts it is one small read and nothing more.
   try {
-    if (await claim(everybody, "calls", WATCH_EVERY_MIN)) {
+    if (asking.patient && !asking.rest && (await claim(everybody, "calls", WATCH_EVERY_MIN))) {
       const { runCalls } = await import("@/lib/dial.server");
       const c = { state: "off", placed: 0, read: 0, booked: 0 };
       let first = true;
@@ -280,8 +317,17 @@ async function tick() {
 export const Route = createFileRoute("/api/public/cron/tick")({
   server: {
     handlers: {
+      // A plain visit — the outside timer's, or anybody's — is not patient.
       GET: async () => Response.json(await tick()),
-      POST: async () => Response.json(await tick()),
+      POST: async ({ request }) => {
+        let said: { patient?: unknown; rest?: unknown } = {};
+        try {
+          said = ((await request.json()) as typeof said) ?? {};
+        } catch {
+          said = {};
+        }
+        return Response.json(await tick({ patient: said.patient === true, rest: said.patient === true && said.rest === true }));
+      },
     },
   },
 });

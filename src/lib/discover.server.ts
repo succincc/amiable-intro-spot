@@ -758,7 +758,45 @@ export async function runDiscover(supabase: any, opts: { since?: string | undefi
     // last — only on postings that already survived every other filter — and
     // every result is cached forever.
     const radius = Number(cfg.radius_miles ?? 0);
-    await supabase.from("runs").update({ message: `measuring ${rows.length}` }).eq("id", run!.id);
+    // What is already in the list needs nothing more done to it here: it was
+    // measured when it came in, and the pass further down looks over the
+    // list itself. A round was found stopped at "measuring 5177" — a new
+    // person's search, wide and with no state limit — where each of those
+    // was a question put to the database one at a time, nearly all of them
+    // about postings saved by an earlier round. Those are taken out first,
+    // a hundred addresses to a question, and only what is new goes on.
+    let knownAlready = 0;
+    if (rows.length) {
+      const have = new Set<string>();
+      const urls = rows.map((r) => String(r.url));
+      const chunks: string[][] = [];
+      for (let i = 0; i < urls.length; i += 100) chunks.push(urls.slice(i, i + 100));
+      for (let i = 0; i < chunks.length; i += 6) {
+        await Promise.all(
+          chunks.slice(i, i + 6).map(async (c) => {
+            const { data } = await supabase.from("jobs").select("url").in("url", c);
+            for (const d of data ?? []) have.add(String(d.url));
+          }),
+        );
+      }
+      if (have.size) {
+        const fresh = rows.filter((r) => !have.has(String(r.url)));
+        knownAlready = rows.length - fresh.length;
+        rows.length = 0;
+        rows.push(...fresh);
+      }
+      // And of what is new, only so much is carried by one round: the
+      // newest, with the rest left for the next round to find still new.
+      const NEW_PER_ROUND = 600;
+      if (rows.length > NEW_PER_ROUND) {
+        rows.sort((a, b) => String(b.posted_at ?? "").localeCompare(String(a.posted_at ?? "")));
+        const over = rows.length - NEW_PER_ROUND;
+        rows.length = NEW_PER_ROUND;
+        stats.filtered += over;
+        byReason["new, and left for the next round"] = (byReason["new, and left for the next round"] ?? 0) + over;
+      }
+    }
+    await supabase.from("runs").update({ message: `measuring ${rows.length} new (${knownAlready} already in the list)` }).eq("id", run!.id);
     if (radius > 0) {
       const { data: profile } = await supabase
         .from("profile")
@@ -836,7 +874,17 @@ export async function runDiscover(supabase: any, opts: { since?: string | undefi
           | { status: "miss" }
           | { status: "deferred" };
 
-        const locate = async (place: string): Promise<Located> => {
+        const asked = new Map<string, Promise<Located>>();
+        const locate = (place: string): Promise<Located> => {
+          const key = place.trim().toLowerCase();
+          let answer = asked.get(key);
+          if (!answer) {
+            answer = locateOnce(place);
+            asked.set(key, answer);
+          }
+          return answer;
+        };
+        const locateOnce = async (place: string): Promise<Located> => {
           const cached = await cachedGeocode(supabase, place);
           if (cached) return { status: "found", point: cached };
           if (cached === null) return { status: "miss" }; // looked up before, no result
@@ -1115,7 +1163,8 @@ export async function runDiscover(supabase: any, opts: { since?: string | undefi
       }
     }
 
-    stats.kept = rows.length;
+    stats.kept = rows.length + knownAlready;
+    await supabase.from("runs").update({ message: `saving ${rows.length}` }).eq("id", run!.id);
     for (let i = 0; i < rows.length; i += 500) {
       const chunk = rows.slice(i, i + 500);
       const { data, error } = await supabase

@@ -218,13 +218,30 @@ jobs:
           # a round, because asking wakes the database and the round is about
           # to wake it anyway. (It used to be asked "in the first half of each
           # hour", by a run timed for the second half: it was hardly asked.)
-          if [ "$round" -eq 1 ]; then
-            code=$(curl -sS -o /tmp/tick.json -w '%{http_code}' --max-time 90 \
+          # Asked by every run, and as a caller that will wait: the outside
+          # timer hangs up after thirty seconds, a reading takes forty, and
+          # for six hours its calls took the mailbox's turn and were cut off
+          # before reading it. The panel now leaves the mailbox for a caller
+          # that says it will wait, which is this one. Where the turn has not
+          # come round the panel says so and nothing is woken.
+          ask() {
+            code=$(curl -sS -o /tmp/tick.json -w '%{http_code}' --max-time 120 \
               -X POST "${APP_URL}/api/public/cron/tick" \
-              -H "Content-Type: application/json" -d '{}' || echo "000")
+              -H "Content-Type: application/json" -d "$1" || echo "000")
             # Which things were done and a few counts; never the mail.
             echo "mail: the panel answered ${code} $(head -c 300 /tmp/tick.json 2>/dev/null || true)"
-          fi
+          }
+          ask '{"patient":true}'
+          # Where it ran out of room before everyone was reached, it is asked
+          # to carry on with the rest, until it says everyone has been.
+          for again in $(seq 1 40); do
+            said=$(jq -r '.people // empty' /tmp/tick.json 2>/dev/null || true)
+            [ -n "$said" ] || break
+            reached=${said%% of *}
+            total=${said##* of }
+            [ "$reached" -lt "$total" ] 2>/dev/null || break
+            ask '{"patient":true,"rest":true}'
+          done
 
           # No waiting here and no handing on: a runner held asleep to keep
           # time is a runner taken from somebody else. This run looks, starts

@@ -40,7 +40,7 @@ for (const r of runs) {
   const began = r.started_at ?? r.created_at ?? null;
   const took = began && r.ended_at ? `${Math.round((Date.parse(r.ended_at) - Date.parse(began)) / 1000)}s` : "never finished";
   const msg = String(r.message ?? "");
-  const step = /^(reading|judging|measuring)\b/.test(msg) ? msg.slice(0, 200) : `(${msg.length} letters of message)`;
+  const step = /^(reading|judging|measuring|saving)\b/.test(msg) ? msg.slice(0, 200) : `(${msg.length} letters of message)`;
   console.log(`  ${r.status ?? "?"} | ${took} | found ${r.found ?? "?"} | ${step}`);
   if (r.status !== "done" && /^reading /.test(msg)) {
     const ids = [...msg.matchAll(/#(\d+)/g)].map((m) => m[1]);
