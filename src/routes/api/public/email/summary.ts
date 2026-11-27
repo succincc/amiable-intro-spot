@@ -36,9 +36,12 @@ export const Route = createFileRoute("/api/public/email/summary")({
         const dry = b?.dry === true;
 
         try {
-          const { supabaseAdmin: typed } = await import("@/integrations/supabase/client.server");
+          const { supabaseAdmin: everybody } = await import("@/integrations/supabase/client.server");
+          const { forUser, personFor } = await import("@/lib/scope.server");
+          const who = await personFor(everybody, request);
+          if (!who) return Response.json({ ok: false, error: "not a person with a workspace" }, { status: 403 });
           // daily_summary is newer than the generated types.
-          const supabaseAdmin = typed as any;
+          const supabaseAdmin = forUser(everybody, who);
 
           const { data: profile } = await supabaseAdmin.from("profile").select("daily_summary").eq("id", 1).maybeSingle();
           const on = profile?.daily_summary === true;

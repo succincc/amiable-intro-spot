@@ -82,4 +82,4 @@ jobs:
           GEMINI_MODEL: ${{ secrets.GEMINI_MODEL || 'gemini-3.8-flash' }}
           MODE: ${{ github.event_name == 'schedule' && 'send' || github.event.inputs.mode }}
           MAX: ${{ github.event.inputs.max || '12' }}
-        run: node outreach.mjs
+        run: node forusers.mjs outreach.mjs

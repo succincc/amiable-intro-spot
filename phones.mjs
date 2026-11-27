@@ -12,6 +12,8 @@ guardLogs();
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const ANON_KEY = process.env.SUPABASE_ANON_KEY;
+// Whose round this is, when the runner is doing somebody else's: see forusers.mjs.
+const ACT_AS = process.env.AP_ACT_AS ? { "x-act-as": process.env.AP_ACT_AS } : {};
 const AP_EMAIL = process.env.APPLYPILOT_EMAIL;
 const AP_PASSWORD = process.env.APPLYPILOT_PASSWORD;
 const APPLY = process.env.APPLY === "true";
@@ -49,7 +51,7 @@ if (process.env.PHONES_IMPORT_ONLY !== "1") {
   }
   const sign = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
     method: "POST",
-    headers: { apikey: ANON_KEY, "Content-Type": "application/json" },
+    headers: { apikey: ANON_KEY, ...ACT_AS, "Content-Type": "application/json" },
     body: JSON.stringify({ email: AP_EMAIL, password: AP_PASSWORD }),
   });
   if (!sign.ok) throw new Error(`Sign-in failed ${sign.status}`);
@@ -57,7 +59,7 @@ if (process.env.PHONES_IMPORT_ONLY !== "1") {
   const db = async (path, init = {}) => {
     const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
       ...init,
-      headers: { apikey: ANON_KEY, Authorization: `Bearer ${ACCESS}`, "Content-Type": "application/json", ...(init.headers || {}) },
+      headers: { apikey: ANON_KEY, ...ACT_AS, Authorization: `Bearer ${ACCESS}`, "Content-Type": "application/json", ...(init.headers || {}) },
     });
     if (!res.ok) throw new Error(`DB ${res.status}: ${(await res.text()).slice(0, 160)}`);
     const text = await res.text();

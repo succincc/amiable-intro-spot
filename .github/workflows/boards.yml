@@ -36,4 +36,4 @@ jobs:
           APPLYPILOT_EMAIL: ${{ secrets.APPLYPILOT_EMAIL }}
           APPLYPILOT_PASSWORD: ${{ secrets.APPLYPILOT_PASSWORD }}
           APPLY: ${{ github.event.inputs.apply || 'false' }}
-        run: node boards.mjs
+        run: node forusers.mjs boards.mjs

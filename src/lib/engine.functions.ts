@@ -3,11 +3,22 @@ import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 
 /** RUN DISCOVERY — pulls every enabled free feed into `jobs`. */
+/**
+ * The signed-in person's own client, for code that was written when there
+ * was one person: every "only one" rule it asks for is asked per person.
+ * The database already limits this client to the person's own rows.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function mine(context: { supabase: unknown; userId: string }): Promise<any> {
+  const { forUser } = await import("@/lib/scope.server");
+  return forUser(context.supabase, context.userId);
+}
+
 export const runDiscovery = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
     const { runDiscover } = await import("@/lib/discover.server");
-    return runDiscover(context.supabase);
+    return runDiscover(await mine(context));
   });
 
 /** RUN SCORING — rates new jobs and tailors resumes for queued ones. */
@@ -15,7 +26,7 @@ export const runScoring = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
     const { runScore } = await import("@/lib/score.server");
-    return runScore(context.supabase);
+    return runScore(await mine(context));
   });
 
 /**
@@ -57,7 +68,7 @@ export const addCompanyByUrl = createServerFn({ method: "POST" })
         careers_url: data.url.trim(),
         last_error: null,
       },
-      { onConflict: "ats,token,site" },
+      { onConflict: "user_id,ats,token,site" },
     );
 
     if (error) return { ok: false as const, message: error.message };
@@ -200,7 +211,7 @@ export const verifyCandidates = createServerFn({ method: "POST" })
           careers_url: candidate.careers_url,
           last_error: null,
         },
-        { onConflict: "ats,token,site" },
+        { onConflict: "user_id,ats,token,site" },
       );
 
       if (error) {
@@ -286,8 +297,8 @@ export const gmailStatus = createServerFn({ method: "POST" })
 /** START CONNECTING GMAIL — returns the Google consent URL for the panel to open. */
 export const gmailAuthUrl = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .handler(async () => {
-    const { buildAuthUrl, clientConfig } = await import("@/lib/google.server");
+  .handler(async ({ context }) => {
+    const { buildAuthUrl, clientConfig, signState } = await import("@/lib/google.server");
     const { id, secret } = clientConfig();
     if (!id || !secret) {
       return {
@@ -295,8 +306,8 @@ export const gmailAuthUrl = createServerFn({ method: "POST" })
         message: "GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET are not set yet. Add them first.",
       };
     }
-    // state is only a CSRF nonce here; the callback is idempotent either way.
-    return { ok: true as const, url: buildAuthUrl(crypto.randomUUID()) };
+    // The state says whose mailbox this is, sealed so that nobody else can say it.
+    return { ok: true as const, url: buildAuthUrl(await signState(context.userId)) };
   });
 
 /** SYNC GMAIL — pull recent mail and run it through the existing classifier. */
@@ -314,7 +325,7 @@ export const gmailSync = createServerFn({ method: "POST" })
       // count read zero while the applications had in fact been answered.
       const max = Math.min(Math.max(Math.trunc(data.max ?? 50), 1), 200);
       const messages = await fetchMessages(
-        context.supabase,
+        await mine(context),
         data.query ?? "in:inbox newer_than:3d",
         max,
       );
@@ -331,14 +342,14 @@ export const gmailSync = createServerFn({ method: "POST" })
       // only changes where the messages come from.
       // ingestMessages already reports ok; spreading it after another one
       // silently overwrote it.
-      const stats = await ingestMessages(context.supabase, messages);
+      const stats = await ingestMessages(await mine(context), messages);
       return {
         ...stats,
         message: `Read ${messages.length}, kept ${stats.stored}, matched ${stats.matched} to applications.`,
       };
     } catch (e) {
       const why = String((e as Error)?.message ?? e);
-      await recordSyncError(context.supabase, why).catch(() => {});
+      await recordSyncError(await mine(context), why).catch(() => {});
       return { ok: false as const, message: why.slice(0, 300) };
     }
   });

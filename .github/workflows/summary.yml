@@ -40,17 +40,27 @@ jobs:
             echo "ENGINE_API_KEY is not set as a repository secret."
             exit 1
           fi
-          code=$(curl -sS -o /tmp/summary.json -w '%{http_code}' --max-time 60 \
-            -X POST "${APP_URL}/api/public/email/summary" \
-            -H "x-engine-key: ${ENGINE_API_KEY}" \
-            -H "Content-Type: application/json" \
-            -d "{\"dry\":${DRY}}" || echo "000")
-          echo "the panel answered ${code}"
-          # Counts and a state; nothing of the owner's is in it.
-          head -c 400 /tmp/summary.json 2>/dev/null || true
-          echo
-          case "${code}" in
-            200) exit 0 ;;
-            404) echo "the panel does not have this yet: it needs a publish."; exit 0 ;;
-            *) exit 1 ;;
-          esac
+          # The owner's summary, then each approved person's in turn; the
+          # panel answers 403 when there is nobody at the next place.
+          first=0
+          for PERSON in $(seq 0 60); do
+            code=$(curl -sS -o /tmp/summary.json -w '%{http_code}' --max-time 60 \
+              -X POST "${APP_URL}/api/public/email/summary" \
+              -H "x-engine-key: ${ENGINE_API_KEY}" \
+              -H "x-person: ${PERSON}" \
+              -H "Content-Type: application/json" \
+              -d "{\"dry\":${DRY}}" || echo "000")
+            if [ "${PERSON}" != "0" ] && [ "${code}" != "200" ]; then break; fi
+            echo "person $((PERSON + 1)): the panel answered ${code}"
+            # Counts and a state; nothing of anybody's is in it.
+            head -c 400 /tmp/summary.json 2>/dev/null || true
+            echo
+            if [ "${PERSON}" = "0" ]; then
+              case "${code}" in
+                200) first=0 ;;
+                404) echo "the panel does not have this yet: it needs a publish."; exit 0 ;;
+                *) first=1; break ;;
+              esac
+            fi
+          done
+          exit "${first}"

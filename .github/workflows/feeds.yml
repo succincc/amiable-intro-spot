@@ -47,4 +47,4 @@ jobs:
           ADZUNA_APP_KEY: ${{ secrets.ADZUNA_APP_KEY }}
           JOOBLE_KEY: ${{ secrets.JOOBLE_KEY }}
           APPLY: ${{ github.event_name == 'schedule' || github.event.inputs.apply == 'true' }}
-        run: node feeds.mjs
+        run: node forusers.mjs feeds.mjs

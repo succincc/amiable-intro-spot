@@ -52,7 +52,7 @@ async function claim(supabase: any, name: string, everyMin: number): Promise<boo
 }
 
 async function tick() {
-  const out: { ok: boolean; mail: string; watch: string; health?: string; calls?: string; counts?: { read: number; stored?: number; drafted?: number; sent?: number; failed?: number; told?: number; booked?: number } } = {
+  const out: { ok: boolean; mail: string; watch: string; health?: string; calls?: string; people?: string; counts?: { read: number; stored?: number; drafted?: number; sent?: number; failed?: number; told?: number; booked?: number } } = {
     ok: true,
     mail: "not due",
     watch: "not due",
@@ -94,8 +94,25 @@ async function tick() {
     out.watch = `failed: ${String((e as Error)?.message ?? e).slice(0, 80)}`;
   }
 
+  // Everyone with a workspace: the owner first, then whoever's mailbox has
+  // waited longest. Each is done with a client that can see only that
+  // person's rows. A pass that runs short of time stops between people; the
+  // ones it did not reach are first in line next time.
+  const everybody = supabase;
+  const began = Date.now();
+  const ROOM_MS = 25_000;
+  let people: string[] = [];
+  let forUser: (admin: any, uid: string) => any = () => everybody;
   try {
-    if (await claim(supabase, "mail", MAIL_EVERY_MIN)) {
+    const scope = await import("@/lib/scope.server");
+    forUser = scope.forUser;
+    people = await scope.everyone(everybody);
+  } catch (e) {
+    return { ok: false, error: `could not tell whose turn it is: ${String((e as Error)?.message ?? e).slice(0, 80)}` };
+  }
+
+  /** One person's mailbox: read, filed, answered, and the person told what needs them. */
+  const mailFor = async (supabase: any) => {
       const { fetchMessages } = await import("@/lib/gmail.server");
       const { ingestMessages, sendApprovedReplies } = await import("@/lib/email.server");
       const messages = await fetchMessages(supabase, "in:inbox newer_than:6h", 30);
@@ -155,8 +172,25 @@ async function tick() {
       } catch {
         /* telling the owner never stops the mail; it is tried again next hour */
       }
+      return counts;
+  };
+
+  try {
+    if (await claim(everybody, "mail", MAIL_EVERY_MIN)) {
+      let done = 0;
+      for (const uid of people) {
+        if (done > 0 && Date.now() - began > ROOM_MS) break;
+        try {
+          const counts = await mailFor(forUser(everybody, uid));
+          // The counts reported are the first person's, as they always were.
+          if (done === 0) out.counts = counts;
+        } catch (e) {
+          if (done === 0) throw e;
+        }
+        done++;
+      }
       out.mail = "done";
-      out.counts = counts;
+      if (people.length > 1) out.people = `${done} of ${people.length}`;
     }
   } catch (e) {
     out.mail = `failed: ${String((e as Error)?.message ?? e).slice(0, 80)}`;
@@ -165,10 +199,18 @@ async function tick() {
   // Its own turn, so that a mailbox that cannot be read — the commonest
   // thing to go wrong — does not also silence the check that would say so.
   try {
-    if (await claim(supabase, "health", MAIL_EVERY_MIN)) {
+    if (await claim(everybody, "health", MAIL_EVERY_MIN)) {
       const { healthCheck } = await import("@/lib/moments.server");
-      const h = await healthCheck(supabase);
-      out.health = h.problems ? `${h.problems} to look at${h.emailed ? ", owner told" : ""}` : "well";
+      let first = true;
+      for (const uid of people) {
+        if (!first && Date.now() - began > ROOM_MS) break;
+        const h = await healthCheck(forUser(everybody, uid)).catch((e) => {
+          if (first) throw e;
+          return null;
+        });
+        if (first && h) out.health = h.problems ? `${h.problems} to look at${h.emailed ? ", owner told" : ""}` : "well";
+        first = false;
+      }
     }
   } catch (e) {
     out.health = `failed: ${String((e as Error)?.message ?? e).slice(0, 80)}`;
@@ -177,9 +219,24 @@ async function tick() {
   // them on. Every round, because a call placed last round is read back on
   // this one; without the accounts it is one small read and nothing more.
   try {
-    if (await claim(supabase, "calls", WATCH_EVERY_MIN)) {
+    if (await claim(everybody, "calls", WATCH_EVERY_MIN)) {
       const { runCalls } = await import("@/lib/dial.server");
-      const c = await runCalls(supabase);
+      const c = { state: "off", placed: 0, read: 0, booked: 0 };
+      let first = true;
+      for (const uid of people) {
+        if (!first && Date.now() - began > ROOM_MS) break;
+        const one = await runCalls(forUser(everybody, uid)).catch((e) => {
+          if (first) throw e;
+          return null;
+        });
+        if (one) {
+          if (first || (c.state === "off" && one.state !== "off")) c.state = one.state;
+          c.placed += one.placed;
+          c.read += one.read;
+          c.booked += one.booked;
+        }
+        first = false;
+      }
       out.calls = c.state === "off" && !c.read ? "off" : `${c.state}: ${c.placed} placed, ${c.read} read back${c.booked ? `, ${c.booked} time(s) sent to the owner` : ""}`;
     }
   } catch (e) {

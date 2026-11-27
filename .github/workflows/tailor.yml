@@ -52,4 +52,4 @@ jobs:
           GEMINI_MODEL: ${{ secrets.GEMINI_MODEL || 'gemini-3.8-flash' }}
           MAX: ${{ github.event.inputs.max || '30' }}
           WRITE: ${{ github.event.inputs.write || 'true' }}
-        run: node pretailor.mjs
+        run: node forusers.mjs pretailor.mjs

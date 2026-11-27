@@ -35,4 +35,4 @@ jobs:
           APPLYPILOT_PASSWORD: ${{ secrets.APPLYPILOT_PASSWORD }}
           APPLY: ${{ github.event.inputs.apply == 'true' }}
           MAX_CHECK: "300"
-        run: node crawl.mjs
+        run: node forusers.mjs crawl.mjs

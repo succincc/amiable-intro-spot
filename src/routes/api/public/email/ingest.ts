@@ -34,7 +34,11 @@ export const Route = createFileRoute("/api/public/email/ingest")({
           return Response.json({ error: "body must be JSON" }, { status: 400 });
         }
 
-        const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+        const { supabaseAdmin: everybody } = await import("@/integrations/supabase/client.server");
+        const { forUser, personFor } = await import("@/lib/scope.server");
+        const who = await personFor(everybody, request);
+        if (!who) return Response.json({ ok: false, error: "not a person with a workspace" }, { status: 403 });
+        const supabaseAdmin = forUser(everybody, who);
         const email = await import("@/lib/email.server");
 
         try {

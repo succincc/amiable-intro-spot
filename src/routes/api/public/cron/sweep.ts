@@ -22,9 +22,11 @@ export const Route = createFileRoute("/api/public/cron/sweep")({
         // many employers have not been read since then, so it knows when to
         // stop asking.
         let since: string | undefined;
+        let probe = false;
         try {
           const body = (await request.json()) as { only?: string; since?: string } | null;
           if (body?.only === "discover" || body?.only === "score") only = body.only;
+          if ((body?.only as string | undefined) === "probe") probe = true;
           if (typeof body?.since === "string" && Number.isFinite(Date.parse(body.since))) {
             since = body.since;
           }
@@ -40,7 +42,14 @@ export const Route = createFileRoute("/api/public/cron/sweep")({
         // and another guess.
         const started = Date.now();
         try {
-          const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+          const { supabaseAdmin: everybody } = await import("@/integrations/supabase/client.server");
+          const { forUser, personFor } = await import("@/lib/scope.server");
+          const who = await personFor(everybody, request);
+          if (!who) return Response.json({ ok: false, error: "not a person with a workspace" }, { status: 403 });
+          const supabaseAdmin = forUser(everybody, who);
+          // "Is there a person at this place in the line?" — asked by the
+          // runner before it does a round for them.
+          if (probe) return Response.json({ ok: true });
           const discover =
             only === "score"
               ? null

@@ -2,16 +2,27 @@ import { createServerFn } from "@tanstack/react-start";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 
+/**
+ * The server's client, limited to the signed-in person. The keys are kept
+ * where no browser can read them, so they are read with the server's own
+ * key — and only ever that person's row.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function own(userId: string): Promise<any> {
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { forUser } = await import("@/lib/scope.server");
+  return forUser(supabaseAdmin, userId);
+}
+
 type Keys = { voice_key?: string; voice_id?: string; phone_sid?: string; phone_token?: string; phone_number?: string };
 
 /** Which of the user's own provider keys are set. Never the keys themselves. */
 export const callingStatus = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .handler(async () => {
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  .handler(async ({ context }) => {
+    const supabaseAdmin = await own(context.userId);
     // call_keys is newer than the generated types.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data, error } = await (supabaseAdmin as any).from("call_keys").select("voice_key, voice_id, phone_sid, phone_token, phone_number").eq("id", 1).maybeSingle();
+    const { data, error } = await supabaseAdmin.from("call_keys").select("voice_key, voice_id, phone_sid, phone_token, phone_number").eq("id", 1).maybeSingle();
     if (error) return { ok: false as const, message: error.message };
     return {
       ok: true as const,
@@ -27,8 +38,8 @@ export const callingStatus = createServerFn({ method: "POST" })
 export const saveCallingKeys = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: Keys) => d)
-  .handler(async ({ data }) => {
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  .handler(async ({ context, data }) => {
+    const supabaseAdmin = await own(context.userId);
     const patch: Record<string, string> = {};
     for (const k of ["voice_key", "voice_id", "phone_sid", "phone_token", "phone_number"] as const) {
       const v = String(data[k] ?? "").trim();
@@ -40,17 +51,15 @@ export const saveCallingKeys = createServerFn({ method: "POST" })
     const fresh: Record<string, null> = {};
     if (patch["voice_key"] || patch["voice_id"]) fresh["agent_id"] = null;
     if (patch["voice_key"] || patch["phone_sid"] || patch["phone_token"] || patch["phone_number"]) fresh["phone_id"] = null;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { error } = await (supabaseAdmin as any).from("call_keys").upsert({ id: 1, ...patch, ...fresh, updated_at: new Date().toISOString() }, { onConflict: "id" });
+    const { error } = await supabaseAdmin.from("call_keys").upsert({ id: 1, ...patch, ...fresh, updated_at: new Date().toISOString() }, { onConflict: "id" });
     return error ? { ok: false as const, message: error.message } : { ok: true as const, saved: Object.keys(patch).length };
   });
 
 /** Remove every key: the extra is disconnected and nothing more can be billed through it. */
 export const clearCallingKeys = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .handler(async () => {
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { error } = await (supabaseAdmin as any).from("call_keys").delete().eq("id", 1);
+  .handler(async ({ context }) => {
+    const supabaseAdmin = await own(context.userId);
+    const { error } = await supabaseAdmin.from("call_keys").delete().eq("id", 1);
     return error ? { ok: false as const, message: error.message } : { ok: true as const };
   });

@@ -46,4 +46,4 @@ jobs:
           APPLYPILOT_PASSWORD: ${{ secrets.APPLYPILOT_PASSWORD }}
           ANSWERS_ONLY: "true"
           DRY_RUN: "true"
-        run: node apply.mjs
+        run: node forusers.mjs apply.mjs

@@ -49,4 +49,4 @@ jobs:
           APPLY: ${{ github.event.inputs.apply == 'true' }}
           MAX_EMPLOYERS: ${{ github.event.inputs.max || '40' }}
           SF_URLS: ${{ github.event.inputs.urls }}
-        run: node successfactors.mjs
+        run: node forusers.mjs successfactors.mjs

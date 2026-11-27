@@ -49,7 +49,7 @@ jobs:
           APPLYPILOT_EMAIL: ${{ secrets.APPLYPILOT_EMAIL }}
           APPLYPILOT_PASSWORD: ${{ secrets.APPLYPILOT_PASSWORD }}
           APPLY: ${{ github.event_name == 'schedule' || github.event.inputs.apply == 'true' }}
-        run: node measure.mjs
+        run: node forusers.mjs measure.mjs
       - name: Hand on to applying
         if: always() && github.event.inputs.then_apply == 'true'
         env:

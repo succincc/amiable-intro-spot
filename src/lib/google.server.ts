@@ -49,6 +49,46 @@ export function clientConfig() {
  * expires in an hour and cannot be renewed — the mailbox would then
  * disconnect the same afternoon.
  */
+// ---------------------------------------------------------------------------
+// Whose mailbox is being connected
+// ---------------------------------------------------------------------------
+//
+// Google sends the browser back with whatever "state" it was given. That is
+// the only thing that says which person started the connection, so it is
+// the person's id, a time it stops being good, and a seal over both made
+// with the client secret. A callback without a seal that checks out connects
+// nothing: otherwise anyone could finish a connection into somebody else's
+// workspace.
+
+const enc = (s: string) => new TextEncoder().encode(s);
+const b64url = (buf: ArrayBuffer) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+
+async function seal(text: string): Promise<string> {
+  const { secret } = clientConfig();
+  const key = await crypto.subtle.importKey("raw", enc(`state:${secret}`), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  return b64url(await crypto.subtle.sign("HMAC", key, enc(text)));
+}
+
+/** The state to send to Google for this person: good for twenty minutes. */
+export async function signState(userId: string, now = Date.now()): Promise<string> {
+  const body = `${userId}.${Math.floor(now / 1000) + 20 * 60}`;
+  return `${body}.${await seal(body)}`;
+}
+
+/** The person a returned state names, or null when it is not one this server made, or is stale. */
+export async function readState(state: string | null | undefined, now = Date.now()): Promise<string | null> {
+  const parts = String(state ?? "").split(".");
+  if (parts.length !== 3) return null;
+  const [userId, until, mark] = parts as [string, string, string];
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId)) return null;
+  if (!/^\d+$/.test(until) || Number(until) * 1000 < now) return null;
+  const want = await seal(`${userId}.${until}`);
+  if (want.length !== mark.length) return null;
+  let diff = 0;
+  for (let i = 0; i < want.length; i++) diff |= want.charCodeAt(i) ^ mark.charCodeAt(i);
+  return diff === 0 ? userId : null;
+}
+
 export function buildAuthUrl(state: string): string {
   const { id, redirectUri } = clientConfig();
   const url = new URL(AUTH_URL);

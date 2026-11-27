@@ -31,9 +31,12 @@ import { guardLogs, hideJob, STATES } from "./quiet.mjs";
 import { FRESH_DAYS } from "./fresh.mjs";
 import { schoolNameOnly, schoolOption } from "./school.mjs";
 import { fromProfile } from "./fromprofile.mjs";
+import { useOwnKey } from "./ownkey.mjs";
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const ANON_KEY = process.env.SUPABASE_ANON_KEY;
+// Whose round this is, when the runner is doing somebody else's: see forusers.mjs.
+const ACT_AS = process.env.AP_ACT_AS ? { "x-act-as": process.env.AP_ACT_AS } : {};
 const AP_EMAIL = process.env.APPLYPILOT_EMAIL;
 const AP_PASSWORD = process.env.APPLYPILOT_PASSWORD;
 const MAX_JOBS = parseInt(process.env.MAX_JOBS || "25", 10);
@@ -101,7 +104,7 @@ let EXPIRES = 0;
 async function auth(body, grant) {
   const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=${grant}`, {
     method: "POST",
-    headers: { apikey: ANON_KEY, "Content-Type": "application/json" },
+    headers: { apikey: ANON_KEY, ...ACT_AS, "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(`Sign-in failed ${res.status}: ${(await res.text()).slice(0, 200)}`);
@@ -122,7 +125,7 @@ async function db(path, init = {}) {
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
     ...init,
     headers: {
-      apikey: ANON_KEY,
+      apikey: ANON_KEY, ...ACT_AS,
       Authorization: `Bearer ${await token()}`,
       "Content-Type": "application/json",
       ...(init.headers || {}),
@@ -4908,7 +4911,7 @@ async function waitForVerificationCode(host, company, attempts = 6, gapMs = 10_0
     try {
       const res = await fetch(`${base}/api/public/email/verify-code`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-engine-key": key },
+        headers: { "Content-Type": "application/json", "x-engine-key": key, ...ACT_AS },
         // `since`: only a message that arrived after this application asked
         // for its code. An employer's earlier codes — thirty of them, on a
         // day of testing — name the same company and look the same.
@@ -4953,7 +4956,7 @@ async function waitForVerificationLink(host, attempts = 8, gapMs = 8000, kind = 
     try {
       const res = await fetch(`${base}/api/public/email/verify-link`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-engine-key": key },
+        headers: { "Content-Type": "application/json", "x-engine-key": key, ...ACT_AS },
         body: JSON.stringify({ host, kind }),
         signal: AbortSignal.timeout(25000),
       });
@@ -4978,7 +4981,7 @@ async function waitForVerificationLink(host, attempts = 8, gapMs = 8000, kind = 
 }
 
 async function saveAccount(host, email, password, status, jobId, note) {
-  // on_conflict=host, and it matters more than it looks.
+  // on_conflict=user_id,host, and it matters more than it looks.
   //
   // Without it PostgREST resolves a merge-duplicates upsert against the
   // PRIMARY KEY, which here is a generated uuid and can never collide. So
@@ -4990,7 +4993,7 @@ async function saveAccount(host, email, password, status, jobId, note) {
   // bogus password was retried run after run, and why a registration that
   // had already been attempted could never be attempted again.
   try {
-    await db("site_accounts?on_conflict=host", {
+    await db("site_accounts?on_conflict=user_id,host", {
       method: "POST",
       headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
       body: JSON.stringify([
@@ -11446,6 +11449,8 @@ const main = async () => {
   p.last_name = names.length > 1 ? names[names.length - 1] : "";
 
   // Once a round, in the lane that always runs.
+  // The person's own key to the writing model, where they have saved one.
+  if (await useOwnKey(db)) console.log("writing on this person's own key.");
   if (LEADS_THE_ROUND || process.env.ANSWERS_ONLY === "true") await refreshAnswers(p).catch(() => {});
   // Started because the profile was saved: the questions are gone through
   // with it and nothing else is done.
@@ -11961,7 +11966,7 @@ const main = async () => {
         await new Promise((r) => setTimeout(r, 20_000)); // let the receipts arrive
         const said = await fetch(`${base}/api/public/email/sync`, {
           method: "POST",
-          headers: { "Content-Type": "application/json", "x-engine-key": key },
+          headers: { "Content-Type": "application/json", "x-engine-key": key, ...ACT_AS },
           // Sixty messages over a day timed out at a full minute and read
           // nothing. What matters here arrived in the last hour or two.
           body: JSON.stringify({ query: "in:inbox newer_than:3h", max: 25 }),

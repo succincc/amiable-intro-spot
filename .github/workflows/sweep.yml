@@ -74,6 +74,7 @@ jobs:
               --max-time 300 \
               -X POST "${APP_URL}/api/public/cron/sweep" \
               -H "x-engine-key: ${ENGINE_API_KEY}" \
+              -H "x-person: ${PERSON}" \
               -H "Content-Type: application/json" \
               -d "{\"only\":\"$1\",\"since\":\"${SINCE}\"}" || echo "000")
             # 1102 is Cloudflare killing the Worker for running too long. It
@@ -86,56 +87,78 @@ jobs:
             [ "${code}" = "200" ] && ! grep -q '"ok":false' /tmp/sweep.json 2>/dev/null
           }
 
-          good=0
-          bad=0
-          SINCE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          # One person's round: everything below, for whoever PERSON is.
+          one_round() {
+            good=0
+            bad=0
+            SINCE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
-          if [ "${ONLY}" != "score" ]; then
-            for round in $(seq 1 14); do
-              if call discover; then
-                good=$((good + 1))
-                jq -c '{round: '"${round}"', ms, found: .discover.found, kept: .discover.kept, inserted: .discover.inserted, filtered: .discover.filtered, errors: .discover.errors, employers: .discover.employers, not_read_yet: .discover.stale}' /tmp/sweep.json 2>/dev/null || head -c 400 /tmp/sweep.json
-                left=$(jq -r '.discover.stale // "unknown"' /tmp/sweep.json 2>/dev/null || echo unknown)
-                # Every employer read: done. A panel that does not say how
-                # many are left gets four rounds and no more.
-                if [ "${left}" = "0" ]; then break; fi
-                if [ "${left}" = "unknown" ] && [ "${round}" -ge 4 ]; then break; fi
-              else
-                bad=$((bad + 1))
-                echo "discover round ${round}: HTTP ${code}"
-                head -c 600 /tmp/sweep.json 2>/dev/null || true
-                echo
-                # Two failures in a row is the server, not bad luck.
-                if [ "${bad}" -ge 2 ]; then break; fi
-              fi
-              sleep 3
-            done
-          fi
+            if [ "${ONLY}" != "score" ]; then
+              for round in $(seq 1 14); do
+                if call discover; then
+                  good=$((good + 1))
+                  jq -c '{round: '"${round}"', ms, found: .discover.found, kept: .discover.kept, inserted: .discover.inserted, filtered: .discover.filtered, errors: .discover.errors, employers: .discover.employers, not_read_yet: .discover.stale}' /tmp/sweep.json 2>/dev/null || head -c 400 /tmp/sweep.json
+                  left=$(jq -r '.discover.stale // "unknown"' /tmp/sweep.json 2>/dev/null || echo unknown)
+                  # Every employer read: done. A panel that does not say how
+                  # many are left gets four rounds and no more.
+                  if [ "${left}" = "0" ]; then break; fi
+                  if [ "${left}" = "unknown" ] && [ "${round}" -ge 4 ]; then break; fi
+                else
+                  bad=$((bad + 1))
+                  echo "discover round ${round}: HTTP ${code}"
+                  head -c 600 /tmp/sweep.json 2>/dev/null || true
+                  echo
+                  # Two failures in a row is the server, not bad luck.
+                  if [ "${bad}" -ge 2 ]; then break; fi
+                fi
+                sleep 3
+              done
+            fi
 
-          if [ "${ONLY}" != "discover" ]; then
-            # Scoring is bounded per request too; three requests clear what a
-            # full discovery brings in.
-            for round in $(seq 1 3); do
-              if call score; then
-                good=$((good + 1))
-                jq -c '{score_round: '"${round}"', ms, score}' /tmp/sweep.json 2>/dev/null | head -c 600 || head -c 400 /tmp/sweep.json
-                echo
-              else
-                bad=$((bad + 1))
-                echo "score round ${round}: HTTP ${code}"
-                head -c 600 /tmp/sweep.json 2>/dev/null || true
-                echo
-                break
-              fi
-              sleep 3
-            done
-          fi
+            if [ "${ONLY}" != "discover" ]; then
+              # Scoring is bounded per request too; three requests clear what a
+              # full discovery brings in.
+              for round in $(seq 1 3); do
+                if call score; then
+                  good=$((good + 1))
+                  jq -c '{score_round: '"${round}"', ms, score}' /tmp/sweep.json 2>/dev/null | head -c 600 || head -c 400 /tmp/sweep.json
+                  echo
+                else
+                  bad=$((bad + 1))
+                  echo "score round ${round}: HTTP ${code}"
+                  head -c 600 /tmp/sweep.json 2>/dev/null || true
+                  echo
+                  break
+                fi
+                sleep 3
+              done
+            fi
 
-          echo "requests that succeeded: ${good}, failed: ${bad}"
-          # The endpoint reports its own failures as 200 with an "error" field,
-          # so a 200 is not automatically a success. A sweep in which nothing
-          # worked is a failed sweep; one bad round among good ones is not.
-          [ "${good}" -gt 0 ]
+            echo "requests that succeeded: ${good}, failed: ${bad}"
+            # The endpoint reports its own failures as 200 with an "error" field,
+            # so a 200 is not automatically a success. A sweep in which nothing
+            # worked is a failed sweep; one bad round among good ones is not.
+            [ "${good}" -gt 0 ]
+          }
+
+          # The owner's round, as it has always run; a failure here fails the job.
+          PERSON=0
+          one_round
+
+          # Then each person the owner has approved, in turn. The panel is
+          # asked whether there is anyone at the next place in the line, and
+          # says no when the line has ended. Nobody is named: this log is public.
+          for PERSON in $(seq 1 60); do
+            there=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 30 \
+              -X POST "${APP_URL}/api/public/cron/sweep" \
+              -H "x-engine-key: ${ENGINE_API_KEY}" \
+              -H "x-person: ${PERSON}" \
+              -H "Content-Type: application/json" \
+              -d '{"only":"probe"}' || echo "000")
+            [ "${there}" = "200" ] || break
+            echo "==== person $((PERSON + 1)) ===="
+            one_round || echo "that person's round did not finish; the next is still done."
+          done
 
       # What was just found is measured and applied to now, not a round from
       # now. Each job used to wait for the clock: a posting found at noon was

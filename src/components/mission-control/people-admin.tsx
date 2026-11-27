@@ -57,8 +57,17 @@ export function PeopleAdmin() {
       <span className="ml-auto flex gap-2">
         {m.status !== "approved" ? <Btn variant="primary" onClick={() => void decide(m.user_id, "approved")}>approve</Btn> : null}
         {m.status !== "denied" ? <Btn onClick={() => void decide(m.user_id, "denied")}>deny</Btn> : null}
+        {m.status === "approved" ? <Btn onClick={async () => {
+          if (!window.confirm(`Empty ${m.email}'s workspace? Their profile, resume, jobs, applications, answers, mail and connected accounts are deleted. Their login, name and email stay. This cannot be undone.`)) return;
+          setErr(null);
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const { error } = await (supabase as any).rpc("admin_reset_workspace", { p_user: m.user_id });
+          if (error) setErr(error.message);
+          else setErr(null);
+          void qc.invalidateQueries({ queryKey: ["members"] });
+        }}>full reset</Btn> : null}
         <Btn onClick={async () => {
-          if (!window.confirm(`Remove ${m.email} altogether? Their login is deleted and cannot be brought back.`)) return;
+          if (!window.confirm(`Remove ${m.email} altogether? Their login and everything in their workspace are deleted and cannot be brought back.`)) return;
           setErr(null);
           const r = await remove({ data: { user_id: m.user_id } });
           if (!r.ok) setErr(r.message);
@@ -71,7 +80,7 @@ export function PeopleAdmin() {
   return (
     <div className="space-y-3 text-xs">
       <p className="text-muted-foreground">
-        people who asked to use the panel from the sign-in page. nobody comes in without your yes. an approved person has a login only: their own workspace is not built yet, and nothing of yours is ever shown to them.
+        people who asked to use the panel from the sign-in page. nobody comes in without your yes. an approved person gets a workspace of their own, starting from the employer boards yours has already found; nothing else of yours is shown to them, and nothing of theirs to each other. full reset empties a person's workspace and keeps their login; remove deletes the login and everything with it.
       </p>
       {err ? <div className="text-destructive">{err}</div> : null}
       <div>

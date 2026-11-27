@@ -1,3 +1,4 @@
+import { AiKey } from "@/components/mission-control/ai-key";
 import { CallingExtra } from "@/components/mission-control/calling-extra";
 import { PeopleAdmin } from "@/components/mission-control/people-admin";
 import { useEffect, useState, type ReactNode } from "react";
@@ -69,6 +70,8 @@ function SaveLine({ onSave }: { onSave: () => Promise<void> }) {
 }
 
 function Settings() {
+  // The people list is the owner's; the database would show nobody else anything in it anyway.
+  const isOwner = (Route.useRouteContext() as { access?: string }).access === "owner";
   const search = Route.useSearch();
   const navigate = Route.useNavigate();
   const [gmailBanner, setGmailBanner] = useState<{ ok: boolean; text: string } | null>(null);
@@ -107,12 +110,17 @@ function Settings() {
       <SearchBlock initial={q.data.search} profile={q.data.profile} />
       <CompaniesBlock />
       <EmailBlock initial={q.data.profile} open={gmailBanner !== null} />
+      <Block title="writing key (free, 3 minutes)">
+        <AiKey />
+      </Block>
       <Block title="calling (optional extra)">
         <CallingExtra initial={q.data.profile as unknown as Record<string, unknown>} />
       </Block>
-      <Block title="people (admin)">
-        <PeopleAdmin />
-      </Block>
+      {isOwner ? (
+        <Block title="people (admin)">
+          <PeopleAdmin />
+        </Block>
+      ) : null}
     </div>
   );
 }
@@ -196,7 +204,10 @@ function ResumeBlock({ initial }: { initial: Profile }) {
         setFile({ k: "err", t: "Almost no text came out of this file — it is probably a scan. Export a text PDF from Word or Google Docs, or upload a .docx." });
         return;
       }
-      const path = `resume/${Date.now()}-${f.name.replace(/[^\w.-]+/g, "_")}`;
+      // In the person's own folder of the private store: nobody else can open it.
+      const me = (await supabase.auth.getUser()).data.user?.id;
+      if (!me) throw new Error("Sign in again to upload a resume.");
+      const path = `u/${me}/resume/${Date.now()}-${f.name.replace(/[^\w.-]+/g, "_")}`;
       const up = await supabase.storage.from("artifacts").upload(path, f, f.type ? { upsert: true, contentType: f.type } : { upsert: true });
       if (up.error) throw up.error;
       const wc = extracted.split(/\s+/).filter(Boolean).length;
@@ -572,7 +583,7 @@ function ApplyingBlock({ initial }: { initial: Profile }) {
         note: "added by hand",
         last_used_at: null,
       },
-      { onConflict: "host" },
+      { onConflict: "user_id,host" },
     );
     setAcctBusy(false);
     if (error) {

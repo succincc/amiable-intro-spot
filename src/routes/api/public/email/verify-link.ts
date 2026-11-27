@@ -34,7 +34,11 @@ export const Route = createFileRoute("/api/public/email/verify-link")({
         if (!host) return Response.json({ url: null, error: "host required" }, { status: 400 });
 
         try {
-          const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+          const { supabaseAdmin: everybody } = await import("@/integrations/supabase/client.server");
+          const { forUser, personFor } = await import("@/lib/scope.server");
+          const who = await personFor(everybody, request);
+          if (!who) return Response.json({ ok: false, error: "not a person with a workspace" }, { status: 403 });
+          const supabaseAdmin = forUser(everybody, who);
           const { findVerificationLink } = await import("@/lib/gmail.server");
           const url = await findVerificationLink(supabaseAdmin, host, 30, kind);
           return Response.json({ url: url ?? null });

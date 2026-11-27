@@ -218,4 +218,4 @@ jobs:
           # Only a scheduled run defers to the stored autopilot setting. A
           # button press means a person is present and said what they wanted.
           RESPECT_AUTOPILOT: ${{ github.event_name == 'schedule' || github.event.inputs.as_scheduled == 'true' }}
-        run: node apply.mjs
+        run: node forusers.mjs apply.mjs

@@ -91,4 +91,4 @@ jobs:
           MAX_CANDIDATES: ${{ github.event.inputs.max || '150' }}
           RESOLVE_URLS: ${{ github.event.inputs.urls }}
           ONLY_SYSTEM: ${{ github.event.inputs.system }}
-        run: node resolve.mjs
+        run: node forusers.mjs resolve.mjs

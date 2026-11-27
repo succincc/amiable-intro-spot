@@ -37,4 +37,4 @@ jobs:
           USAJOBS_KEY: ${{ secrets.USAJOBS_KEY }}
           USAJOBS_EMAIL: ${{ secrets.USAJOBS_EMAIL }}
           APPLY: ${{ github.event.inputs.apply == 'true' }}
-        run: node usajobs.mjs
+        run: node forusers.mjs usajobs.mjs

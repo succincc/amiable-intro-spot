@@ -53,4 +53,4 @@ jobs:
           # as a live write.
           TITLE_LIMIT: ${{ github.event.inputs.limit || github.event.client_payload.limit || '120' }}
           DRY_RUN: ${{ (github.event.inputs.apply == 'true' || github.event.client_payload.apply == true) && '0' || '1' }}
-        run: node suggest-titles.mjs
+        run: node forusers.mjs suggest-titles.mjs

@@ -16,17 +16,23 @@ export const Route = createFileRoute("/_authenticated")({
       await supabase.auth.signOut();
       throw redirect({ to: "/" });
     }
-    return { user: data.user, access };
+    // The rows a person's panel expects to find are made the first time
+    // they come in. Until the database can do that, an approved person has
+    // a login and nothing behind it, and is told so.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const made = await (supabase as any).rpc("ensure_workspace");
+    const ready = !made.error && made.data === "ready";
+    return { user: data.user, access, ready };
   },
   component: AuthenticatedLayout,
 });
 
 function AuthenticatedLayout() {
-  const { access } = Route.useRouteContext();
-  // An approved member has a login and, for now, nothing behind it: each
-  // person's own workspace is the next thing being built. The owner's data
-  // is the owner's alone and is not shown to anyone else.
-  if (access !== "owner") {
+  const { access, ready } = Route.useRouteContext();
+  // Each person has a workspace of their own, and sees nothing of anyone
+  // else's. Where one could not be made yet, the person is told, rather
+  // than shown an empty panel that looks broken.
+  if (access !== "owner" && !ready) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-background px-4">
         <div className="max-w-md space-y-3 rounded-lg border border-border bg-card p-6 text-sm">

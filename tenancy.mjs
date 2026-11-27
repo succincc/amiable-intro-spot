@@ -10,6 +10,8 @@
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const ANON_KEY = process.env.SUPABASE_ANON_KEY;
+// Whose round this is, when the runner is doing somebody else's: see forusers.mjs.
+const ACT_AS = process.env.AP_ACT_AS ? { "x-act-as": process.env.AP_ACT_AS } : {};
 const AP_EMAIL = process.env.APPLYPILOT_EMAIL;
 const AP_PASSWORD = process.env.APPLYPILOT_PASSWORD;
 
@@ -25,12 +27,12 @@ export function hush(text) {
 if (process.env.TENANCY_IMPORT_ONLY !== "1") {
   const sign = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
     method: "POST",
-    headers: { apikey: ANON_KEY, "Content-Type": "application/json" },
+    headers: { apikey: ANON_KEY, ...ACT_AS, "Content-Type": "application/json" },
     body: JSON.stringify({ email: AP_EMAIL, password: AP_PASSWORD }),
   });
   if (!sign.ok) throw new Error(`Sign-in failed ${sign.status}`);
   const ACCESS = (await sign.json()).access_token;
-  const headers = { apikey: ANON_KEY, Authorization: `Bearer ${ACCESS}`, "Content-Type": "application/json" };
+  const headers = { apikey: ANON_KEY, ...ACT_AS, Authorization: `Bearer ${ACCESS}`, "Content-Type": "application/json" };
 
   const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/schema_report`, { method: "POST", headers, body: "{}" });
   if (!res.ok) {
@@ -59,4 +61,19 @@ if (process.env.TENANCY_IMPORT_ONLY !== "1") {
     left[t] = q.ok ? ((await q.json()).length ? "ROWS WITHOUT AN OWNER" : "ok") : `not readable (${q.status})`;
   }
   console.log(`\n== every row has an owner: ${JSON.stringify(left)}`);
+
+  // What somebody with no login at all can read. Only how many rows come
+  // back is looked at; none of it is printed.
+  const open = {};
+  for (const t of ["v_inbox", "v_stats", "v_email_stats", "v_apply_queue", "v_candidate_stats", "jobs", "profile", "emails", "google_tokens", "site_accounts", "members", "user_keys"]) {
+    const q = await fetch(`${SUPABASE_URL}/rest/v1/${t}?select=*&limit=3`, { headers: { apikey: ANON_KEY } });
+    const rows = q.ok ? await q.json().catch(() => []) : null;
+    // A counting view always answers with one row; it is open only if the count in it is not nothing.
+    const counts = rows?.length === 1 && Object.values(rows[0]).every((v) => typeof v === "number" || v === null);
+    open[t] = rows === null ? `closed (${q.status})` : !rows.length ? "closed (no rows)" : counts ? (Object.values(rows[0]).some((v) => Number(v) > 0) ? "OPEN: counts readable" : "closed (counts of nothing)") : "OPEN: ROWS READABLE WITHOUT A LOGIN";
+  }
+  console.log(`\n== readable with no login: ${JSON.stringify(open)}`);
+
+  const ready = await fetch(`${SUPABASE_URL}/rest/v1/rpc/workspaces_ready`, { method: "POST", headers, body: "{}" });
+  console.log(`\n== second workspace step applied: ${ready.ok ? "yes" : "not yet"}`);
 }

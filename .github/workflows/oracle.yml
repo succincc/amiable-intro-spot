@@ -34,4 +34,4 @@ jobs:
           APPLYPILOT_EMAIL: ${{ secrets.APPLYPILOT_EMAIL }}
           APPLYPILOT_PASSWORD: ${{ secrets.APPLYPILOT_PASSWORD }}
           APPLY: ${{ github.event_name == 'schedule' || github.event.inputs.apply == 'true' }}
-        run: node oracle.mjs
+        run: node forusers.mjs oracle.mjs

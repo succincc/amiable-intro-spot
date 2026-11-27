@@ -60,4 +60,4 @@ jobs:
           APPLYPILOT_PASSWORD: ${{ secrets.APPLYPILOT_PASSWORD }}
           APPLY: ${{ github.event_name == 'schedule' || github.event.inputs.apply == 'true' }}
           ONLY_HOST: ${{ github.event.inputs.host }}
-        run: node icims.mjs
+        run: node forusers.mjs icims.mjs

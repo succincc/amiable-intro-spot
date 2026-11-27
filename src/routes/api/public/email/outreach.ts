@@ -64,9 +64,12 @@ export const Route = createFileRoute("/api/public/email/outreach")({
         }
 
         try {
-          const { supabaseAdmin: typed } = await import("@/integrations/supabase/client.server");
+          const { supabaseAdmin: everybody } = await import("@/integrations/supabase/client.server");
+          const { forUser, personFor } = await import("@/lib/scope.server");
+          const who = await personFor(everybody, request);
+          if (!who) return Response.json({ ok: false, error: "not a person with a workspace" }, { status: 403 });
           // The outreach table is newer than the generated types.
-          const supabaseAdmin = typed as any;
+          const supabaseAdmin = forUser(everybody, who);
           const record = async (state: string, reason: string | null) => {
             await supabaseAdmin.from("outreach").insert({
               job_id: b?.job_id ?? null,

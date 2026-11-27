@@ -69,4 +69,4 @@ jobs:
           APPLY: ${{ github.event.inputs.apply == 'true' }}
           MAX_EMPLOYERS: ${{ github.event.inputs.max || '120' }}
           ONLY_URLS: ${{ github.event.inputs.urls }}
-        run: node jobposting.mjs
+        run: node forusers.mjs jobposting.mjs

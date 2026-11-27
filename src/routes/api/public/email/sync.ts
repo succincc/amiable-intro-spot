@@ -33,7 +33,11 @@ export const Route = createFileRoute("/api/public/email/sync")({
         }
 
         try {
-          const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+          const { supabaseAdmin: everybody } = await import("@/integrations/supabase/client.server");
+          const { forUser, personFor } = await import("@/lib/scope.server");
+          const who = await personFor(everybody, request);
+          if (!who) return Response.json({ ok: false, error: "not a person with a workspace" }, { status: 403 });
+          const supabaseAdmin = forUser(everybody, who);
           const { fetchMessages } = await import("@/lib/gmail.server");
           const { ingestMessages, sendApprovedReplies } = await import("@/lib/email.server");
           // Whatever was cleared to go goes now, whether or not there is new
@@ -78,9 +82,11 @@ export const Route = createFileRoute("/api/public/email/sync")({
           // failed mailbox read must never fail the run that asked for it.
           const message = String((e as Error)?.message ?? e);
           try {
-            const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+            const { supabaseAdmin: everybody } = await import("@/integrations/supabase/client.server");
+            const { forUser, personFor } = await import("@/lib/scope.server");
+            const who = await personFor(everybody, request);
             const { recordSyncError } = await import("@/lib/email.server");
-            await recordSyncError(supabaseAdmin, message);
+            if (who) await recordSyncError(forUser(everybody, who), message);
           } catch {
             /* recording the failure must not become a second failure */
           }

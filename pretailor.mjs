@@ -20,11 +20,14 @@
 //
 // Free: a public-repo runner, public feeds, the free Gemini tier.
 
+import { useOwnKey } from "./ownkey.mjs";
 import { tailorResume, rolesText, structureResume } from "./tailor.mjs";
 import { guardLogs, hideJob } from "./quiet.mjs";
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const ANON_KEY = process.env.SUPABASE_ANON_KEY;
+// Whose round this is, when the runner is doing somebody else's: see forusers.mjs.
+const ACT_AS = process.env.AP_ACT_AS ? { "x-act-as": process.env.AP_ACT_AS } : {};
 const AP_EMAIL = process.env.APPLYPILOT_EMAIL;
 const AP_PASSWORD = process.env.APPLYPILOT_PASSWORD;
 const MAX = Number(process.env.MAX || 30);
@@ -38,7 +41,7 @@ let EXPIRES = 0;
 async function auth(body, grant) {
   const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=${grant}`, {
     method: "POST",
-    headers: { apikey: ANON_KEY, "Content-Type": "application/json" },
+    headers: { apikey: ANON_KEY, ...ACT_AS, "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(`Sign-in failed ${res.status}`);
@@ -52,7 +55,7 @@ async function db(path, init = {}) {
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
     ...init,
     headers: {
-      apikey: ANON_KEY,
+      apikey: ANON_KEY, ...ACT_AS,
       Authorization: `Bearer ${ACCESS}`,
       "Content-Type": "application/json",
       ...(init.headers || {}),
@@ -120,11 +123,14 @@ if (process.env.PRETAILOR_IMPORT_ONLY !== "1") {
     console.error("Missing SUPABASE_URL, SUPABASE_ANON_KEY, APPLYPILOT_EMAIL or APPLYPILOT_PASSWORD.");
     process.exit(1);
   }
+  await auth({ email: AP_EMAIL, password: AP_PASSWORD }, "password");
+  // The person's own key where they have saved one; the shared one otherwise.
+  const own = await useOwnKey(db);
   if (!process.env.GEMINI_API_KEY) {
     console.log("no model key on this run; nothing can be written.");
     process.exit(0);
   }
-  await auth({ email: AP_EMAIL, password: AP_PASSWORD }, "password");
+  if (own) console.log("writing on this person's own key.");
 
   const [profile] = (await db("profile?id=eq.1&select=*")) ?? [];
   // Nothing printed from here can carry the owner's own details.

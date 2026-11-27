@@ -30,8 +30,16 @@ export const Route = createFileRoute("/api/public/google/callback")({
           return back(error === "access_denied" ? "You cancelled the connection." : error, false);
         if (!code) return back("Google sent no authorisation code.", false);
 
-        const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-        const { exchangeCode, expiryFrom } = await import("@/lib/google.server");
+        const { supabaseAdmin: everybody } = await import("@/integrations/supabase/client.server");
+        const { exchangeCode, expiryFrom, readState } = await import("@/lib/google.server");
+        const { forUser, personFor } = await import("@/lib/scope.server");
+
+        // Whose mailbox this is: the person who started the connection, as
+        // sealed into the state, and only if they have a workspace.
+        const named = await readState(url.searchParams.get("state"));
+        const who = named ? await personFor(everybody, new Request(request.url, { headers: { "x-act-as": named } })) : null;
+        if (!who) return back("This connection was not started from your panel, or took too long. Press connect again.", false);
+        const supabaseAdmin = forUser(everybody, who);
 
         const token = await exchangeCode(code);
         if (!token.access_token) {
@@ -55,21 +63,13 @@ export const Route = createFileRoute("/api/public/google/callback")({
 
         // google_tokens arrives with this feature's migration; the generated
         // Supabase types will not know it until they are regenerated.
-        const db = supabaseAdmin as unknown as {
-          from(table: string): {
-            update(patch: Record<string, unknown>): { eq(c: string, v: unknown): Promise<unknown> };
-            select(cols: string): {
-              eq(
-                c: string,
-                v: unknown,
-              ): { maybeSingle(): Promise<{ data: { refresh_token?: string } | null }> };
-            };
-          };
-        };
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const db = supabaseAdmin as any;
 
-        await db
-          .from("google_tokens")
-          .update({
+        // The person's one row: made the first time, updated after.
+        await db.from("google_tokens").upsert(
+          {
+            id: 1,
             access_token: token.access_token,
             expires_at: expiryFrom(token.expires_in),
             scope: token.scope ?? null,
@@ -79,15 +79,12 @@ export const Route = createFileRoute("/api/public/google/callback")({
             // Google issues a refresh token only at first consent. Never
             // overwrite a working one with the null a later grant returns.
             ...(token.refresh_token ? { refresh_token: token.refresh_token } : {}),
-          })
-          .eq("id", 1);
+          },
+          { onConflict: "id" },
+        );
 
         if (!token.refresh_token) {
-          const { data } = await db
-            .from("google_tokens")
-            .select("refresh_token")
-            .eq("id", 1)
-            .maybeSingle();
+          const { data } = await db.from("google_tokens").select("refresh_token").eq("id", 1).maybeSingle();
           if (!data?.refresh_token) {
             return back(
               "Google did not return a refresh token, so access would expire within the hour. " +
