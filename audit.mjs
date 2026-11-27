@@ -50,6 +50,13 @@ async function main() {
   // What came back first, the evidence last: the end of the log is what is read.
   if (sent.length >= 20) for (const line of outcomeLines(outcomes(corrected))) console.log(line);
   for (const l of lines) console.log(l);
+  // Sent against the person's own bar for sending without being asked.
+  const [cfg] = (await db("search_config?select=auto_apply_score,review_score&limit=1").catch(() => [])) ?? [];
+  if (cfg?.auto_apply_score != null) {
+    const under = sent.filter((j) => j.score != null && j.score < cfg.auto_apply_score);
+    const day = under.filter((j) => Date.now() - new Date(j.applied_at ?? 0).getTime() < 24 * 3_600_000).length;
+    console.log(`the bar for sending unasked is ${cfg.auto_apply_score} (to review: ${cfg.review_score}); sent under it: ${under.length} of ${sent.length}, ${day} of them in the last day`);
+  }
   if (failures.length) {
     for (const f of failures) console.log(`WRONG: ${f}`);
     process.exitCode = 1;

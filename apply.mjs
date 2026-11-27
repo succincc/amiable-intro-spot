@@ -4976,6 +4976,7 @@ const USED_CODES = new Set();
 const CODE_ASKED = new Set();
 async function waitForVerificationCode(host, company, attempts = 6, gapMs = 10_000, since = null) {
   CODE_ASKED.add(String(company ?? "").toLowerCase().trim());
+  used("emailed code asked for");
   const base = (process.env.APP_URL || "https://applynow.lol").replace(/\/+$/, "");
   const key = process.env.ENGINE_API_KEY;
   if (!key) {
@@ -5011,6 +5012,7 @@ async function waitForVerificationCode(host, company, attempts = 6, gapMs = 10_0
         }
         USED_CODES.add(code);
         console.log(`    got the code from the inbox`);
+        used("emailed code read");
         return code;
       }
     } catch (e) {
@@ -6906,6 +6908,10 @@ const STOPS = [];
 // For each job of this run: how its resume matched the posting, and what it could not show.
 const ATS_REPORT = new Map();
 // The last look at each resume of this run, counted, for the line at the end.
+// How often each newer part of the engine was reached in this run, for one
+// line at its end: a part that never runs in an ordinary run is not a part.
+const USED = {};
+const used = (what, n = 1) => { USED[what] = (USED[what] ?? 0) + n; };
 const LAST_LOOK = { resumes: 0, tidied: 0, ownInstead: 0, contactAdded: 0, pdfRead: 0, pdfBad: 0, required: [] };
 
 // Hosts whose inbox has already been checked for a verification link.
@@ -7742,7 +7748,7 @@ async function answerFromResume(question, options, profile, job) {
   if (!options.length) return null;
   if (!process.env.GEMINI_API_KEY) return rangeOption(q, options, profile) ?? evidenceOption(q, options, resume);
 
-  const reply = await chooseOption({
+  const reply = await (used("model asked to pick from a list"), chooseOption)({
     question: q,
     options,
     resume,
@@ -9204,10 +9210,10 @@ async function applyToJobOnce(context, job, profile, answers) {
         const direct = answerQuestion(label, profile) ?? lookupSaved(label) ?? fieldValue(label, profile);
         if (direct !== null && direct !== undefined && String(direct).trim() !== "") return String(direct).trim();
         if (Array.isArray(options) && options.length) {
-          const picked = await chooseOption(label, options, profile, job).catch(() => null);
+          const picked = await (used("model asked to pick from a list"), chooseOption)(label, options, profile, job).catch(() => null);
           if (picked) return String(picked).trim();
         }
-        const gen = await generateAnswer(label, profile, job, fieldType).catch(() => null);
+        const gen = await (used("model asked for an answer"), generateAnswer)(label, profile, job, fieldType).catch(() => null);
         return gen ? String(gen).trim() : null;
       };
       const boardRes = await applyBoardJob(page, boardPlatform, job, {
@@ -11144,7 +11150,7 @@ async function applyToJobOnce(context, job, profile, answers) {
               }
             }
             const written = process.env.GEMINI_API_KEY
-              ? await generateAnswer({
+              ? await (used("model asked for an answer"), generateAnswer)({
                   question: label,
                   job,
                   resume: profile?.resume_text,
@@ -12908,6 +12914,7 @@ async function applyToJobOnce(context, job, profile, answers) {
  * answer must always win over this.
  */
 async function saveGeneratedAnswer(question, answer, fieldType) {
+  used(fieldType === "choice" ? "list pick kept for next time" : "written answer kept for next time");
   const key = String(question).toLowerCase()
     .replace(/[^\w\s]/g, " ").replace(/\s+/g, " ").trim().slice(0, 200);
   if (key.length < 4) return;
@@ -13036,7 +13043,7 @@ async function refreshAnswers(profile) {
           if (want) { assumed = true; tallyHow.assumed++; }
           else if (options.length && options.length <= 40 && !NEVER_INFER.test(plain) && process.env.GEMINI_API_KEY && profile?.resume_text && modelAsked < 80 && modelFailed < 3) {
             modelAsked++;
-            const reply = await chooseOption({ question: plain, options, resume: profile.resume_text, apiKey: process.env.GEMINI_API_KEY }).catch(() => { modelFailed++; return null; });
+            const reply = await (used("model asked to pick from a list"), chooseOption)({ question: plain, options, resume: profile.resume_text, apiKey: process.env.GEMINI_API_KEY }).catch(() => { modelFailed++; return null; });
             want = reply ? options.find((o) => norm(o) === norm(reply)) ?? null : null;
             if (want) { assumed = true; tallyHow.read++; }
           }
@@ -13291,7 +13298,7 @@ const main = async () => {
   const APPLIED_JOBS = new Set();
   {
     for (let from = 0; from < 20000; from += 1000) {
-      const rows = (await db(`jobs?or=(status.eq.applied,help_reason.eq.unconfirmed)&select=title,company,location&order=id.asc&offset=${from}&limit=1000`).catch(() => null)) ?? [];
+      const rows = (await db(`jobs?or=(status.in.(applied,interview,offer,rejected),help_reason.eq.unconfirmed)&select=title,company,location&order=id.asc&offset=${from}&limit=1000`).catch(() => null)) ?? [];
       for (const r of rows) { const k = jobKey(r); if (k) APPLIED_JOBS.add(k); }
       if (rows.length < 1000) break;
     }
@@ -13692,6 +13699,24 @@ const main = async () => {
               // Marked before the claim is asked for, not after it comes
               // back: two workers that looked in the same instant each saw
               // the employer free, and two codes were emailed for it.
+              // One more look at the record itself, at the last moment. The
+              // list above was read when this run began, and another run —
+              // a different lane, started a minute later — keeps its own.
+              // An audit found one job sent twice inside two days.
+              {
+                const k = jobKey(row);
+                const others = k && row.company
+                  ? ((await db(`jobs?company=eq.${encodeURIComponent(row.company)}&status=in.(applied,applying,interview,offer,rejected)&id=neq.${row.id}&select=status,title,company,location&limit=200`).catch(() => null)) ?? [])
+                  : [];
+                const same = others.filter((o) => jobKey(o) === k);
+                if (same.some((o) => o.status !== "applying")) {
+                  APPLIED_JOBS.add(k);
+                  sameJobSkipped++;
+                  await patchJob(row.id, { status: "skipped", skip_reason: "the same role at this employer in this place was already applied to", updated_at: new Date().toISOString() }).catch(() => {});
+                  continue;
+                }
+                if (same.length) continue; // in another run's hands right now
+              }
               CLAIMING.add(companyOf(row));
               const won =
                 (await db(`jobs?id=eq.${row.id}&status=eq.queued`, {
@@ -13969,6 +13994,10 @@ const main = async () => {
       const r = LAST_LOOK.required;
       console.log(`last look at ${LAST_LOOK.resumes} resume(s): ${LAST_LOOK.tidied} tidied, ${LAST_LOOK.ownInstead} sent as the person's own because the written one claimed something of its own, ${LAST_LOOK.contactAdded} given an email or phone number; PDFs read back ${LAST_LOOK.pdfRead - LAST_LOOK.pdfBad} of ${LAST_LOOK.pdfRead}${LAST_LOOK.pdfRead ? "" : " (no reader on this machine)"}; required qualifications covered, by this system's own estimate: ${r.length ? `${Math.round(r.reduce((a, b) => a + b, 0) / r.length)}% on average, lowest ${Math.min(...r)}%` : "not measured"}`);
     }
+    if (sameJobSkipped) used("same job under another address set aside", sameJobSkipped);
+    if (ATS_REPORT.size) used("requirements report kept", ATS_REPORT.size);
+    for (const [k, v] of Object.entries(TAILORED)) if (v) used(`resume ${k}`, v);
+    console.log(`parts of the engine reached this run: ${Object.keys(USED).length ? JSON.stringify(USED) : "none of the counted ones"}`);
     if (STOPS.length) console.log(`what stopped them, one line each:\n${STOPS.map((x) => "  - " + x).join("\n")}`);
 
     // Where things stand, at the end where it is read: what is still waiting
