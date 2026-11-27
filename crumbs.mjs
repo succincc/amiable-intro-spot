@@ -61,7 +61,7 @@ const plain = (t) => String(t ?? "").replace(/[\w.+-]+@[\w.-]+/g, "[address]").r
 const [mail] = (await db("email_sync?id=eq.1&select=*").catch(() => [])) ?? [];
 if (mail) {
   const age = mail.last_run_at ? Math.round((Date.now() - Date.parse(mail.last_run_at)) / 60000) : null;
-  console.log(`mailbox: last read ${age === null ? "never" : `${age} min ago`}; fields ${Object.keys(mail).filter((k) => k !== "user_id").join(",")}; last error: ${mail.last_error ? plain(mail.last_error) : "none"}`);
+  console.log(`mailbox: last read ${age === null ? "never" : `${age} min ago`}; fields ${Object.keys(mail).filter((k) => k !== "user_id").join(",")}; last status: ${plain(mail.last_status ?? "none")}; last error: ${mail.last_error ? plain(mail.last_error) : "none"}`);
 } else console.log("mailbox: no record of a reading");
 const [tok] = (await db("google_tokens?id=eq.1&select=connected_at,updated_at").catch(() => [])) ?? [];
 console.log(`gmail: ${tok ? `connected ${tok.connected_at ? Math.round((Date.now() - Date.parse(tok.connected_at)) / 3600000) + "h ago" : "at an unrecorded time"}` : "no connection on file"}`);

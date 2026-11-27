@@ -181,6 +181,7 @@ async function tick() {
   try {
     if (await claim(everybody, "mail", MAIL_EVERY_MIN)) {
       let done = 0;
+      let firstFailure: string | null = null;
       for (const uid of people) {
         if (done > 0 && Date.now() - began > ROOM_MS) break;
         try {
@@ -188,11 +189,22 @@ async function tick() {
           // The counts reported are the first person's, as they always were.
           if (done === 0) out.counts = counts;
         } catch (e) {
-          if (done === 0) throw e;
+          // A mailbox that could not be read says so on its own record, where
+          // its person and the health check can see it. It used to be said
+          // only to whichever caller happened to take the turn — and when it
+          // was the first person's, nobody after them was read at all: one
+          // mailbox went five hours unread behind "mail: not due".
+          const why = String((e as Error)?.message ?? e).replace(/[\w.+-]+@[\w.-]+/g, "[address]").slice(0, 300);
+          if (done === 0) firstFailure = why;
+          try {
+            await forUser(everybody, uid).from("email_sync").update({ last_status: "failed", last_error: why }).eq("id", 1);
+          } catch {
+            /* the note is a courtesy; the next person is still read */
+          }
         }
         done++;
       }
-      out.mail = "done";
+      out.mail = firstFailure ? `failed: ${firstFailure.slice(0, 80)}` : "done";
       if (people.length > 1) out.people = `${done} of ${people.length}`;
     }
   } catch (e) {
