@@ -7060,6 +7060,8 @@ const MODEL_FAILURES = new Set();
 const selfIdSeen = new Set();
 // What was worked out for a group of pick-one buttons, by the group's name.
 const RADIO_PICKS = new Map();
+// Jobs whose phone box has been typed into again, key by key, once.
+const RETYPED = new Set();
 
 /**
  * "How many accounts were in your most recent book?" over "Under 50",
@@ -9412,7 +9414,16 @@ async function applyToJobOnce(context, job, profile, answers) {
           // required" to a form with everything else on it. The number is
           // typed in, key by key, as the pattern expects.
           // The same where it holds only a country's dialling code: "+1".
-          if (type === "tel" && existing && existing.trim() && existing.replace(/\D/g, "").length < 7) {
+          // And on ADP, where a number put into the box whole is shown and
+          // not taken: its component listens for keys. Typed again, once.
+          const adpPhone = type === "tel" && /(^|\.)adp\.com$/i.test(hostOf(page.url()) ?? "") && !RETYPED.has(job.id);
+          if (adpPhone) {
+            RETYPED.add(job.id);
+            await el.click({ timeout: 3000 }).catch(() => {});
+            await page.keyboard.press("Control+A").catch(() => {});
+            await page.keyboard.press("Backspace").catch(() => {});
+          }
+          if (type === "tel" && (adpPhone || (existing && existing.trim() && existing.replace(/\D/g, "").length < 7))) {
             const digits = String(profile.phone ?? "").replace(/\D/g, "").replace(/^1(?=\d{10}$)/, "");
             if (digits) {
               await el.click({ timeout: 3000 }).catch(() => {});
