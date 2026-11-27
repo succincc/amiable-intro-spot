@@ -55,4 +55,22 @@ console.log(`search: ${(cfg?.titles ?? []).length} title(s), ${(cfg?.exclude_tit
 const cos = (await db("companies?select=ats&limit=2000").catch(() => [])) ?? [];
 const by = {}; for (const c of cos) by[c.ats] = (by[c.ats] ?? 0) + 1;
 console.log(`employers by system: ${JSON.stringify(by)}`);
+// The mailbox: when it was last read and what the last reading said, with
+// anything that looks like an address taken out.
+const plain = (t) => String(t ?? "").replace(/[\w.+-]+@[\w.-]+/g, "[address]").replace(/\s+/g, " ").slice(0, 160);
+const [mail] = (await db("email_sync?id=eq.1&select=*").catch(() => [])) ?? [];
+if (mail) {
+  const age = mail.last_run_at ? Math.round((Date.now() - Date.parse(mail.last_run_at)) / 60000) : null;
+  console.log(`mailbox: last read ${age === null ? "never" : `${age} min ago`}; fields ${Object.keys(mail).filter((k) => k !== "user_id").join(",")}; last error: ${mail.last_error ? plain(mail.last_error) : "none"}`);
+} else console.log("mailbox: no record of a reading");
+const [tok] = (await db("google_tokens?id=eq.1&select=connected_at,updated_at").catch(() => [])) ?? [];
+console.log(`gmail: ${tok ? `connected ${tok.connected_at ? Math.round((Date.now() - Date.parse(tok.connected_at)) / 3600000) + "h ago" : "at an unrecorded time"}` : "no connection on file"}`);
+const beats = (await db("heartbeat?select=name,at").catch(() => [])) ?? [];
+console.log(`turns last taken (min ago): ${JSON.stringify(Object.fromEntries(beats.map((b) => [b.name, Math.round((Date.now() - Date.parse(b.at)) / 60000)])))}`);
+if (!process.env.AP_ACT_AS) {
+  try {
+    const res = await fetch("https://applynow.lol/api/public/cron/tick", { method: "POST", signal: AbortSignal.timeout(60_000) });
+    console.log(`tick: HTTP ${res.status} ${plain(await res.text())}`);
+  } catch (e) { console.log(`tick: ${plain(e?.message ?? e)}`); }
+}
 process.exit(0);
