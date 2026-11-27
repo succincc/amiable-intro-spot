@@ -163,6 +163,20 @@ export function requirementTerms(posting, limit = 40, company = "") {
     .map(([term, weight]) => ({ term, weight }));
 }
 
+/**
+ * The rules a coverage figure rests on, as one short code. Two figures are
+ * comparable only when this is the same for both. A change to the lists or
+ * the proofs changes it, a test notices, and the change is then reported
+ * with its effect instead of slipping into the numbers.
+ */
+export const BENCHMARK_METHOD = "named-v1 (27 Nov 2026)";
+export function methodFingerprint() {
+  const text = JSON.stringify([EVIDENCE.map((e) => [e.term, String(e.proof)]), ACRONYMS, [...STOP].sort()]);
+  let h = 2166136261;
+  for (let i = 0; i < text.length; i++) { h ^= text.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
+  return h.toString(16).padStart(8, "0");
+}
+
 /** Whether a term is one of the named skills, tools or credentials, rather than a frequent word. */
 export function isNamedTerm(term) {
   const t = String(term ?? "").toLowerCase();
@@ -208,7 +222,9 @@ export function coverage(resumeText, terms) {
  * reported as a gap, which is the honest answer and the useful one: it tells
  * the candidate what the job wants that they have not shown.
  */
-export function alignToPosting(resumeText, posting, company = "") {
+export function alignToPosting(resumeText, posting, company = "", confirmed = []) {
+  // What the person has themselves confirmed, beyond the page (candidate.mjs).
+  const said = new Set((confirmed ?? []).map((t) => String(t?.term ?? t).toLowerCase()));
   const resume = String(resumeText ?? "");
   if (!resume.trim() || !String(posting ?? "").trim()) {
     return { text: resume, added: [], gaps: [] };
@@ -221,6 +237,10 @@ export function alignToPosting(resumeText, posting, company = "") {
   const added = [];
   const gaps = [];
   for (const term of before.missing) {
+    if (said.has(String(term).toLowerCase())) {
+      added.push(EVIDENCE.find((e) => e.term.toLowerCase() === String(term).toLowerCase())?.term ?? term);
+      continue;
+    }
     const rule = EVIDENCE.find((e) => e.term.toLowerCase() === term.toLowerCase());
     if (rule && rule.proof.test(resume)) {
       added.push(rule.term);

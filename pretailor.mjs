@@ -193,6 +193,16 @@ if (process.env.PRETAILOR_IMPORT_ONLY !== "1") {
   } catch {
     roles = "";
   }
+  // What the person has confirmed about themselves beyond the resume
+  // (candidate.mjs): theirs, in their words, and so the writer's to use.
+  try {
+    const { confirmedQualifications, qualificationLines } = await import("./candidate.mjs");
+    const said = confirmedQualifications((await db("answers?confirmed=eq.true&question=ilike.About%20you:*&select=q_key,answer,confirmed&limit=200")) ?? []);
+    if (said.length) {
+      roles = [roles, `ALSO CONFIRMED BY THE CANDIDATE, IN THEIR OWN WORDS\n${qualificationLines(said)}`].filter(Boolean).join("\n\n");
+      console.log(`the writer also has ${said.length} qualification(s) the person confirmed beyond the resume`);
+    }
+  } catch { /* the page of answers could not be read: the resume stands alone */ }
 
   // Where postings are being set aside over a location that could not be
   // read. These are employers' own place names, not anything of the owner's,

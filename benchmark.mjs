@@ -14,7 +14,7 @@
  */
 import { guardLogs } from "./quiet.mjs";
 import { requirementReport, unsupportedClaims, writingFindings, segmentPosting } from "./quality.mjs";
-import { requirementTerms, isNamedTerm, showsTerm } from "./ats.mjs";
+import { requirementTerms, isNamedTerm, showsTerm, BENCHMARK_METHOD, methodFingerprint } from "./ats.mjs";
 guardLogs();
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -123,6 +123,7 @@ export function whereLines(o) {
 export function compareLines(o) {
   if (!o.read) return [`resume benchmark: no posting on record has both a written resume and requirements that could be read (${o.noRequirements} had no requirements to read)`];
   return [
+    `resume benchmark, method ${BENCHMARK_METHOD}, rules ${methodFingerprint()} — figures compare only with others under the same two`,
     `resume benchmark over ${o.read} posting(s), the person's own resume against the one written for each, same postings, same measure:`,
     o.nBefore?.length ? `  named skills, tools and credentials shown (${o.nBefore.length} posting(s) name three or more) — own: ${mean(o.nBefore)}% on average (lowest ${Math.min(...o.nBefore)}%); written: ${mean(o.nAfter)}% (lowest ${Math.min(...o.nAfter)}%); written shows more on ${o.nBetter ?? 0}, fewer on ${o.nWorse ?? 0}` : `  no posting named three or more skills, tools or credentials`,
     `  all frequent terms of the posting, most of which are not qualifications — own: ${mean(o.before)}% on average (middle ${median(o.before)}%, lowest ${Math.min(...o.before)}%); written: ${mean(o.after)}% (middle ${median(o.after)}%, lowest ${Math.min(...o.after)}%)`,

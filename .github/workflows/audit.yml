@@ -41,6 +41,14 @@ jobs:
           APPLYPILOT_EMAIL: ${{ secrets.APPLYPILOT_EMAIL }}
           APPLYPILOT_PASSWORD: ${{ secrets.APPLYPILOT_PASSWORD }}
         run: node forusers.mjs benchmark.mjs
+      - name: What postings ask for that the profile does not show, put to the person
+        if: always()
+        env:
+          SUPABASE_URL: https://inqhfkshqndkxyztzita.supabase.co
+          SUPABASE_ANON_KEY: sb_publishable_QK4kidijM8nk46uK6L22Qw_XA0RQu5U
+          APPLYPILOT_EMAIL: ${{ secrets.APPLYPILOT_EMAIL }}
+          APPLYPILOT_PASSWORD: ${{ secrets.APPLYPILOT_PASSWORD }}
+        run: node forusers.mjs gaps.mjs
       - name: In one line each
         if: always()
         run: grep -h "^DIGEST\|^WRONG" "$RUNNER_TEMP/audit.txt" || true

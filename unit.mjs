@@ -616,5 +616,37 @@ quiet.hideJob({ company: "ZQ" });
   ], [3, 3, 0, true, true]);
 }
 
+{
+  // What a person confirms about themselves: asked, never assumed.
+  const c = await import("./candidate.mjs");
+  const a = await import("./ats.mjs");
+  const g = await import("./gaps.mjs");
+  const rows = [
+    { q_key: c.qualKey("SQL"), answer: "Yes - wrote the weekly sales queries", confirmed: true },
+    { q_key: c.qualKey("Python"), answer: "No", confirmed: true },
+    { q_key: c.qualKey("compliance"), answer: "", confirmed: false },
+    { q_key: "do you have experience with sql", answer: "Yes", confirmed: true },
+  ];
+  const said = c.confirmedQualifications(rows);
+  const asked = c.askedQualifications(rows);
+  const posting = "Requirements:\n- SQL and Python for reporting\n- compliance experience\n" + "We serve customers every day. ".repeat(12);
+  const resume = "Sam Fixture\n\nEXPERIENCE\nRan the shop floor and the rota.";
+  const without = a.alignToPosting(resume, posting, "X");
+  const withIt = a.alignToPosting(resume, posting, "X", said);
+  const gaps = g.gapsOf(resume, [{ description: posting }, { description: posting }, { description: posting }]);
+  check("candidate: only a Yes from the person adds a qualification; a No and an unanswered one add nothing; a gap is counted to be asked about", [
+    said.map((q) => q.term), said[0].detail, [asked.get("sql"), asked.get("python"), asked.get("compliance")],
+    /sql/i.test(without.text), /sql/i.test(withIt.text), /python/i.test(withIt.text), /compliance/i.test(withIt.text),
+    gaps.gaps.find(([t]) => t === "sql")?.[1], c.qualQuestion("SQL", 3).startsWith(c.ABOUT_YOU),
+  ], [["sql"], "wrote the weekly sales queries", ["yes", "no", "waiting"], false, true, false, false, 3, true]);
+
+  // The rules the coverage figures rest on. If this fails, the lists or the
+  // proofs in ats.mjs changed: that changes every figure after it. Give
+  // BENCHMARK_METHOD a new name, run the benchmark before and after on the
+  // same postings, report the difference on its own, and only then update
+  // the two values here.
+  check("benchmark method: the rules have not changed without being named", [a.BENCHMARK_METHOD, a.methodFingerprint()], ["named-v1 (27 Nov 2026)", "5ec1a89f"]);
+}
+
 console.log(failed ? `unit: ${failed} failed, ${passed} passed.` : `unit: all ${passed} passed.`);
 process.exit(failed ? 1 : 0);

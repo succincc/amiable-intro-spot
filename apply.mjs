@@ -37,6 +37,7 @@ import { fromProfile } from "./fromprofile.mjs";
 import { useOwnKey } from "./ownkey.mjs";
 import { isCoverLetter, writeCoverLetter } from "./coverletter.mjs";
 import { jobKey } from "./samejob.mjs";
+import { confirmedQualifications, qualificationLines } from "./candidate.mjs";
 import { GONE_RE } from "./gone.mjs";
 import { tidyWriting, unsupportedClaims, documentCheck, requirementReport } from "./quality.mjs";
 import { BOARD_HOSTS, applyStealth, detectBoardPlatform } from "./major-boards-selectors.mjs";
@@ -6466,7 +6467,7 @@ function lastResort(label, p, job) {
   {
     const m = l.match(/^\s*do you have (?:any |prior |previous |direct |professional |hands-on )*experience (?:with|in|within|using|working (?:with|in))\s+([a-z0-9][a-z0-9 .&/,+-]{1,70}?)\s*\*?\s*(\?|$)/i);
     if (m && !NEVER_INFER.test(l)) {
-      const text = ` ${String(p?.resume_text ?? "").toLowerCase().replace(/[^a-z0-9+#]+/g, " ")} `;
+      const text = ` ${`${p?.resume_text ?? ""} ${CONFIRMED_QUALS.map((q) => q.term).join(" ")}`.toLowerCase().replace(/[^a-z0-9+#]+/g, " ")} `;
       const things = m[1].toLowerCase().split(/\s*(?:,|\/|\bor\b|\band\b|&)\s*/).map((t) => t.replace(/[^a-z0-9+# ]+/g, " ").replace(/\s+/g, " ").trim()).filter((t) => t.length > 1);
       // The phrase as written, or each of its words somewhere: "B2B SaaS"
       // is on a resume that says "SaaS" in one line and "B2B" in another.
@@ -6912,6 +6913,9 @@ const ATS_REPORT = new Map();
 // line at its end: a part that never runs in an ordinary run is not a part.
 const USED = {};
 const used = (what, n = 1) => { USED[what] = (USED[what] ?? 0) + n; };
+// What the person has confirmed about themselves beyond the resume
+// (candidate.mjs): read once a round from their answers.
+let CONFIRMED_QUALS = [];
 const LAST_LOOK = { resumes: 0, tidied: 0, ownInstead: 0, contactAdded: 0, pdfRead: 0, pdfBad: 0, required: [] };
 
 // Hosts whose inbox has already been checked for a verification link.
@@ -8358,7 +8362,7 @@ async function attachResumeOnly(context, page, form, profile, job) {
   // for experience the resume already evidences. Nothing is added that the
   // candidate's own text does not prove, and what is missing is reported as
   // a gap rather than written in.
-  const aligned = alignToPosting(resumeText, job.description ?? "", job.company ?? "");
+  const aligned = alignToPosting(resumeText, job.description ?? "", job.company ?? "", CONFIRMED_QUALS);
   if (aligned.after !== undefined) ATS_REPORT.set(job.id, { match: aligned.after, gaps: (aligned.gaps ?? []).slice(0, 12) });
   if (aligned.added.length || aligned.before !== undefined) {
     console.log(
@@ -8374,7 +8378,7 @@ async function attachResumeOnly(context, page, form, profile, job) {
   // is not sent; the candidate's resume as they wrote it goes instead.
   let finalText = aligned.text || resumeText;
   const ownMaterial = [
-    profile?.resume_text, ROLES,
+    profile?.resume_text, ROLES, qualificationLines(CONFIRMED_QUALS),
     profile?.full_name, profile?.email, profile?.phone, profile?.address, profile?.city, profile?.state, profile?.postal_code, profile?.linkedin_url, profile?.website,
   ].filter(Boolean).join("\n");
   try {
@@ -8384,7 +8388,7 @@ async function attachResumeOnly(context, page, form, profile, job) {
     const claims = unsupportedClaims(finalText, ownMaterial);
     if (claims.length) {
       const own = standardResume(profile?.resume_text, profile) || String(profile?.resume_text ?? "");
-      const again = alignToPosting(own, job.description ?? "", job.company ?? "");
+      const again = alignToPosting(own, job.description ?? "", job.company ?? "", CONFIRMED_QUALS);
       const plain = tidyWriting(again.text || own).text;
       if (plain.trim() && !unsupportedClaims(plain, ownMaterial).length) {
         console.log(`    the resume written for this posting carried ${claims.length} thing(s) not in the candidate's own material; their own resume goes instead`);
@@ -8398,7 +8402,7 @@ async function attachResumeOnly(context, page, form, profile, job) {
     // for the posting, names more, that goes instead.
     if ((job.description ?? "").length > 300) {
       const own = standardResume(profile?.resume_text, profile) || String(profile?.resume_text ?? "");
-      const plain = tidyWriting(alignToPosting(own, job.description ?? "", job.company ?? "").text || own).text;
+      const plain = tidyWriting(alignToPosting(own, job.description ?? "", job.company ?? "", CONFIRMED_QUALS).text || own).text;
       // By the named skills, tools and credentials where the posting names
       // three or more; by every frequent term otherwise.
       const ra = requirementReport(finalText, job.description, job.company ?? "");
@@ -9015,7 +9019,9 @@ async function ensureTailored(job, profile) {
   const made = await tailorResume({
     job,
     profile,
-    roles: await allRoles(),
+    // The roles as the person wrote them out, and what they have confirmed
+    // about themselves beyond the page. Both are theirs; neither is guessed.
+    roles: [await allRoles(), CONFIRMED_QUALS.length ? `ALSO CONFIRMED BY THE CANDIDATE, IN THEIR OWN WORDS\n${qualificationLines(CONFIRMED_QUALS)}` : ""].filter(Boolean).join("\n\n"),
     apiKey: process.env.GEMINI_API_KEY,
   }).catch((e) => ({ text: null, why: String(e?.message ?? e).slice(0, 40) }));
   if (!made.text) {
@@ -13009,7 +13015,9 @@ async function refreshAnswers(profile) {
       await db(`answers?id=eq.${row.id}`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ answer: want }) }).then(() => brought++).catch(() => {});
     }
   }
-  const rows = await db("answers?confirmed=eq.false&select=id,question,options&limit=500").catch(() => null);
+  // Not the questions about the person themselves (candidate.mjs): those
+  // are theirs alone to answer, never the rules' and never the model's.
+  const rows = await db("answers?confirmed=eq.false&question=not.ilike.About%20you:*&select=id,question,options&limit=500").catch(() => null);
   if (!rows?.length) {
     if (brought) {
       console.log(`Answers page: ${brought} saved answer(s) brought in line with the profile.`);
@@ -13443,7 +13451,13 @@ const main = async () => {
       }).catch(() => null)) ?? [];
     if (back.length) console.log(`rehearsed, never sent: ${back.length} posting(s) put back in the queue.`);
   }
-  const answers = await db("answers?confirmed=eq.true&select=q_key,answer") ?? [];
+  const everyAnswer = await db("answers?confirmed=eq.true&select=q_key,answer") ?? [];
+  CONFIRMED_QUALS = confirmedQualifications(everyAnswer);
+  // Those are about the person, not answers to a form's question: kept out
+  // of what is matched against forms, so a line of theirs is never typed
+  // into a box that wanted Yes or No.
+  const answers = everyAnswer.filter((a) => !/^about you /i.test(String(a.q_key ?? "")));
+  if (CONFIRMED_QUALS.length) used("qualification the person confirmed beyond the resume", CONFIRMED_QUALS.length);
 
   // Adopt the row the panel opened when it dispatched this run.
   //
