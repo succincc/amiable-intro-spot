@@ -421,7 +421,15 @@ function answerQuestion(label, p) {
   if (has(label, "authorized to work", "legally authorized", "work authorization",
                  "legal authorization", "authorization to work", "authorised to work",
                  "eligible to work", "right to work")) return p.work_authorized;
-  if (has(label, "sponsorship", "visa", "h-1b", "h1b", "work permit")) return p.needs_sponsorship;
+  if (has(label, "sponsorship", "visa", "h-1b", "h1b", "work permit")) {
+    // A citizen of the United States needs nobody's sponsorship to work in
+    // it: where the box in the panel was left alone, the citizenship on
+    // file answers, and only for work in the United States.
+    const said = p.needs_sponsorship;
+    if (said !== null && said !== undefined && String(said).trim() !== "") return said;
+    const elsewhere = /\b(canada|canadian|united kingdom|uk|europe|eu|australia|india|mexico)\b/i.test(String(label));
+    return /^united states/i.test(String(p.citizenship ?? "").trim()) && !elsewhere ? "No" : said;
+  }
   // "Are you 18 or over?" has as many wordings as there are forms. Where the
   // panel holds no answer, a resume that shows a finished college degree
   // settles it; nothing else is taken as proof.
@@ -5120,6 +5128,16 @@ async function findSubmit(page, frame) {
       }
     }
   }
+  // A link dressed as the button. One careers site took eighteen answers and
+  // offered "SUBMIT APPLICATION" as an <a>; only its exact words are taken,
+  // since a link that merely says "apply" goes somewhere else.
+  for (const root of [frame, page]) {
+    for (const el of (await root.$$('a, [role=button], div[onclick], span[onclick]').catch(() => [])).slice(0, 200)) {
+      const text = ((await el.innerText().catch(() => "")) || "").replace(/\s+/g, " ").trim();
+      if (!/^(submit|submit (my |your |the )?application|send (my |your )?application)$/i.test(text)) continue;
+      if (await el.isVisible().catch(() => false)) return el;
+    }
+  }
   // SuccessFactors draws its "Apply" as a link or a span, not a button the
   // usual search knows. By its exact word, then; and where even that finds
   // nothing, what the page does offer is written down once.
@@ -6141,6 +6159,12 @@ function defaultYesNo(label, p) {
     }
   }
 
+  // "Have you led account managers, as a manager or a team lead?" What the
+  // resume shows of leading anyone.
+  if (/\bhave you (ever |previously )?(led|managed|supervised|mentored|coached|trained)\b/.test(l)) {
+    return /\b(supervis\w*|manag(ed|er|ing)\w*|team lead\w*|led (a|the) team|director|mentor\w*|coach\w*|train(ed|ing) (new|staff|team|employees))\b/.test(resume) ? "Yes" : "No";
+  }
+
   // Conflicts, restrictions and adverse history: No.
   if (/relationship|relative|related to|family member|financial interest|conflict of interest|non-?compete|restrictive covenant|subject to any|convicted|felony|misdemeanor|terminated|discharged|dismissed|disciplin|debarr|sanction|suspended|revoked|lawsuit|bankrupt|government official|require (visa )?sponsorship|represented by|recruiting agency|staffing agency|third.party recruiter/.test(l)) {
     return "No";
@@ -6945,6 +6969,37 @@ async function workAnswer(label, profile, job) {
 const MODEL_FAILURES = new Set();
 const selfIdSeen = new Set();
 
+/**
+ * "How many accounts were in your most recent book?" over "Under 50",
+ * "50 to 150", "150 to 300", "300+": a list that is nothing but sizes.
+ *
+ * Asked on a day the model is not answering. Where the question is plainly
+ * about years of work, the years on file choose the line they fall on. For
+ * any other count, the smallest line is taken — the one claim on the list
+ * that cannot overstate anything — and it is printed as assumed.
+ */
+function rangeOption(question, options, profile) {
+  const q = String(question ?? "").toLowerCase();
+  if (!/\bhow (many|much|long)\b|\bnumber of\b|\byears? of\b|\bsize of\b/.test(q)) return null;
+  const spans = options.map((o) => {
+    const t = String(o).toLowerCase().replace(/,/g, "");
+    const n = (t.match(/\d+(?:\.\d+)?/g) ?? []).map(Number);
+    if (!n.length) return /^(none|no experience)\b/.test(t.trim()) ? [0, 0] : null;
+    if (/\b(under|less than|fewer than|below|up to)\b|^\s*</.test(t)) return [0, n[0]];
+    if (/\+|\b(or more|more than|over|above|at least)\b|>/.test(t)) return [n[0], Infinity];
+    return n.length >= 2 ? [n[0], n[1]] : [n[0], n[0]];
+  });
+  if (spans.length < 2 || spans.some((x) => !x)) return null;
+  const years = Number(profile?.years_experience ?? 0);
+  let i = -1;
+  if (years && /\b(total|overall|professional|work(ing)?)\b[^?]{0,20}\bexperience\b|years? of experience do you have\s*\??\s*$/.test(q)) {
+    i = spans.findIndex(([lo, hi]) => years >= lo && years <= hi);
+  }
+  if (i < 0) i = spans.reduce((best, x, k) => (x[0] < spans[best][0] || (x[0] === spans[best][0] && x[1] < spans[best][1]) ? k : best), 0);
+  console.log(`    assumed "${String(options[i]).slice(0, 24)}" for "${q.slice(0, 50)}"`);
+  return options[i];
+}
+
 async function answerFromResume(question, options, profile, job) {
   const q = String(question ?? "");
   if (!q || NEVER_INFER.test(q)) return null;
@@ -6959,7 +7014,8 @@ async function answerFromResume(question, options, profile, job) {
     }
   }
 
-  if (!process.env.GEMINI_API_KEY || !options.length) return null;
+  if (!options.length) return null;
+  if (!process.env.GEMINI_API_KEY) return rangeOption(q, options, profile);
 
   const reply = await chooseOption({
     question: q,
@@ -6976,7 +7032,7 @@ async function answerFromResume(question, options, profile, job) {
     }
     return null;
   });
-  if (!reply) return null;
+  if (!reply) return rangeOption(q, options, profile);
 
   // Accept it only if it is literally one of the employer's own options.
   // Anything else is the model writing its own answer onto a real
