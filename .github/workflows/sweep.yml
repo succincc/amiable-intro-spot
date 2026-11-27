@@ -44,9 +44,50 @@ permissions:
   contents: read
 
 jobs:
-  sweep:
+  # Who is in the line. Each person's sweep then runs as a job of its own,
+  # side by side: one after another, two people took thirty-four minutes of a
+  # forty-minute job, and thirty would never have finished. Nobody is named;
+  # a person is a place in the line.
+  people:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 10
+    outputs:
+      list: ${{ steps.line.outputs.list }}
+    steps:
+      - name: Count the line
+        id: line
+        env:
+          APP_URL: ${{ secrets.APP_URL || 'https://applynow.lol' }}
+          ENGINE_API_KEY: ${{ secrets.ENGINE_API_KEY }}
+        run: |
+          set -euo pipefail
+          list="0"
+          for PERSON in $(seq 1 60); do
+            there=$(curl -sS -o /tmp/there.json -w '%{http_code}' --max-time 30 \
+              -X POST "${APP_URL}/api/public/cron/sweep" \
+              -H "x-engine-key: ${ENGINE_API_KEY}" \
+              -H "x-person: ${PERSON}" \
+              -H "Content-Type: application/json" \
+              -d '{"only":"probe"}' || echo "000")
+            # A panel from before there was more than one person answers
+            # this like any other request; only one that says so in words
+            # has somebody at this place.
+            [ "${there}" = "200" ] && grep -q '"someone_here":true' /tmp/there.json 2>/dev/null || break
+            list="${list},${PERSON}"
+          done
+          echo "people in the line: $(echo "${list}" | tr ',' '\n' | wc -l)"
+          echo "list=[${list}]" >> "$GITHUB_OUTPUT"
+
+  sweep:
+    needs: people
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      # A few at a time: every one of these asks the panel's one server.
+      max-parallel: 4
+      matrix:
+        person: ${{ fromJSON(needs.people.outputs.list) }}
     steps:
       - name: Run discovery and scoring
         env:
@@ -141,32 +182,19 @@ jobs:
             [ "${good}" -gt 0 ]
           }
 
-          # The owner's round, as it has always run; a failure here fails the job.
-          PERSON=0
+          # This job's person: a place in the line, the owner at its head.
+          PERSON=${{ matrix.person }}
+          echo "==== person $((PERSON + 1)) ===="
           one_round
 
-          # Then each person the owner has approved, in turn. The panel is
-          # asked whether there is anyone at the next place in the line, and
-          # says no when the line has ended. Nobody is named: this log is public.
-          for PERSON in $(seq 1 60); do
-            there=$(curl -sS -o /tmp/there.json -w '%{http_code}' --max-time 30 \
-              -X POST "${APP_URL}/api/public/cron/sweep" \
-              -H "x-engine-key: ${ENGINE_API_KEY}" \
-              -H "x-person: ${PERSON}" \
-              -H "Content-Type: application/json" \
-              -d '{"only":"probe"}' || echo "000")
-            # A panel from before there was more than one person answers
-            # this like any other request; only one that says so in words
-            # has somebody at this place.
-            [ "${there}" = "200" ] && grep -q '"someone_here":true' /tmp/there.json 2>/dev/null || break
-            echo "==== person $((PERSON + 1)) ===="
-            one_round || echo "that person's round did not finish; the next is still done."
-          done
-
-      # What was just found is measured and applied to now, not a round from
-      # now. Each job used to wait for the clock: a posting found at noon was
-      # measured at three and applied to at six. Handing on costs the database
-      # nothing extra — it is awake for this stretch already.
+  # What was just found is measured and applied to now, not a round from
+  # now. Once, after everybody's sweep has ended.
+  handon:
+    needs: sweep
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
       - name: Hand on to measuring
         if: always()
         env:
