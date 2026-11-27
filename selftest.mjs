@@ -102,7 +102,11 @@ const PLAIN_FORM = `<!doctype html><html><head><title>Vendor Coordinator</title>
   <p><label for="last_name">Last Name *</label><input id="last_name" name="last_name" required></p>
   <p><label for="email">Email *</label><input id="email" name="email" type="email" required></p>
   <p><label for="phone">Phone *</label><input id="phone" name="phone" type="tel" required></p>
+  <!-- The letter's box comes FIRST, as it does on some real forms: the
+       resume must still land in the resume's box and the letter in this one. -->
+  <p><label for="cover_letter">Cover Letter</label><input id="cover_letter" name="cover_letter" type="file"></p>
   <p><label for="resume">Resume *</label><input id="resume" name="resume" type="file"></p>
+  <p><label for="cover_letter_text">Cover letter (optional)</label><textarea id="cover_letter_text" name="cover_letter_text"></textarea></p>
   <div role="alert" id="up" style="display:none"></div>
   <p><button type="submit">Submit</button></p>
 </form>
@@ -114,14 +118,31 @@ const PLAIN_FORM = `<!doctype html><html><head><title>Vendor Coordinator</title>
   });
   document.getElementById("f").addEventListener("submit", (e) => {
     e.preventDefault();
+    // What each box was given, told to the test's own server.
+    fetch("/plain/got", { method: "POST", body: JSON.stringify({
+      resume: document.getElementById("resume").files[0]?.name ?? null,
+      letterFile: document.getElementById("cover_letter").files[0]?.name ?? null,
+      letterText: document.getElementById("cover_letter_text").value,
+    }) }).catch(() => {});
     setTimeout(() => { document.body.innerHTML = "<h2>Application submitted</h2><p>We have received your application.</p>"; }, 7000);
   });
 </script>
 </body></html>`;
 
 let codeRequests = 0;
+let plainGot = null;
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, "http://x");
+  if (url.pathname === "/plain/got") {
+    let body = "";
+    req.on("data", (d) => (body += d));
+    req.on("end", () => {
+      try { plainGot = JSON.parse(body); } catch { plainGot = {}; }
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end("{}");
+    });
+    return;
+  }
   const send = (type, body, status = 200) => {
     res.writeHead(status, { "Content-Type": type });
     res.end(body);
@@ -213,7 +234,15 @@ const cases = [
       location: "Princeton, NJ",
       description: "Requirements: vendor management and scheduling.",
     },
-    check: () => null,
+    // The resume in the resume's box, a letter in each of the letter's, and
+    // the letter made of the applicant's own resume.
+    check: () =>
+      !plainGot ? "the form never said what it was given"
+      : !/_Resume_/.test(plainGot.resume ?? "") ? `the resume's box holds ${plainGot.resume ?? "nothing"}`
+      : !/_Cover_Letter_/.test(plainGot.letterFile ?? "") ? `the cover letter's upload holds ${plainGot.letterFile ?? "nothing"}`
+      : !/^Dear Hiring Manager,/.test(plainGot.letterText ?? "") || !/Sam Fixture\s*$/.test(plainGot.letterText ?? "") ? "the cover letter box was not given a letter"
+      : !/vendor relationships, scheduling and inventory/i.test(plainGot.letterText) ? "the letter does not use the resume's own words"
+      : null,
   },
 ];
 

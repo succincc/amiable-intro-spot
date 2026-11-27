@@ -35,6 +35,7 @@ import { FRESH_DAYS } from "./fresh.mjs";
 import { schoolNameOnly, schoolOption } from "./school.mjs";
 import { fromProfile } from "./fromprofile.mjs";
 import { useOwnKey } from "./ownkey.mjs";
+import { isCoverLetter, writeCoverLetter } from "./coverletter.mjs";
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const ANON_KEY = process.env.SUPABASE_ANON_KEY;
@@ -7264,7 +7265,105 @@ async function checkBox(el, label) {
  * identical to one that did, and an ATS rejecting the submission for a
  * missing resume looked like no reason at all.
  */
+// ---------------------------------------------------------------------------
+// A cover letter, where a form asks for one
+// ---------------------------------------------------------------------------
+
+/** One letter per posting, written the first time a form asks and kept for the rest of it. */
+const LETTERS = new Map();
+async function coverLetterFor(job, profile) {
+  if (LETTERS.has(job.id)) return LETTERS.get(job.id);
+  const made = await writeCoverLetter({
+    job,
+    profile,
+    resume: (profile.tailor_resumes === false ? null : job.tailored_resume) || profile.resume_text,
+    apiKey: process.env.GEMINI_API_KEY,
+  }).catch(() => null);
+  const text = made?.text ?? null;
+  if (text) console.log(`    wrote a cover letter of ${text.split(/\s+/).length} words${made.by === "model" ? "" : " without the model"}`);
+  LETTERS.set(job.id, text);
+  return text;
+}
+
+/** What an upload box is for, from everything that names it: "cover", "resume", or neither said. */
+async function uploadKind(el) {
+  const said = await el
+    .evaluate((n) => {
+      const byFor = n.id ? document.querySelector(`label[for="${CSS.escape(n.id)}"]`) : null;
+      // What the box says of itself comes first. The words around it are
+      // only gone by when it says nothing, and never from further out than
+      // the part of the page that is this box's alone: a form with two
+      // upload boxes mentions both a resume and a letter.
+      const own = [n.id, n.name, n.getAttribute("aria-label"), n.getAttribute("data-automation-id"), n.getAttribute("data-testid"), byFor?.innerText].filter(Boolean).join(" | ");
+      let around = "";
+      for (let e = n.parentElement, d = 0; e && d < 4; d++, e = e.parentElement) {
+        if (e.querySelectorAll("input[type=file]").length > 1) break;
+        const t = (e.innerText || "").replace(/\s+/g, " ").trim();
+        if (t && t.length < 220) around = t;
+      }
+      return { own, around };
+    })
+    .catch(() => ({ own: "", around: "" }));
+  const kindOf = (t) => (isCoverLetter(t) ? "cover" : /resume|\bcv\b|curriculum/i.test(t) ? "resume" : null);
+  return kindOf(said.own) ?? kindOf(said.around) ?? "unsaid";
+}
+
+/** The letter as a one-page PDF, in the applicant's name. */
+async function buildLetterPdf(context, text, profile, jobId) {
+  const name = (profile.full_name || "Applicant").trim();
+  const safe = name.replace(/[^A-Za-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "Applicant";
+  const path = `/tmp/${safe}_Cover_Letter_${jobId}.pdf`;
+  const esc = (t) => String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const reach = [profile.email, profile.phone].map((v) => String(v ?? "").trim()).filter(Boolean).join("  ·  ");
+  const html =
+    `<!doctype html><html><head><meta charset="utf-8"><style>` +
+    `body{font-family:Georgia,"Times New Roman",serif;font-size:11.5pt;line-height:1.5;color:#111;margin:0}` +
+    `h1{font-size:15pt;margin:0 0 2pt}.reach{font-size:10pt;color:#444;margin:0 0 22pt}p{margin:0 0 11pt;white-space:pre-wrap}` +
+    `</style></head><body><h1>${esc(name)}</h1><div class="reach">${esc(reach)}</div>` +
+    String(text).split(/\n{2,}/).map((para) => `<p>${esc(para.trim())}</p>`).join("") +
+    `</body></html>`;
+  const sheet = await context.newPage();
+  try {
+    await sheet.setContent(html, { waitUntil: "load" });
+    await sheet.pdf({ path, format: "Letter", margin: { top: "1in", bottom: "1in", left: "1in", right: "1in" } });
+    return path;
+  } catch {
+    return null;
+  } finally {
+    await sheet.close().catch(() => {});
+  }
+}
+
+/**
+ * Put a cover letter where the screen has a place for one that is still
+ * empty. Says nothing and does nothing on a screen that does not ask.
+ */
+async function attachCoverLetter(context, page, form, profile, job) {
+  const inputs = await form.$$("input[type=file]").catch(() => []);
+  let put = 0;
+  for (const el of inputs) {
+    if ((await uploadKind(el)) !== "cover") continue;
+    if (await el.evaluate((n) => (n.files?.length ?? 0) > 0).catch(() => true)) continue;
+    const text = await coverLetterFor(job, profile);
+    const pdf = text ? await buildLetterPdf(context, text, profile, job.id) : null;
+    if (!pdf) return put;
+    if (await el.setInputFiles(pdf).then(() => true).catch(() => false)) {
+      put++;
+      await page.waitForTimeout(1500);
+    }
+  }
+  if (put) console.log("    cover letter attached");
+  return put;
+}
+
+/** The resume, then a cover letter where one is asked for. */
 async function attachResume(context, page, form, profile, job) {
+  const out = await attachResumeOnly(context, page, form, profile, job);
+  await attachCoverLetter(context, page, form, profile, job).catch(() => 0);
+  return out;
+}
+
+async function attachResumeOnly(context, page, form, profile, job) {
   let fileInputs = await form.$$("input[type=file]").catch(() => []);
 
   // Workday's upload lives on screen two and renders after the navigation
@@ -7362,6 +7461,17 @@ async function attachResume(context, page, form, profile, job) {
   // Someone who has asked for their own resume to be sent as it is gets
   // exactly that: the file they uploaded, untouched. Where it cannot be
   // fetched, their own text in the standard layout — still nothing rewritten.
+  // The resume goes in the box for the resume: one that says so, or failing
+  // that the first that is not the cover letter's. It used to go in the
+  // first box whatever that box was for.
+  if (fileInputs.length > 1) {
+    const kinds = await Promise.all(fileInputs.map((el) => uploadKind(el)));
+    const pick = kinds.indexOf("resume") >= 0 ? kinds.indexOf("resume") : kinds.findIndex((k) => k !== "cover");
+    if (pick > 0) fileInputs = [fileInputs[pick], ...fileInputs.filter((_, i) => i !== pick)];
+  } else if (fileInputs.length === 1 && (await uploadKind(fileInputs[0])) === "cover") {
+    // The only box on this screen is for a letter; the resume is not put in it.
+    return { wanted: false, note: "this screen asks for a cover letter only" };
+  }
   const ownOnly = profile.tailor_resumes === false;
   if (ownOnly) {
     const own = await ownResumeFile(profile).catch(() => null);
@@ -8302,6 +8412,9 @@ async function applyToJobOnce(context, job, profile, answers) {
     // J&J advanced eight times and was still going when the loop ended.
     for (let step = 0; step < 14; step++) {
       const filledAtStart = filled;
+      // A later screen may have a place for the letter that the screen with
+      // the resume did not.
+      if (resumeNote === "resume attached") await attachCoverLetter(context, page, form, profile, job).catch(() => 0);
       if (resumeNote !== "resume attached") {
         const r = await attachResume(context, page, form, profile, job);
         if (r.wanted) {
@@ -9781,6 +9894,15 @@ async function applyToJobOnce(context, job, profile, answers) {
             // which meant that without one the model-free writer — the thing
             // built so this works at zero cost — never ran at all, and every
             // open-ended question stopped a finished application.
+            // A box for a cover letter gets a cover letter, not an answer
+            // to the two words on its label.
+            if (isCoverLetter(label)) {
+              const letter = await coverLetterFor(job, profile);
+              if (letter && (await fillField(el, maxLen ? letter.slice(0, maxLen) : letter, label))) {
+                filled++;
+                continue;
+              }
+            }
             const written = process.env.GEMINI_API_KEY
               ? await generateAnswer({
                   question: label,

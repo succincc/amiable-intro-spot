@@ -28,6 +28,7 @@ const near = await import("./near.mjs");
 const school = await import("./school.mjs");
 const zip = await import("./zipmcp.mjs");
 const fp = await import("./fromprofile.mjs");
+const cover = await import("./coverletter.mjs");
 const idx = await import("./indexes.mjs");
 const crawl = await import("./crawl.mjs");
 const nearby = await import("./nearby.mjs");
@@ -433,6 +434,27 @@ quiet.hideJob({ company: "ZQ" });
     nearby.siteOf("https://locations.example.com/nj/springfield"), nearby.siteOf("facebook.com/somecafe"), nearby.siteOf(""),
     nearby.employersFrom([{ tags: { name: "Example #12", brand: "Example", website: "https://www.example.com/a" } }, { tags: { name: "Example", brand: "Example", website: "example.com" } }, { tags: { name: "Corner Cafe", website: "https://cornercafe.test" } }, { tags: { name: "No Site" } }]).map((e) => `${e.name}:${e.site}:${e.places}`),
   ], ["example.com", null, null, ["Example:example.com:2", "Corner Cafe:cornercafe.test:1"]]);
+  {
+    const resume = "Pat Example\nExperience\nStore Manager | Example Goods | 01/2020 - Present\n• Ran a team of 12 and raised store sales 20% in one year\n• Hired, trained and scheduled all store staff\n• Handled customer complaints and vendor orders\nSkills\nSales, Scheduling";
+    const job = { title: "Assistant Store Manager", company: "Sample Mart", description: "You will lead a team, drive store sales, and hire and train staff. Handle scheduling and customer service." };
+    const me = { full_name: "Pat Example", phone: "732-555-0100", email: "pat@example.test", earliest_start: "Immediately" };
+    check("cover: which boxes ask for one", [cover.isCoverLetter("Cover Letter"), cover.isCoverLetter("cover_letter_upload"), cover.isCoverLetter("Letter of Interest (optional)"), cover.isCoverLetter("Resume/CV"), cover.isCoverLetter("Why do you want to work here?")], [true, true, true, false, false]);
+    check("cover: a bullet as a sentence", [cover.asSentence("Ran a team of 12;"), cover.asSentence("Hired, trained and scheduled all store staff."), cover.asSentence("Responsible for vendor orders")], ["I ran a team of 12.", "I hired, trained and scheduled all store staff.", "Responsible for vendor orders."]);
+    const letter = cover.composeCoverLetter({ job, profile: me, resume });
+    check("cover: the composed letter is the resume's own lines, addressed and signed", [
+      letter.startsWith("Dear Hiring Manager,"), letter.endsWith("Sincerely,\nPat Example"), /Assistant Store Manager position at Sample Mart/.test(letter),
+      /I ran a team of 12 and raised store sales 20% in one year\./.test(letter), /I hired, trained and scheduled all store staff\./.test(letter), /available to start immediately/.test(letter), /\[|\{/.test(letter),
+    ], [true, true, true, true, true, true, false]);
+    const good = "Dear Hiring Manager,\n\n" + "I ran a team of 12 and raised store sales 20% at Example Goods. ".repeat(12) + "\n\nSincerely,\nPat Example";
+    check("cover: a model's letter is signed only if it can be stood behind", [
+      cover.standsBehind(good, { resume, job, profile: me }),
+      cover.standsBehind(good.replace("20%", "45%"), { resume, job, profile: me }),
+      cover.standsBehind(good.replace("Pat Example", "[Your Name]"), { resume, job, profile: me }),
+      cover.standsBehind("Dear Hiring Manager, I fit. Sincerely, Pat", { resume, job, profile: me }),
+    ], [true, false, false, false]);
+    const made = await cover.writeCoverLetter({ job, profile: me, resume, apiKey: "" });
+    check("cover: with no model, the composed letter", [made.by, made.text === letter], ["rules", true]);
+  }
   check("quiet: nothing to strike out, nothing changed", quiet.scrub("plain line", [], null), "plain line");
 }
 
