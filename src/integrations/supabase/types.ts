@@ -305,6 +305,7 @@ export type Database = {
           id: string
           is_read: boolean | null
           job_id: string | null
+          kind: string | null
           message_id: string
           moment: string | null
           notified_at: string | null
@@ -330,6 +331,7 @@ export type Database = {
           id?: string
           is_read?: boolean | null
           job_id?: string | null
+          kind?: string | null
           message_id: string
           moment?: string | null
           notified_at?: string | null
@@ -355,6 +357,7 @@ export type Database = {
           id?: string
           is_read?: boolean | null
           job_id?: string | null
+          kind?: string | null
           message_id?: string
           moment?: string | null
           notified_at?: string | null
