@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { opening, reply, start, transcript } from "./caller";
+import { menuKey, opening, reply, start, transcript } from "./caller";
 
 const job = { title: "Sales Associate", company: "Example Office Supply", location: "Exampleton, NJ", description: "• Experience helping customers and managing inventory on the sales floor" };
 const me = { full_name: "Sam Sample", resume_text: "Helped customers on a busy sales floor and kept inventory counts accurate for two years.", earliest_start: "two weeks", phone: "(732) 555-0100" };
@@ -8,7 +8,7 @@ describe("the calling assistant", () => {
   it("says it is an AI assistant in its first sentence, every call, whatever the job or the owner", () => {
     for (const j of [job, {}, { title: "X" }]) for (const m of [me, {}, { full_name: "A B" }]) {
       const firstSentence = opening(j, m).split(/(?<=[.?!])\s/)[0] ?? "";
-      expect(firstSentence).toMatch(/AI assistant calling on behalf of/);
+      expect(firstSentence).toMatch(/^Hi, this is an AI assistant calling about /);
       expect(start(j, m).lines[0]?.said).toBe(opening(j, m));
     }
   });
@@ -23,7 +23,7 @@ describe("the calling assistant", () => {
     expect(c.stage).toBe("manager");
 
     const said = c.lines.at(-1)?.said ?? "";
-    expect(said).toBe("Thank you for taking the call. The application is for the Sales Associate role at your Exampleton location, and the name on it is Sam Sample. After reviewing the posting it looks like an excellent fit, with experience like this: helped customers on a busy sales floor and kept inventory counts accurate for two years. Would there be a good time to come in and talk?");
+    expect(said).toBe("Hi, this is a call about the Sales Associate position at Example Office Supply; the application is under the name Sam Sample. After reading the job posting this looks like an excellent fit, because of experience like this: helped customers on a busy sales floor and kept inventory counts accurate for two years. If you have a moment, it would be great to talk more about the position.");
     // No narrator: it neither claims to be the applicant nor speaks about them.
     expect(said).not.toMatch(/\bI (applied|helped|can start)\b|\bSam (applied|asked|can|is)\b/);
   });
@@ -31,7 +31,7 @@ describe("the calling assistant", () => {
     let c = reply(reply(start(job, me), "Speaking.", job, me), "When can he start?", job, me);
     expect(c.lines.at(-1)?.said).toBe("Available to start with two weeks' notice.");
     c = reply(c, "Why does he want to work here?", job, me);
-    expect(c.lines.at(-1)?.said).toMatch(/deserves a proper answer in person/);
+    expect(c.lines.at(-1)?.said).toMatch(/deserves a proper answer in person.*interview/);
   });
   it("takes no for an answer, and a message when the manager is out", () => {
     expect(reply(start(job, me), "We're not hiring, please don't call again.", job, me)).toMatchObject({ stage: "done", outcome: "declined" });
@@ -49,5 +49,13 @@ describe("the calling assistant", () => {
   it("gives the name on the application when asked for it", () => {
     const c = reply(reply(start(job, me), "This is the manager.", job, me), "Sure, what's the name on the application?", job, me);
     expect(c.lines.at(-1)?.said).toBe("The name on the application is Sam Sample.");
+  });
+  it("gets through a recorded menu to a person, and never to billing", () => {
+    expect(menuKey("For English press one, para español oprima dos.")).toBe("1");
+    expect(menuKey("Press 1 for billing, press 2 for print services, press 3 for customer service.")).toBe("3");
+    expect(menuKey("For store hours, press 1. For the pharmacy, press 2. To speak to a store associate, press 0.")).toBe("0");
+    expect(menuKey("Press 1 for billing or press 2 for print services.")).toBeNull();
+    expect(menuKey("Thanks for calling, how can I help?")).toBeNull();
+    expect(reply(start(job, me), "Press 1 for billing, press 2 for customer service.", job, me).lines.at(-1)?.said).toBe("[presses 2]");
   });
 });

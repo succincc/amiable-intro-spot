@@ -24,8 +24,31 @@ const first = (me: Me) => String(me.full_name ?? "").trim().split(/\s+/)[0] || "
 
 /** How every call begins. The first sentence says what is calling. */
 export function opening(job: CallJob, me: Me): string {
-  const role = job.title ? `the ${job.title} opening` : "an opening you have";
-  return `Hi, this is an AI assistant calling on behalf of ${first(me)}, who applied online for ${role}. Is the hiring manager available for a minute?`;
+  const full = String(me.full_name ?? "").trim() || first(me);
+  const role = job.title ? `the ${job.title} position` : "an open position";
+  return `Hi, this is an AI assistant calling about ${full}'s application for ${role}. Is it possible to speak to the hiring manager?`;
+}
+
+/**
+ * A recorded menu, and which key gets to a person: the operator or customer
+ * service where one is offered, never billing or a department. Null when
+ * what was heard is not a menu, or offers no such key.
+ */
+export function menuKey(heard: string): string | null {
+  const t = String(heard ?? "").toLowerCase().replace(/\s+/g, " ");
+  const options = [...t.matchAll(/(?:press|dial|say) (\d|zero|one|two|three|four|five|six|seven|eight|nine)(?: for| to)? ([^.,;]{2,60})|(?:for|to) ([^.,;]{2,60}?),? (?:press|dial) (\d|zero|one|two|three|four|five|six|seven|eight|nine)/g)].map((m) => ({
+    key: m[1] ?? m[4] ?? "",
+    what: (m[2] ?? m[3] ?? "").trim(),
+  }));
+  if (!options.length) return null;
+  const digit = (k: string) => ({ zero: "0", one: "1", two: "2", three: "3", four: "4", five: "5", six: "6", seven: "7", eight: "8", nine: "9" } as Record<string, string>)[k] ?? k;
+  // A language menu comes first on many lines: English, then the real menu.
+  const wants = [/operator|representative|speak (to|with) (a|an|someone)|front desk|store (associate|manager)|a person|team member/, /customer service|customer care|general (inquir|question)|all other|anything else/, /english/];
+  for (const re of wants) {
+    const hit = options.find((o) => re.test(o.what));
+    if (hit) return digit(hit.key);
+  }
+  return null;
 }
 
 export function start(job: CallJob, me: Me, openTimes: string | null = null): Call {
@@ -47,12 +70,15 @@ export function reply(call: Call, heard: string, job: CallJob, me: Me): Call {
   const full = String(me.full_name ?? "").trim();
   const proof = (p.pitch.match(/The short version of why I fit: (.+?)\. I can start soon/) ?? [])[1] ?? null;
   const pitch = () =>
-    `Thank you for taking the call. The application is for ${job.title ? `the ${job.title} role` : "the open role"}${job.location ? ` at your ${String(job.location).split(",")[0]} location` : ""}` +
-    `${full ? `, and the name on it is ${full}` : ""}. ` +
-    (proof ? `After reviewing the posting it looks like an excellent fit, with experience like this: ${proof.replace(/^./, (c) => c.toLowerCase())}. ` : "After reviewing the posting it looks like a strong fit for what you need. ") +
-    `Would there be a good time to come in and talk?`;
+    `Hi, this is a call about ${job.title ? `the ${job.title} position` : "the open position"}${job.company ? ` at ${job.company}` : ""}; the application is under the name ${full || name}. ` +
+    (proof ? `After reading the job posting this looks like an excellent fit, because of experience like this: ${proof.replace(/^./, (c) => c.toLowerCase())}. ` : "After reading the job posting this looks like a strong fit for what you need. ") +
+    `If you have a moment, it would be great to talk more about the position.`;
 
   if (call.stage === "done") return next;
+
+  // A recorded menu: the key that reaches a person.
+  const key = menuKey(heard);
+  if (key) return say(`[presses ${key}]`);
 
   // Asked what it is, at any point: it says so again, plainly.
   if (has(t, /\b(are you (a |an )?(robot|ai|bot|machine|real|recording|human|person)|is this (a |an )?(robot|ai|bot|recording|real person)|who (is|am i) (this|speaking|talking))\b/)) {
@@ -96,7 +122,7 @@ export function reply(call: Call, heard: string, job: CallJob, me: Me): Call {
     if (has(t, /\b(send|email|drop off|bring).{0,20}\b(resume|cv)\b|have (him|her|them) (call|come|email)\b/)) return say("That will be taken care of today. Thank you for your time.", { stage: "done", outcome: "spoke" });
     if (has(t, /\b(we'?ll (be in touch|call|review|look)|i'?ll (take a look|look (it|for it) up|pull (it|the application))|thanks for calling|okay,? thank)\b/)) return say("Thank you, that is much appreciated. Have a good day.", { stage: "done", outcome: "spoke" });
     // A question about the person that only the person should answer.
-    if (has(t, /\?|\b(tell me|why|what|how|describe|experience|salary|pay|wage)\b/)) return say("That one deserves a proper answer in person. Would a call back or a time to come in work?");
+    if (has(t, /\?|\b(tell me|why|what|how|describe|experience|salary|pay|wage)\b/)) return say("That one deserves a proper answer in person, and it would be great to give it. Is there a time this week for an interview?");
     return say("Thank you. Is there a good time to come in, or someone to follow up with?", { stage: "close", outcome: "spoke" });
   }
 
