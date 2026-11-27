@@ -49,7 +49,7 @@ export const Route = createFileRoute("/api/public/cron/sweep")({
           const supabaseAdmin = forUser(everybody, who);
           // "Is there a person at this place in the line?" — asked by the
           // runner before it does a round for them.
-          if (probe) return Response.json({ ok: true });
+          if (probe) return Response.json({ ok: true, someone_here: true });
           const discover =
             only === "score"
               ? null

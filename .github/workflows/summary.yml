@@ -44,13 +44,24 @@ jobs:
           # panel answers 403 when there is nobody at the next place.
           first=0
           for PERSON in $(seq 0 60); do
+            # Past the owner, the panel is first asked whether anybody is at
+            # this place in the line; one from before there was more than one
+            # person does not say so, and the line ends with the owner.
+            if [ "${PERSON}" != "0" ]; then
+              there=$(curl -sS -o /tmp/there.json -w '%{http_code}' --max-time 30 \
+                -X POST "${APP_URL}/api/public/cron/sweep" \
+                -H "x-engine-key: ${ENGINE_API_KEY}" \
+                -H "x-person: ${PERSON}" \
+                -H "Content-Type: application/json" \
+                -d '{"only":"probe"}' || echo "000")
+              [ "${there}" = "200" ] && grep -q '"someone_here":true' /tmp/there.json 2>/dev/null || break
+            fi
             code=$(curl -sS -o /tmp/summary.json -w '%{http_code}' --max-time 60 \
               -X POST "${APP_URL}/api/public/email/summary" \
               -H "x-engine-key: ${ENGINE_API_KEY}" \
               -H "x-person: ${PERSON}" \
               -H "Content-Type: application/json" \
               -d "{\"dry\":${DRY}}" || echo "000")
-            if [ "${PERSON}" != "0" ] && [ "${code}" != "200" ]; then break; fi
             echo "person $((PERSON + 1)): the panel answered ${code}"
             # Counts and a state; nothing of anybody's is in it.
             head -c 400 /tmp/summary.json 2>/dev/null || true

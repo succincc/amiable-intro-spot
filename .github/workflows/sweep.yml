@@ -149,13 +149,16 @@ jobs:
           # asked whether there is anyone at the next place in the line, and
           # says no when the line has ended. Nobody is named: this log is public.
           for PERSON in $(seq 1 60); do
-            there=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 30 \
+            there=$(curl -sS -o /tmp/there.json -w '%{http_code}' --max-time 30 \
               -X POST "${APP_URL}/api/public/cron/sweep" \
               -H "x-engine-key: ${ENGINE_API_KEY}" \
               -H "x-person: ${PERSON}" \
               -H "Content-Type: application/json" \
               -d '{"only":"probe"}' || echo "000")
-            [ "${there}" = "200" ] || break
+            # A panel from before there was more than one person answers
+            # this like any other request; only one that says so in words
+            # has somebody at this place.
+            [ "${there}" = "200" ] && grep -q '"someone_here":true' /tmp/there.json 2>/dev/null || break
             echo "==== person $((PERSON + 1)) ===="
             one_round || echo "that person's round did not finish; the next is still done."
           done
