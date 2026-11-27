@@ -10080,6 +10080,21 @@ async function applyToJobOnce(context, job, profile, answers) {
             // back, or the list's own "none". "Which of the following
             // repairs have you done hands-on?" stopped four of one
             // employer's forms. Never for a question about the person.
+            // A required list of subjects of study, and no subject on file or
+            // readable from the resume: the list's own "Other" is chosen where
+            // it has one, and nothing where it has not. A subject is never
+            // picked for someone.
+            (await (async () => {
+              if ((await el.getAttribute("role").catch(() => null)) !== "combobox") return null;
+              if (!/^\s*(discipline|field of study|major|area of study)\b/i.test(label)) return null;
+              await el.click({ force: true, timeout: 3000 }).catch(() => {});
+              const seen = await popupOptions(form, el).catch(() => []);
+              await page.keyboard.press("Escape").catch(() => {});
+              const texts = seen.map((o) => o.text).filter(Boolean);
+              const other = texts.find((t) => /^\s*(other|not listed|not applicable|n\/?a|none)\b/i.test(t)) ?? texts.find((t) => /^\s*general studies\s*$/i.test(t));
+              console.log(`    "${label.slice(0, 24)}" has no subject on file; its list of ${texts.length} ${other ? `offers "${other.slice(0, 24)}"` : "offers no \"Other\""}`);
+              return other ?? null;
+            })()) ??
             (await (async () => {
               if ((await el.getAttribute("role").catch(() => null)) !== "combobox") return null;
               if (NEVER_INFER.test(label) || selfIdTopic(label)) return null;
