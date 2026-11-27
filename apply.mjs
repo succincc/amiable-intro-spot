@@ -9406,6 +9406,21 @@ async function applyToJobOnce(context, job, profile, answers) {
               continue;
             }
           }
+          // A phone box that shows its own pattern — "(___) ___-____" — holds
+          // something and no number. Taken as already filled, it was left
+          // as it was, and ADP's first screen answered "Mobile Number is
+          // required" to a form with everything else on it. The number is
+          // typed in, key by key, as the pattern expects.
+          if (type === "tel" && existing && existing.trim() && !/\d/.test(existing)) {
+            const digits = String(profile.phone ?? "").replace(/\D/g, "").replace(/^1(?=\d{10}$)/, "");
+            if (digits) {
+              await el.click({ timeout: 3000 }).catch(() => {});
+              await el.type(digits, { delay: 35 }).catch(() => {});
+              filled++;
+              console.log("    typed the phone number into a box that shows its own pattern");
+            }
+            continue;
+          }
           if (existing && existing.trim()) { skips.prefilled++; continue; }
           const want =
             answerQuestion(label, profile) ??
@@ -11213,6 +11228,25 @@ async function applyToJobOnce(context, job, profile, answers) {
         // employer's job search: a keyword box, a location box, nothing to
         // fill in and nothing to send. That is not a form that failed and
         // not something for a person to finish; the posting is gone.
+        // UKG shows a visitor the posting and a "Sign In", and nothing to
+        // apply with: its applications are taken only from an account on
+        // that employer's board. Said as that, so it can be done from the
+        // owner's own browser, where they are signed in.
+        if (filled === 0 && /ultipro\.com$|ukg\.(com|net)$/i.test(hostOf(page.url()) ?? "")) {
+          const wall = await page
+            .evaluate(() => {
+              const said = Array.from(document.querySelectorAll("a, button")).map((b) => (b.innerText || "").replace(/\s+/g, " ").trim().toLowerCase());
+              return said.includes("sign in") && !said.some((t) => /^apply( now)?$/.test(t));
+            })
+            .catch(() => false);
+          if (wall) {
+            return {
+              status: "needs_help",
+              help_reason: "login",
+              note: "This employer's board takes applications only from a signed-in account. Open the posting, sign in or register there, and apply.",
+            };
+          }
+        }
         if (filled === 0 && (await postingGone(page))) {
           console.log("    the page says the posting is no longer open");
           return { status: "skipped", skip_reason: "the posting is no longer open, by its own page" };

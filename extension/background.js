@@ -546,7 +546,7 @@ async function handLoop() {
     const { dryRun } = await chrome.storage.local.get("dryRun");
     const tried = new Set();
     while (handRunning) {
-      const list = (await db("jobs?status=eq.needs_help&help_reason=eq.captcha&select=id,title,company,url,apply_url,ats&order=score.desc.nullslast,updated_at.desc&limit=60")) ?? [];
+      const list = (await db("jobs?status=eq.needs_help&or=(help_reason.eq.captcha,and(ats.eq.ukg,help_reason.eq.login))&select=id,title,company,url,apply_url,ats&order=score.desc.nullslast,updated_at.desc&limit=60")) ?? [];
       const job = list.find((j) => !tried.has(j.id));
       if (!job) { handNote = done ? `Done: ${done} sent.` : "Nothing on the by-hand list."; break; }
       tried.add(job.id);
@@ -622,7 +622,7 @@ chrome.runtime.onMessage.addListener((msg, _s, reply) => {
         const [stats] = await db("v_stats?select=*");
         let byHand = 0;
         try {
-          const rows = await db("jobs?status=eq.needs_help&help_reason=eq.captcha&select=id&limit=200");
+          const rows = await db("jobs?status=eq.needs_help&or=(help_reason.eq.captcha,and(ats.eq.ukg,help_reason.eq.login))&select=id&limit=200");
           byHand = (rows ?? []).length;
         } catch { byHand = 0; }
         reply({ ok: true, running, handRunning, handNote, byHand, stats });
