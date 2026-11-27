@@ -295,6 +295,8 @@ export async function runScore(supabase: any) {
   let byModel = 0;
   let secondSpent = false;
   let firstSpent = false;
+  let bySecond = 0;
+  let secondSaid = "";
   try {
     const { data: profile } = await supabase.from("profile").select("*").eq("id", 1).single();
     if (!profile?.resume_text?.trim())
@@ -383,8 +385,13 @@ export async function runScore(supabase: any) {
               .eq("id", id);
             stats.scored++;
             byModel++;
+            bySecond++;
           }
-          if (lean.spent) secondSpent = true;
+          if (lean.spent) {
+            secondSpent = true;
+            const { secondRefusal } = await import("@/lib/second-model.server");
+            secondSaid = secondRefusal();
+          }
           // Whatever it did not reach is still unscored and comes round
           // again as the next batch: to it, or to the word counter once it
           // has nothing left this minute.
@@ -509,6 +516,13 @@ export async function runScore(supabase: any) {
       }
     }
 
+    // Where the first model was spent, what became of the second is said:
+    // "not there", "scored so many", and what it said when it stopped.
+    if (firstSpent) {
+      note = `${note ? `${note} ` : ""}Second model: ${
+        KEYS.second ? `scored ${bySecond}${secondSaid ? `, then stopped (${secondSaid})` : ""}` : "no key on file"
+      }.`;
+    }
     const message =
       note ||
       (stats.scored === 0 && stats.tailored === 0

@@ -29,14 +29,28 @@ async function pickModel(apiKey: string): Promise<string | null> {
   return chosen;
 }
 
+/**
+ * What the second model last said when it did not answer: its status and
+ * the name it gives the refusal, never the request. For the line a scoring
+ * run leaves behind, so "not used" can be told from "used up".
+ */
+let lastRefusal = "";
+export const secondRefusal = (): string => lastRefusal;
+
 /** Whether this looks like a Groq key at all. */
 export const looksLikeSecondKey = (key: unknown): key is string => /^gsk_[A-Za-z0-9]{20,120}$/.test(String(key ?? "").trim());
 
 /** Ask the second model. Null where it has nothing to say; never throws. */
 export async function callSecond(opts: { prompt: string; apiKey: string; maxTokens?: number; temperature?: number }): Promise<string | null> {
-  if (!looksLikeSecondKey(opts.apiKey)) return null;
+  if (!looksLikeSecondKey(opts.apiKey)) {
+    lastRefusal = "the key on file is not shaped like a Groq key";
+    return null;
+  }
   const model = await pickModel(opts.apiKey);
-  if (!model) return null;
+  if (!model) {
+    lastRefusal = "no model was offered to this key";
+    return null;
+  }
   try {
     const res = await fetch(`${BASE}/chat/completions`, {
       method: "POST",
@@ -44,11 +58,23 @@ export async function callSecond(opts: { prompt: string; apiKey: string; maxToke
       body: JSON.stringify({ model, messages: [{ role: "user", content: opts.prompt }], max_tokens: Math.min(opts.maxTokens ?? 2048, 8000), temperature: opts.temperature ?? 0.2 }),
       signal: AbortSignal.timeout(60_000),
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      let named = "";
+      try {
+        const said = (await res.json()) as { error?: { code?: string; type?: string } };
+        named = String(said.error?.code ?? said.error?.type ?? "").slice(0, 40);
+      } catch {
+        named = "";
+      }
+      lastRefusal = `HTTP ${res.status}${named ? ` ${named}` : ""}`;
+      return null;
+    }
     const body = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
     const text = String(body.choices?.[0]?.message?.content ?? "").trim();
+    if (!text) lastRefusal = "an empty answer";
     return text || null;
-  } catch {
+  } catch (e) {
+    lastRefusal = String((e as Error)?.name ?? "failed").slice(0, 30);
     return null;
   }
 }
