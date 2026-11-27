@@ -5260,9 +5260,39 @@ async function adpVerify(page, job) {
       })
       .catch(() => null);
   console.log(`    ADP asks to send a code: ${JSON.stringify(await shapeOf())}`);
-  // By email, where the pane offers a choice.
-  const byMail = pane.locator('sdf-radio:has-text("mail"), sdf-radio-button:has-text("mail"), label:has-text("mail")').first();
-  if (await byMail.isVisible().catch(() => false)) await byMail.click({ timeout: 3000 }).catch(() => {});
+  // By email, where the pane offers a choice. Its two choices are radio
+  // buttons whose values are CELL_PHONE and EMAIL and whose words are drawn
+  // elsewhere; left as it opened, the code went to the phone, and ADP
+  // answered that the email belonged to an account with another number.
+  // The email's button is chosen by its value, and what is chosen is read
+  // back before anything is sent.
+  const mail = pane.locator('input[type=radio][value="EMAIL" i]').first();
+  if ((await mail.count().catch(() => 0)) > 0) {
+    await mail.check({ force: true, timeout: 3000 }).catch(() => {});
+    if (!(await mail.isChecked().catch(() => false))) {
+      await mail.evaluate((r) => {
+        const host = r.getRootNode().host ?? r.closest("sdf-radio, sdf-radio-button, label") ?? r;
+        host.click();
+        if (!r.checked) r.click();
+      }).catch(() => {});
+    }
+  } else {
+    const byMail = pane.locator('sdf-radio:has-text("mail"), sdf-radio-button:has-text("mail"), label:has-text("mail")').first();
+    if (await byMail.isVisible().catch(() => false)) await byMail.click({ timeout: 3000 }).catch(() => {});
+  }
+  const chosen = await pane
+    .evaluate((root) => {
+      const deep = (r, out = []) => {
+        for (const n of r.querySelectorAll("*")) {
+          if (n.tagName === "INPUT" && n.type === "radio") out.push(n);
+          if (n.shadowRoot) deep(n.shadowRoot, out);
+        }
+        return out;
+      };
+      return deep(root).filter((r) => r.checked).map((r) => r.value);
+    })
+    .catch(() => null);
+  console.log(`    the code is to be sent by: ${JSON.stringify(chosen)}`);
   const askedAt = Date.now();
   await pane.locator('sdf-button:has-text("Send"), button:has-text("Send")').first().click({ timeout: 5000 }).catch(() => {});
   await page.waitForTimeout(3500);
