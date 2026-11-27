@@ -19,6 +19,10 @@ on:
         type: boolean
         required: false
         default: false
+      only_under:
+        description: "Only for searches with fewer than this many titles (0 = everyone)"
+        required: false
+        default: "0"
   repository_dispatch:
     types: [titles]
 
@@ -54,5 +58,6 @@ jobs:
           # equal to false in a GitHub expression, so "dry_run: true" came out
           # as a live write.
           TITLE_LIMIT: ${{ github.event.inputs.limit || github.event.client_payload.limit || '120' }}
+          ONLY_UNDER: ${{ github.event.inputs.only_under || '0' }}
           DRY_RUN: ${{ (github.event.inputs.apply == 'true' || github.event.client_payload.apply == true) && '0' || '1' }}
         run: node forusers.mjs suggest-titles.mjs

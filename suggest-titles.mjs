@@ -75,6 +75,13 @@ async function db(path, init = {}) {
   }
 
   const existing = (cfg?.titles ?? []).map((t) => String(t).trim()).filter(Boolean);
+  // Asked to help only where a search has next to nothing to look for: a
+  // new person with one title, not somebody whose list is already theirs.
+  const onlyUnder = Number(process.env.ONLY_UNDER || 0);
+  if (onlyUnder > 0 && existing.length >= onlyUnder) {
+    console.log(`this search already has ${existing.length} title(s); left as it is`);
+    process.exit(0);
+  }
   const exclude = [...(cfg?.exclude_titles ?? []), ...(cfg?.no_go_patterns ?? [])];
 
   // Base roles only. The seniority variants match nothing the base role
