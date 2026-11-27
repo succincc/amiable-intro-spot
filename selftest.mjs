@@ -145,6 +145,11 @@ const BOARD_FORM = `<!doctype html><html><head><title>Account Coordinator</title
     <label><input type="checkbox" name="tools[]" value="v"> Vendor scheduling</label>
     <label><input type="checkbox" name="tools[]" value="n"> None of the above</label>
   </fieldset>
+  <fieldset id="book"><legend>How many accounts were in your most recent book? *</legend>
+    <label><input type="radio" name="question_31[]" value="a" required> Under 50</label>
+    <label><input type="radio" name="question_31[]" value="b"> 50 to 150</label>
+    <label><input type="radio" name="question_31[]" value="c"> 150 to 300</label>
+  </fieldset>
   <p id="err" role="alert" style="display:none"></p>
   <p><button type="submit">Submit Application</button></p>
 </form>
@@ -153,7 +158,8 @@ const BOARD_FORM = `<!doctype html><html><head><title>Account Coordinator</title
     e.preventDefault();
     const v = (id) => document.getElementById(id).value.trim();
     const ticked = Array.from(document.querySelectorAll('input[name="tools[]"]:checked')).map((b) => b.value);
-    const got = { name: v("_systemfield_name"), email: v("_systemfield_email"), phone: v("a2c71faa-5319-4d4a-8ec8-ebe9dcac45b3"), last: v("c779ac6e-f4fe-4dfe-9dfa-acd7e2823ba7"), ticked, resume: document.getElementById("_systemfield_resume").files[0]?.name ?? null };
+    const book = document.querySelector('input[name="question_31[]"]:checked')?.value ?? "";
+    const got = { book, name: v("_systemfield_name"), email: v("_systemfield_email"), phone: v("a2c71faa-5319-4d4a-8ec8-ebe9dcac45b3"), last: v("c779ac6e-f4fe-4dfe-9dfa-acd7e2823ba7"), ticked, resume: document.getElementById("_systemfield_resume").files[0]?.name ?? null };
     const empty = Object.entries(got).filter(([, x]) => (Array.isArray(x) ? !x.length : !x)).map(([k]) => k);
     if (empty.length) { const er = document.getElementById("err"); er.textContent = "Missing entry for required field: " + empty.join(", "); er.style.display = "block"; return; }
     fetch("/board/got", { method: "POST", body: JSON.stringify(got) }).catch(() => {});
@@ -306,6 +312,7 @@ const cases = [
       : boardGot.name !== "Sam Fixture" ? `the name box holds "${boardGot.name}"`
       : !/7325550100|732.?555.?0100/.test(boardGot.phone ?? "") ? `the contact number holds "${boardGot.phone}"`
       : !/Fixture Goods/i.test(boardGot.last ?? "") ? `the last employer holds "${boardGot.last}"`
+      : boardGot.book !== "a" ? `the pick-one holds "${boardGot.book}"`
       : JSON.stringify(boardGot.ticked) !== '["v"]' ? `the list has ${JSON.stringify(boardGot.ticked)} ticked`
       : null,
   },

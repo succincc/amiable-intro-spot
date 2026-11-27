@@ -9224,7 +9224,13 @@ async function applyToJobOnce(context, job, profile, answers) {
             }
             if (!want && !picked) continue;
             if (picked) {
-              if (String(label || "").replace(/\s+/g, " ").trim().toLowerCase() === String(picked).trim().toLowerCase()) {
+              // The button's label as read here may carry its field's name
+              // after the words ("under 50 question_123 …"): the option is
+              // how it begins. Read as the whole label, the chosen option
+              // matched no button and the form said "Please select an option".
+              const mine = String(label || "").replace(/\s+/g, " ").trim().toLowerCase();
+              const pick = String(picked).replace(/\s+/g, " ").trim().toLowerCase();
+              if (mine === pick || mine.startsWith(pick + " ")) {
                 console.log(`    pick-one "${String(question).slice(0, 34)}" -> "${String(picked).slice(0, 24)}"`);
                 if (await checkBox(el, label || question)) filled++;
               }
@@ -11021,6 +11027,41 @@ async function applyToJobOnce(context, job, profile, answers) {
           }))
           .catch(() => null);
         console.log(`    no form here: ${JSON.stringify(where)}`);
+        // And the page's shape, where its words say nothing: an application
+        // drawn inside components of the portal's own, in another tab, or
+        // behind a check, all read as "no fields" from the outside.
+        {
+          const shapeOf = (pg) =>
+            pg
+              .evaluate(() => {
+                const deep = (root, out = []) => {
+                  for (const n of root.querySelectorAll("*")) {
+                    out.push(n);
+                    if (n.shadowRoot) deep(n.shadowRoot, out);
+                  }
+                  return out;
+                };
+                const all = deep(document);
+                const own = {};
+                for (const n of all) {
+                  const t = n.tagName.toLowerCase();
+                  if (t.includes("-")) own[t] = (own[t] ?? 0) + 1;
+                }
+                return {
+                  host: location.hostname.split(".").slice(-2).join("."),
+                  path: location.pathname.split("/").filter(Boolean).map((x) => (x.length > 14 || /\d{4,}/.test(x) ? "#" : x)).slice(0, 5).join("/"),
+                  text: (document.body?.innerText ?? "").length,
+                  shadows: all.filter((n) => n.shadowRoot).length,
+                  inputs: all.filter((n) => /^(INPUT|TEXTAREA|SELECT)$/.test(n.tagName)).length,
+                  own: Object.entries(own).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([t, c]) => `${t}:${c}`),
+                  checks: Array.from(document.querySelectorAll("iframe")).map((f) => (f.src.match(/captcha-delivery|datadome|recaptcha|hcaptcha|turnstile|arkoselabs|perimeterx/i) ?? [""])[0]).filter(Boolean),
+                  frames: document.querySelectorAll("iframe").length,
+                };
+              })
+              .catch(() => null);
+          const tabs = context.pages();
+          console.log(`    no form here, by shape: ${JSON.stringify({ tabs: tabs.length, here: await shapeOf(page), others: await Promise.all(tabs.filter((t) => t !== page).slice(0, 2).map(shapeOf)) })}`);
+        }
 
         return {
           status: "needs_help",
