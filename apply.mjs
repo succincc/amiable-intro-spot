@@ -7258,7 +7258,7 @@ async function ukgAccount(page, form, profile, job) {
   const m = where.match(/https?:\/\/([^/]+)\/([^/]+)\/JobBoard\//i);
   const key = m ? `${m[1].toLowerCase()}/${m[2].toLowerCase()}` : (hostOf(where) ?? "ukg");
   const rows = (await db(`site_accounts?host=eq.${encodeURIComponent(key)}&select=*`).catch(() => [])) ?? [];
-  const existing = rows.find((r) => r.status !== "failed") ?? null;
+  const existing = rows[0] ?? null;
   const email = profile.email;
   const password = existing?.password || generatePassword();
   if (!email) return { ok: false, reason: "no email on file" };
@@ -7294,6 +7294,41 @@ async function ukgAccount(page, form, profile, job) {
     const at = page.frames().map((f) => { try { const u = new URL(f.url()); return /ultipro|ukg/i.test(u.hostname) ? u.pathname.split("/").filter(Boolean).map((x) => (x.length > 22 ? "#" : x)).slice(-2).join("/") : null; } catch { return null; } }).filter(Boolean);
     return { at, says: (t.match(/[^.]{0,70}(verif|confirm|activat|sent|check your|welcome|sign out|log out|my (profile|presence|applications)|incorrect|invalid|wrong)[^.]{0,70}/g) ?? []).slice(0, 4) };
   };
+  // The board's mail comes from UKG's own hosts, not the board's.
+  const mailLink = async (kind, tries = 2) => {
+    for (const h of [hostOf(where), "ukg.com", "ultipro.com"].filter(Boolean)) {
+      const link = await waitForVerificationLink(h, tries, 6000, kind).catch(() => null);
+      if (link) {
+        try { const u = new URL(link); console.log(`    its ${kind} mail's link is on ${u.hostname.split(".").slice(-2).join(".")}/${u.pathname.split("/").filter(Boolean)[0] ?? ""}`); } catch {}
+        return link;
+      }
+    }
+    return null;
+  };
+  const shapeNow = async () => {
+    const out = [];
+    for (const f of page.frames()) {
+      const one = await f.evaluate(() => {
+        const on = (e) => { const b = e.getBoundingClientRect(); return b.width > 0 && b.height > 0; };
+        return {
+          inputs: Array.from(document.querySelectorAll("input")).filter(on).filter((i) => i.type !== "hidden").map((i) => `${i.type}:${(i.name || i.id || "").slice(0, 20)}`).slice(0, 8),
+          buttons: Array.from(document.querySelectorAll("button, input[type=submit], a[role=button]")).filter(on).map((b) => (b.innerText || b.value || "").replace(/\s+/g, " ").trim().slice(0, 30)).filter(Boolean).slice(0, 8),
+        };
+      }).catch(() => null);
+      if (one && (one.inputs.length || one.buttons.length)) out.push(one);
+    }
+    return out.slice(0, 3);
+  };
+  // Back at the posting: does it still say Sign In and offer nothing to apply with?
+  const stillWalled = async () => {
+    await page.goto(job.apply_url || job.url, { waitUntil: "domcontentloaded", timeout: 45_000 }).catch(() => {});
+    await page.waitForTimeout(7000);
+    for (const f of page.frames()) {
+      const b = f.getByText(/^\s*sign in\s*$/i).first();
+      if (await b.isVisible().catch(() => false)) return f;
+    }
+    return null;
+  };
   const signIn = async () => {
     const user = await inAny('input[name=username], input[name=email], input[type=email], input[type=text]');
     const pw = await inAny('input[type=password]');
@@ -7313,8 +7348,65 @@ async function ukgAccount(page, form, profile, job) {
     }
     const why = (await said()).match(/(wrong|incorrect|invalid)[^.]{0,60}/)?.[0] ?? "the sign-in did not go through";
     console.log(`    this board's saved account did not sign in: ${why}`);
-    await saveAccount(key, email, existing.password, "failed", job.id, `sign-in refused: ${why}`.slice(0, 120));
-    return { ok: false, reason: `the saved account was refused (${why})` };
+    // An account made and never confirmed: its activation mail, if one came.
+    const act = await mailLink("activate", 1);
+    if (act) {
+      const tab = await page.context().newPage();
+      await tab.goto(act, { waitUntil: "domcontentloaded", timeout: 45_000 }).catch(() => {});
+      await tab.waitForTimeout(5000);
+      await tab.close().catch(() => {});
+      if (await signIn()) { console.log("    signed in after its activation link"); return { ok: true, key }; }
+    }
+    // The board's own "Create or reset your password", for the account this
+    // bot made there: a link is mailed, and a new password set through it.
+    if (await press(/create or reset your password|forgot (your )?password|reset (your )?password/i)) {
+      await page.waitForTimeout(3500);
+      console.log(`    its reset screen: ${JSON.stringify(await shapeNow())}`);
+      const box = await inAny('input[name=email], input[type=email], input[name=username], input[type=text]');
+      if (box) {
+        await box.fill(email, { timeout: 4000 }).catch(() => {});
+        if (!(await press(/^\s*(continue|send|submit|reset( password)?|send (reset )?(email|link))\s*$/i))) await box.press("Enter").catch(() => {});
+        await page.waitForTimeout(5000);
+        console.log(`    after asking for a reset, the board stands: ${JSON.stringify(await stands())}`);
+        const link = await mailLink("reset", 3);
+        if (link) {
+          const fresh = generatePassword();
+          await page.goto(link, { waitUntil: "domcontentloaded", timeout: 45_000 }).catch(() => {});
+          await page.waitForTimeout(4500);
+          console.log(`    its new-password screen: ${JSON.stringify(await shapeNow())}`);
+          let typed = 0;
+          for (const f of page.frames()) {
+            for (const c of await f.$$('input[type=password]').catch(() => [])) {
+              if (await c.isVisible().catch(() => false)) { await c.fill(fresh, { timeout: 4000 }).catch(() => {}); typed++; }
+            }
+          }
+          if (typed) {
+            await saveAccount(key, email, fresh, "pending_verification", job.id, "a new password being set through the board's own reset");
+            if (!(await press(/^\s*(continue|reset password|save|submit|set password|change password|confirm)\s*$/i))) await page.keyboard.press("Enter").catch(() => {});
+            await page.waitForTimeout(6000);
+            console.log(`    after the new password, the board stands: ${JSON.stringify(await stands())}`);
+            const wall = await stillWalled();
+            if (!wall) { await saveAccount(key, email, fresh, "active", job.id, "password reset through the board; signed in"); return { ok: true, key }; }
+            await wall.getByText(/^\s*sign in\s*$/i).first().click({ timeout: 6000 }).catch(() => {});
+            await page.waitForTimeout(3500);
+            const user = await inAny('input[name=username], input[name=email], input[type=email], input[type=text]');
+            const pw = await inAny('input[type=password]');
+            if (user && pw) {
+              await user.fill(email, { timeout: 4000 }).catch(() => {});
+              await pw.fill(fresh, { timeout: 4000 }).catch(() => {});
+              if (!(await press(/^\s*(sign in|log in|continue)\s*$/i))) await pw.press("Enter").catch(() => {});
+              await page.waitForTimeout(6000);
+              console.log(`    after signing in with the new password: ${JSON.stringify(await stands())}`);
+              if (!(await inAny('input[type=password]'))) {
+                await saveAccount(key, email, fresh, "active", job.id, "password reset through the board; signed in");
+                return { ok: true, key };
+              }
+            }
+          }
+        }
+      }
+    }
+    return { ok: false, reason: `the saved account was refused (${why}), and its reset did not get it in` };
   }
 
   // No account yet: its sign-up, an email and a password.
@@ -7345,9 +7437,11 @@ async function ukgAccount(page, form, profile, job) {
     return { ok: false, reason: "the board says an account already exists under this email" };
   }
   if (shape.accept) await press(/^\s*(accept|authorize|allow|continue)\s*$/i);
-  if (shape.verify) {
-    const link = await waitForVerificationLink(hostOf(where) ?? "ultipro.com", 8, 8000, "activate").catch(() => null);
-    if (link) {
+  if (shape.verify || !stillAsks) {
+    const link = await mailLink("activate", shape.verify ? 4 : 1);
+    if (!link && !shape.verify) {
+      // nothing asked for and nothing mailed: on to the proof below
+    } else if (link) {
       const tab = await page.context().newPage();
       await tab.goto(link, { waitUntil: "domcontentloaded", timeout: 45_000 }).catch(() => {});
       await tab.waitForTimeout(4000);
@@ -7360,6 +7454,19 @@ async function ukgAccount(page, form, profile, job) {
   }
   if (stillAsks && !shape.verify) {
     return { ok: false, reason: `its sign-up did not go through: ${after.match(/(password|email)[^.]{0,80}(must|should|invalid|required|least)[^.]{0,60}/)?.[0] ?? "no reason shown"}`.slice(0, 200) };
+  }
+  // Proof, at the posting itself: registered is not the same as signed in.
+  const wall = await stillWalled();
+  if (wall) {
+    await wall.getByText(/^\s*sign in\s*$/i).first().click({ timeout: 6000 }).catch(() => {});
+    await page.waitForTimeout(3500);
+    if (!(await inAny('input[type=password]')) ) {
+      // The sign-in went straight through on the session it already has.
+      await page.waitForTimeout(4000);
+    } else if (!(await signIn())) {
+      await saveAccount(key, email, password, "pending_verification", job.id, "registered; the board would not yet sign it in");
+      return { ok: false, reason: "registered, and the board would not yet sign it in" };
+    }
   }
   await saveAccount(key, email, password, "active", job.id, "registered on this UKG board");
   console.log("    registered an account on this board");
