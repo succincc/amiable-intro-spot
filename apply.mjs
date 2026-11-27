@@ -7762,6 +7762,17 @@ async function answerFromResume(question, options, profile, job) {
     return null;
   }
   console.log(`    from the resume: "${q.slice(0, 28)}" -> "${hit.slice(0, 26)}"`);
+  // Remembered. The same question on the next employer's form is answered
+  // from the saved answers, as one the person typed would be, without the
+  // model being asked again — and it is on the Answers page for them to
+  // correct. Never for a question about who the person is, one the law
+  // attaches weight to, or one that names this employer.
+  try {
+    const firm = String(job?.company ?? "").toLowerCase().trim();
+    if (!NEVER_INFER.test(q) && !selfIdTopic(q) && !(firm.length > 2 && q.toLowerCase().includes(firm))) {
+      await saveGeneratedAnswer(q, hit, "choice");
+    }
+  } catch { /* an answer not remembered is asked for again; nothing is lost */ }
   return hit;
 }
 
@@ -8410,6 +8421,21 @@ async function attachResumeOnly(context, page, form, profile, job) {
   if (outcome !== true) return { wanted: true, note: `attaching the resume failed: ${outcome}` };
 
   await page.waitForTimeout(3000); // ATS parse the upload
+  // Whether the form is in fact holding a file. Where the box itself can
+  // say — some forms take the file and clear the box — an empty one after
+  // a quiet failure is put right once and then said.
+  const holding = async () => fileInputs[0].evaluate((n) => (n.isConnected ? n.files?.length ?? null : null)).catch(() => null);
+  let held = await holding();
+  if (held === 0) {
+    const named = await page.evaluate((name) => (document.body?.innerText ?? "").includes(name), nodePath.basename(pdf)).catch(() => false);
+    if (!named) {
+      await fileInputs[0].setInputFiles(pdf).catch(() => {});
+      await page.waitForTimeout(2500);
+      held = await holding();
+      const namedNow = await page.evaluate((name) => (document.body?.innerText ?? "").includes(name), nodePath.basename(pdf)).catch(() => false);
+      if (held === 0 && !namedNow) console.log("    the form shows no resume held after two tries; it may have taken it without saying");
+    }
+  }
   return { wanted: true, note: "resume attached" };
 }
 

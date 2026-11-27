@@ -221,7 +221,31 @@ async function geminiOnly(prompt, apiKey, maxTokens = 600, attempt = 0, temperat
 // either is set, a request Gemini cannot take is put to it instead: same
 // prompt, same checks on the reply afterwards, and still nothing to pay.
 // (The fall-back order and the protocol follow billmal071/job-agent, MIT.)
+// A model on the machine itself, where one is running: Ollama, llama.cpp's
+// server, LM Studio and the like all speak the same chat protocol on a local
+// port. LOCAL_AI_URL names it ("http://127.0.0.1:11434/v1" for Ollama) and
+// LOCAL_AI_MODEL which model; with LOCAL_AI_FIRST=1 it is asked before
+// anything outside, and with no Gemini key at all it is the only one asked.
+// Nothing leaves the machine, and there is nothing to pay or run out of.
+const LOCAL = {
+  name: "the local model",
+  key: () => (process.env.LOCAL_AI_URL ? "local" : ""),
+  get base() { return String(process.env.LOCAL_AI_URL ?? "").replace(/\/+$/, ""); },
+  model: () => process.env.LOCAL_AI_MODEL,
+  prefer: /./,
+};
+// Every caller in this system hands over GEMINI_API_KEY and does nothing
+// without one. Where only a local model is set, the stand-in is put there,
+// so that none of them needs to know.
+if (!process.env.GEMINI_API_KEY && process.env.LOCAL_AI_URL) process.env.GEMINI_API_KEY = "local";
+export const localOnly = () => Boolean(process.env.LOCAL_AI_URL) && (process.env.GEMINI_API_KEY === "local" || process.env.LOCAL_AI_FIRST === "1");
+/** The key callers hand to this module: Gemini's, or a stand-in where only a local model is set. */
+export function modelKey() {
+  return process.env.GEMINI_API_KEY || (process.env.LOCAL_AI_URL ? "local" : "");
+}
+
 const SECOND = [
+  LOCAL,
   { name: "groq", key: () => process.env.GROQ_API_KEY, base: "https://api.groq.com/openai/v1", model: () => process.env.GROQ_MODEL, prefer: /llama.*70b|versatile/i },
   { name: "openrouter", key: () => process.env.OPENROUTER_API_KEY, base: "https://openrouter.ai/api/v1", model: () => process.env.OPENROUTER_MODEL, prefer: /:free$/i },
 ];
@@ -268,7 +292,7 @@ async function secondOpinion(prompt, maxTokens, temperature) {
       if (!res.ok) continue;
       const text = String((await res.json())?.choices?.[0]?.message?.content ?? "").trim();
       if (!text) continue;
-      if (!SECOND_SAID.has(p.name)) { SECOND_SAID.add(p.name); console.warn(`[answers] Gemini has no free allowance left for now; ${p.name} is answering instead.`); }
+      if (!SECOND_SAID.has(p.name)) { SECOND_SAID.add(p.name); console.warn(localOnly() ? `[answers] ${p.name} is answering.` : `[answers] Gemini has no free allowance left for now; ${p.name} is answering instead.`); }
       return text;
     } catch {
       /* this one did not answer; the next is asked */
@@ -279,6 +303,13 @@ async function secondOpinion(prompt, maxTokens, temperature) {
 const SECOND_SAID = new Set();
 
 async function gemini(prompt, apiKey, maxTokens = 600, attempt = 0, temperature = 0.6, hops = 0) {
+  // The machine's own model first, where that is what has been asked for;
+  // only if it gives nothing is anything outside asked, and only with a key.
+  if (localOnly()) {
+    const own = await secondOpinion(prompt, maxTokens, temperature);
+    if (own !== null) return own;
+    if (process.env.GEMINI_API_KEY === "local" || apiKey === "local") throw new Error("the local model gave no answer");
+  }
   try {
     return await geminiOnly(prompt, apiKey, maxTokens, attempt, temperature, hops);
   } catch (e) {

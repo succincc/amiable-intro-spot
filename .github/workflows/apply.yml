@@ -201,6 +201,11 @@ jobs:
           # touching the saved setting. Empty means use the panel's.
           RADIUS_MILES: ${{ github.event.inputs.radius || '' }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          # A model on the runner itself, where the runner is one's own machine
+          # with Ollama or the like on it. Unset on GitHub's runners.
+          LOCAL_AI_URL: ${{ vars.LOCAL_AI_URL }}
+          LOCAL_AI_MODEL: ${{ vars.LOCAL_AI_MODEL }}
+          LOCAL_AI_FIRST: ${{ vars.LOCAL_AI_FIRST }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           GEMINI_MODEL: ${{ secrets.GEMINI_MODEL || 'gemini-3.8-flash' }}
