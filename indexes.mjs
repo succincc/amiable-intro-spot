@@ -64,10 +64,21 @@ export function careersFrom(website) {
   }
 }
 
+/**
+ * Asked politely: a reference site that says "too many, wait" is waited
+ * for, as long as it says, and asked again.
+ */
 async function getJson(url) {
-  const res = await fetch(url, { headers: { "User-Agent": UA, Accept: "application/json" }, signal: AbortSignal.timeout(30_000) });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
+  let last = "";
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const res = await fetch(url, { headers: { "User-Agent": UA, Accept: "application/json" }, signal: AbortSignal.timeout(30_000) });
+    if (res.ok) return res.json();
+    last = `HTTP ${res.status}`;
+    if (res.status !== 429 && res.status < 500) break;
+    const asked = Number(res.headers.get("retry-after"));
+    await new Promise((r) => setTimeout(r, Math.min(90_000, (Number.isFinite(asked) && asked > 0 ? asked : 5 * 2 ** attempt) * 1000)));
+  }
+  throw new Error(last);
 }
 const pause = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -130,7 +141,7 @@ if (process.env.INDEXES_IMPORT_ONLY !== "1") {
     } catch (e) {
       errors.push(`entry lookup: ${String(e?.message ?? e).slice(0, 60)}`);
     }
-    await pause(600);
+    await pause(2500);
   }
 
   // 3. Each entry's official website.
@@ -148,7 +159,7 @@ if (process.env.INDEXES_IMPORT_ONLY !== "1") {
     } catch (e) {
       errors.push(`web address lookup: ${String(e?.message ?? e).slice(0, 60)}`);
     }
-    await pause(600);
+    await pause(2500);
   }
   console.log(`entries found for ${item.size} name(s), ${ids.length} distinct; web addresses for ${site.size}${errors.length ? `; errors ${JSON.stringify([...new Set(errors)].slice(0, 4))}` : ""}`);
 
