@@ -6001,7 +6001,7 @@ function defaultYesNo(label, p) {
   const l = String(label ?? "").toLowerCase().replace(/\s+/g, " ");
   const resume = String(p?.resume_text ?? "").toLowerCase();
   // Two notices are worded as statements and still want a Yes or a No.
-  const STATED = /public accounting firm|immigration reform and control act/;
+  const STATED = /public accounting firm|immigration reform and control act|^(travel (domestically|internationally)|work a flexible schedule|consider part.time work)$/;
   if (!/\?|^(are|do|does|did|have|has|can|will|would|is|were) /.test(l) && !STATED.test(l)) return null;
   if (/\b(race|ethnic|gender|sex|veteran|disabilit|hispanic|latin|religion|orientation|pronoun)/.test(l)) return null;
   // "In accordance with the Immigration Reform and Control Act… you will be
@@ -6163,6 +6163,11 @@ function defaultYesNo(label, p) {
   // resume shows of leading anyone.
   if (/\bhave you (ever |previously )?(led|managed|supervised|mentored|coached|trained)\b/.test(l)) {
     return /\b(supervis\w*|manag(ed|er|ing)\w*|team lead\w*|led (a|the) team|director|mentor\w*|coach\w*|train(ed|ing) (new|staff|team|employees))\b/.test(resume) ? "Yes" : "No";
+  }
+
+  // "Are you currently employed?" The resume says whether a job runs to now.
+  if (/^are you (currently|presently) employed\b/.test(l)) {
+    return /\b(present|current)\b/.test(resume) ? "Yes" : "No";
   }
 
   // Conflicts, restrictions and adverse history: No.
@@ -11471,6 +11476,19 @@ async function saveGeneratedAnswer(question, answer, fieldType) {
  * removed. Anything else stays for the owner. Where the form offered its own
  * list of options, the answer has to be one of them or it is left alone.
  */
+/**
+ * Labels that reached the owner's page and are not questions for a person.
+ *
+ * Sixty-four were left on the page after everything answerable was answered,
+ * and most were the form's own plumbing: one digit of an emailed code, a
+ * field known only by its serial number, the boxes of a job-history or
+ * education block that the resume fills, "if yes, provide details" under a
+ * question answered no. Nobody can answer those from a list, and nothing
+ * here would use the answer.
+ */
+const NOT_A_QUESTION =
+  /verification code|\bpin-code\b|^primaryquestionnaire--|^select one required [0-9a-f]{16,}|^(month|year)\b[^?]*datesection|^(company|role description|degree(\s*\/\s*certificate)?|middle name|county|overall result|phone device type)\b(?![^?]*\?)|^state\s+(state|select|province)\b|^if (yes|no|so|applicable),? |^other agency\b|^please (select as appropriate|of the below options)|^note to california residents/i;
+
 async function refreshAnswers(profile) {
   const flat = (t) => String(t ?? "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
   // Answers already saved that the profile now says otherwise: a link that
@@ -11512,7 +11530,7 @@ async function refreshAnswers(profile) {
   for (const row of rows) {
     const q = String(row.question ?? "").trim();
     try {
-      if (!q || NEVER.test(q)) {
+      if (!q || NEVER.test(q) || NOT_A_QUESTION.test(q)) {
         await db(`answers?id=eq.${row.id}`, { method: "DELETE", headers: { Prefer: "return=minimal" } });
         removed++;
         continue;
@@ -11626,6 +11644,9 @@ async function recordUnknowns(all) {
       !/^(prefix|suffix|title|salutation)\b/i.test(String(u?.question ?? "").trim()) &&
       // A passcode or a password is the portal's business, not a question.
       !/^pass(code|word)\b/i.test(String(u?.question ?? "").trim()),
+  ).filter(
+    // Nor the form's own plumbing, which nobody can answer from a list.
+    (u) => !NOT_A_QUESTION.test(String(u?.question ?? "").trim()),
   );
   // Say what is being handed to the panel.
   //
