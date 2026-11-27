@@ -114,6 +114,7 @@ jobs:
           icims.yml|12|apply=true
           boards.yml|6|apply=true
           usajobs.yml|12|apply=true
+          phones.yml|6|apply=true
           resolve.yml|24|apply=true,max=150
           outreach.yml|6|mode=send
           summary.yml|20|dry=false|12

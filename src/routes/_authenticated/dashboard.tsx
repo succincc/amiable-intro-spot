@@ -5,6 +5,7 @@ import { useServerFn } from "@tanstack/react-start";
 
 import { Btn, Cursor, Empty, ErrorLine, Section, inputCls } from "@/components/mission-control/async-state";
 import { StartCard } from "@/components/mission-control/start-card";
+import { CallSheet } from "@/components/mission-control/call-sheet";
 import { supabase } from "@/integrations/supabase/client";
 import {
   relTime, clockTime,
@@ -103,6 +104,8 @@ function Dashboard() {
       ) : null}
 
       <StartCard />
+
+      <CallSheet />
 
       <AutopilotCard />
 
