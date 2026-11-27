@@ -7819,9 +7819,11 @@ const STEP_PRIORITY = ["apply manually", "manual", "start manually", "use my las
  */
 async function dismissBanners(page) {
   const WORDS =
-    /^(accept( all)?( cookies)?|allow all( cookies)?|i accept|agree|i agree|ok|got it|continue)$/i;
+    /^(accept( all)?( cookies)?|allow all( cookies)?|i accept|agree|i agree|ok|got it|continue|consent (&|and) continue|accept (&|and) (continue|close))$/i;
   for (const frame of framesOf(page)) {
-    for (const el of (await frame.$$("button, a, [role=button]").catch(() => [])).slice(0, 60)) {
+    // ADP draws its buttons as its own element, <sdf-button>; its consent
+    // banner sat over the Apply button through four presses.
+    for (const el of (await frame.$$("button, a, [role=button], sdf-button").catch(() => [])).slice(0, 80)) {
       try {
         const t = ((await el.innerText().catch(() => "")) || "").replace(/\s+/g, " ").trim();
         if (!WORDS.test(t)) continue;
