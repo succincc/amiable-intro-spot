@@ -35,3 +35,4 @@ jobs:
           APPLYPILOT_PASSWORD: ${{ secrets.APPLYPILOT_PASSWORD }}
           APPLY: ${{ github.event.inputs.apply == 'true' }}
 
+        run: node nearby.mjs
