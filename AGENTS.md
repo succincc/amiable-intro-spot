@@ -10,6 +10,7 @@
 <!-- LOVABLE:END -->
 
 ## Architecture
+- Workspace reset uses fixed user-scoped SQL after owner and target checks; elevated reset access must never execute assembled commands.
 - Gmail Settings reads an authenticated metadata-only server function; refresh and access tokens never enter page responses or query caches.
 - Large-employer imports run sequential authenticated batches from Settings, with database-backed progress and resumable pending rows, to avoid one unbounded server request.
 - Employer retry passes use a fixed checked-at cutoff and wait for server completion, so unresolved employers are checked once per pass rather than endlessly retried.

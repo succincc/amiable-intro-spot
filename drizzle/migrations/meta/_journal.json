@@ -281,6 +281,13 @@
       "when": 1795750508025,
       "tag": "0039_own_resume_switch",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1795750921002,
+      "tag": "0040_secure_workspace_reset",
+      "breakpoints": true
     }
   ]
 }
