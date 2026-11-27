@@ -754,7 +754,7 @@ function fieldValue(label, p) {
   // field is empty.
   if (/\b(where|which company)\b[^?]{0,30}\bmost recent(ly)?\b[^?]{0,20}\b(work|employ)|\bmost recent (employer|company)\b|\bcurrent or (most recent|last|previous) (employer|company)\b/i.test(String(label))) {
     let from = null;
-    try { from = latestRoleFrom(null, p)?.company || parseWorkFromResume(p.resume_text)?.company || null; } catch { from = null; }
+    try { from = (typeof WORK !== "undefined" && WORK?.company) || latestRoleFrom(null, p)?.company || parseWorkFromResume(p.resume_text)?.company || null; } catch { from = null; }
     // The roles the person has entered themselves: the one with no end, or
     // the one that ended latest. A resume without dates on it gave nothing.
     if (!p.current_company && !from && Array.isArray(ROLE_ROWS) && ROLE_ROWS.length) {
@@ -8940,6 +8940,12 @@ async function readPosting(page, job) {
 
 async function applyToJobOnce(context, job, profile, answers) {
   let page = await context.newPage();
+  // The latest job, read once before any box is filled: from the resume
+  // written for this posting, the resume on file, the roles entered by
+  // hand, and last the model. "Where have you most recently worked?" was
+  // left empty on a resume that says it in its first lines, because only
+  // the readers that need dates in a set shape had been asked.
+  await workHistory(profile, job).catch(() => null);
   const answerMap = new Map((answers || []).map((a) => [a.q_key, a.answer]));
   const lookupSaved = (label) => {
     const l = String(label ?? "").trim();
