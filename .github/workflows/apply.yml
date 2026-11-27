@@ -41,6 +41,14 @@ on:
       # timer would have started — every portal's lane, and submitting only
       # if autopilot is on in the panel, under the same daily limit. The
       # other inputs are ignored.
+      # A look at one portal, started by hand, does not need the form tests
+      # run before it: they take a minute and a half, and a run that goes
+      # out on the timer still runs them every time.
+      quick:
+        description: "Skip the form self-test (for a hand-started look at one portal)"
+        type: boolean
+        required: false
+        default: false
       as_scheduled:
         description: "Run exactly as the timer would (autopilot decides whether it submits)"
         type: boolean
@@ -169,6 +177,7 @@ jobs:
         run: node unit.mjs
 
       - name: Self-test
+        if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.quick == 'true' && github.event.inputs.as_scheduled != 'true') }}
         run: node selftest.mjs
 
       - name: Apply
