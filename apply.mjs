@@ -11742,7 +11742,7 @@ async function applyToJobOnce(context, job, profile, answers) {
                     await page.keyboard.type(profile.email, { delay: 35 });
                     await page.waitForTimeout(500);
                     const askedAt = Date.now();
-                    const go = page.locator("sdf-button, button").filter({ hasText: /^\s*(continue|next|sign in)\s*$/i }).filter({ visible: true }).first();
+                    const go = page.locator("sdf-button, button").filter({ hasText: /^\s*(continue|next)\s*$/i }).filter({ visible: true }).first();
                     if (await go.isVisible().catch(() => false)) await go.click({ timeout: 5000 }).catch(() => {});
                     else await page.keyboard.press("Enter").catch(() => {});
                     await page.waitForTimeout(6000);
@@ -11755,7 +11755,9 @@ async function applyToJobOnce(context, job, profile, answers) {
                       // A code already sent, and a box waiting for it.
                       const wantsPassword = await page.locator("input[type=password]").filter({ visible: true }).first().isVisible().catch(() => false);
                       const codeBox = page.locator('input[type=text], input[type=tel], input[type=number], input:not([type])').filter({ visible: true }).first();
-                      if (!wantsPassword && /code/i.test(text) && (await codeBox.isVisible().catch(() => false))) {
+                      const backAtGuest = (next?.boxes ?? []).some((x) => /first name/i.test(x));
+                      if (backAtGuest) console.log("    ADP's sign-in fell back to its guest form");
+                      if (!backAtGuest && !wantsPassword && /code/i.test(text) && (await codeBox.isVisible().catch(() => false))) {
                         const code = await waitForVerificationCode(hostOf(page.url()), job.company, 9, 10_000, askedAt);
                         if (code) {
                           await codeBox.click({ timeout: 3000 }).catch(() => {});
