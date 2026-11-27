@@ -12291,6 +12291,16 @@ const main = async () => {
         STALLED_COMPANIES.add(companyOf(job));
         console.log("    this employer's portal emails a code for each attempt and this one stalled; its other postings wait for a later run");
       }
+      // A portal that met one application with a human check, or with "try
+      // again later", meets the next the same way: six of one employer's
+      // postings went to the same check in one run, and five of another's
+      // to the same refusal. One is enough to know; the rest stay queued for
+      // a later run and the time goes to employers that are letting
+      // applications through.
+      if (outcome.status === "needs_help" && (outcome.help_reason === "captcha" || /try again later|too many (requests|attempts)|temporarily unavailable/i.test(String(outcome.note ?? "")))) {
+        if (!STALLED_COMPANIES.has(companyOf(job))) console.log("    this employer's portal turned this visit away; its other postings wait for a later run");
+        STALLED_COMPANIES.add(companyOf(job));
+      }
 
       // Pressed Submit and saw no confirmation: the employer may well have it.
       if (outcome.status !== "applied" && outcome.help_reason === "unconfirmed") {
