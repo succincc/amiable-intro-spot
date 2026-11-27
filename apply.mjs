@@ -5321,18 +5321,28 @@ async function adpVerify(page, job) {
   await page.waitForTimeout(3500);
   const after = await shapeOf();
   console.log(`    after Send, the pane holds: ${JSON.stringify(after)}`);
-  const box = pane.locator('input:not([type=radio]):not([type=checkbox]):not([type=hidden])').first();
-  if (!(await box.isVisible().catch(() => false))) return false;
-  const code = await waitForVerificationCode(hostOf(page.url()), job.company, 9, 10_000, askedAt);
+  // The pane closes on Send, and the box for the code is on the page itself.
+  let box = pane.locator('input:not([type=radio]):not([type=checkbox]):not([type=hidden])').first();
+  let onPage = false;
+  if (!(await box.isVisible().catch(() => false))) {
+    box = page.locator('#oneTimePassWord, input[id*=onetime i], input[name*=onetime i], input[id*=otp i]').first();
+    for (let i = 0; i < 8 && !(await box.isVisible().catch(() => false)); i++) await page.waitForTimeout(1000);
+    if (!(await box.isVisible().catch(() => false))) return false;
+    onPage = true;
+  }
+  console.log(`    ADP sent its code and waits for it ${onPage ? "on the page" : "in the pane"}`);
+  const code = await waitForVerificationCode(hostOf(page.url()), null, 9, 10_000, askedAt);
   if (!code) return false;
   await box.click({ timeout: 3000 }).catch(() => {});
   await page.keyboard.type(code, { delay: 60 });
   await page.waitForTimeout(600);
-  const go = pane.locator('sdf-button, button').filter({ hasText: /^(verify|submit|continue|confirm|next|done)/i }).first();
+  const scope = onPage ? page : pane;
+  const go = scope.locator('sdf-button, button').filter({ hasText: /^\s*(verify|submit|confirm|done)\s*$/i }).filter({ visible: true }).first();
   if (await go.isVisible().catch(() => false)) await go.click({ timeout: 5000 }).catch(() => {});
-  await page.waitForTimeout(5000);
-  const still = await pane.isVisible().catch(() => false);
-  console.log(`    typed ADP's code; the pane is ${still ? "still there" : "gone"}`);
+  else await page.keyboard.press("Enter").catch(() => {});
+  await page.waitForTimeout(6000);
+  const still = await box.isVisible().catch(() => false);
+  console.log(`    typed ADP's code; its box is ${still ? "still there" : "gone"}`);
   return !still;
 }
 
@@ -7260,11 +7270,11 @@ const LOGIN_HOST = { at: null };
 async function ukgAccount(page, form, profile, job) {
   const where = [page.url(), ...page.frames().map((f) => f.url())].find((u) => /ultipro\.com|ukg\.(com|net)/i.test(u)) ?? page.url();
   const m = where.match(/https?:\/\/([^/]+)\/([^/]+)\/JobBoard\//i);
-  const key = m ? `${m[1].toLowerCase()}/${m[2].toLowerCase()}` : (hostOf(where) ?? "ukg");
+  let key = m ? `${m[1].toLowerCase()}/${m[2].toLowerCase()}` : (hostOf(where) ?? "ukg");
   const rows = (await db(`site_accounts?host=eq.${encodeURIComponent(key)}&select=*`).catch(() => [])) ?? [];
-  const existing = rows[0] ?? null;
+  let existing = rows[0] ?? null;
   const email = profile.email;
-  const password = existing?.password || generatePassword();
+  let password = existing?.password || generatePassword();
   if (!email) return { ok: false, reason: "no email on file" };
 
   const inAny = async (sel) => {
@@ -7296,6 +7306,13 @@ async function ukgAccount(page, form, profile, job) {
     const loginAt = page.frames().map((f) => f.url()).find((u) => /\/u\/(login|signup|reset)/i.test(u));
     if (loginAt) LOGIN_HOST.at = hostOf(loginAt);
     console.log(`    its sign-in lives on ${LOGIN_HOST.at === hostOf(where) ? "the board's own host" : "another host than the board's"}`);
+    // Every board that signs in there shares the one account.
+    if (LOGIN_HOST.at && LOGIN_HOST.at !== hostOf(where)) {
+      key = LOGIN_HOST.at;
+      const shared = (await db(`site_accounts?host=eq.${encodeURIComponent(key)}&select=*`).catch(() => [])) ?? [];
+      existing = shared[0] ?? null;
+      password = existing?.password || generatePassword();
+    }
   }
 
   const stands = async () => {
@@ -7458,10 +7475,32 @@ async function ukgAccount(page, form, profile, job) {
         if (!(await c.isChecked().catch(() => false))) await c.check({ force: true, timeout: 3000 }).catch(() => c.click({ force: true }).catch(() => {}));
       }
     }
+    const tel = await inAny('input[name*=phone i], input[type=tel]');
+    if (tel) {
+      await tel.click({ timeout: 3000 }).catch(() => {});
+      await page.keyboard.type(String(profile.phone ?? "").replace(/\D/g, "").replace(/^1(?=\d{10}$)/, ""), { delay: 40 }).catch(() => {});
+    }
     await page.waitForTimeout(500);
-    const sent = await press(/^\s*(register|continue|submit|create( my)? account|save|next|sign up)\s*$/i);
-    console.log(`    its registration: name ${first && last ? "typed" : "boxes not found"}, agreement ticked, ${sent ? "sent" : "no button to send it"}`);
-    await page.waitForTimeout(5000);
+    let sent = await press(/^\s*(register|continue|submit|create( my)? account|save|next|sign up|done|finish|complete)\s*$/i);
+    if (!sent) {
+      // Not a button by its tag: whatever on the page reads as the way on.
+      for (const f of page.frames()) {
+        const hit = await f.evaluate(() => {
+          const on = (e) => { const b = e.getBoundingClientRect(); return b.width > 0 && b.height > 0; };
+          const all = Array.from(document.querySelectorAll("a, button, input, span, div, [role=button], [data-automation]")).filter(on);
+          const says = (e) => (e.innerText || e.value || "").replace(/\s+/g, " ").trim();
+          const one = all.filter((e) => /^(register|continue|submit|create( my)? account|save|next|sign up|done|finish|complete)$/i.test(says(e))).pop();
+          if (one) { one.click(); return says(one); }
+          return { offered: all.map(says).filter((t) => t && t.length < 26).filter((t, i, a) => a.indexOf(t) === i).slice(0, 14) };
+        }).catch(() => null);
+        if (typeof hit === "string") { sent = true; console.log(`    pressed "${hit}"`); break; }
+        if (hit?.offered?.length) console.log(`    its registration page offers: ${JSON.stringify(hit.offered)}`);
+      }
+    }
+    if (!sent && last) await last.press("Enter").catch(() => {});
+    console.log(`    its registration: name ${first && last ? "typed" : "boxes not found"}, agreement ticked, ${sent ? "sent" : "sent with Enter"}`);
+    await page.waitForTimeout(6000);
+    console.log(`    after its registration the board stands: ${JSON.stringify(await stands())}`);
     break;
   }
   {
@@ -8658,7 +8697,23 @@ async function greenhouseBoard(company) {
  * same job at its own address; the employer's page only embeds it. So when
  * the wrapper yields nothing, go to what it wraps.
  */
+// ADP and UKG each know the applicant by one email across every employer,
+// and two sign-ins under it at once undo each other: ADP answered one of two
+// workers "another user account already exists" and the other with its code
+// box. Their postings are taken one at a time.
+const ONE_AT_A_TIME = { adp: null, ukg: null };
 async function applyToJob(context, job, profile, answers) {
+  const lane = job.ats === "adp" || job.ats === "ukg" ? job.ats : null;
+  if (!lane) return await applyToJobFree(context, job, profile, answers);
+  for (let i = 0; ONE_AT_A_TIME[lane] && i < 400; i++) await new Promise((r) => setTimeout(r, 1500));
+  ONE_AT_A_TIME[lane] = job.id;
+  try {
+    return await applyToJobFree(context, job, profile, answers);
+  } finally {
+    if (ONE_AT_A_TIME[lane] === job.id) ONE_AT_A_TIME[lane] = null;
+  }
+}
+async function applyToJobFree(context, job, profile, answers) {
   const first = await applyToJobOnce(context, job, profile, answers);
 
   const at = String(job.apply_url || job.url || "");
@@ -11780,9 +11835,6 @@ async function applyToJobOnce(context, job, profile, answers) {
               console.log(`    ADP, to someone with an account, offers: ${JSON.stringify(await lay(page))}`);
               let adpHeld = false;
               try {
-                for (let i = 0; ADP_BUSY.on && i < 240; i++) await page.waitForTimeout(1500);
-                ADP_BUSY.on = true;
-                adpHeld = true;
                 const way = page.locator("a, button, sdf-button, sdf-link").filter({ hasText: /^\s*(sign in|log in|already have an account\??( sign in)?)\s*$/i }).first();
                 if (await way.isVisible().catch(() => false)) {
                   await way.click({ timeout: 5000 }).catch(() => {});
