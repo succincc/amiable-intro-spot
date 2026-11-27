@@ -764,6 +764,7 @@ export type Database = {
           salary_expectation: number | null
           salary_min: number | null
           state: string | null
+          tailor_resumes: boolean
           target_role: string | null
           updated_at: string | null
           user_id: string
@@ -822,6 +823,7 @@ export type Database = {
           salary_expectation?: number | null
           salary_min?: number | null
           state?: string | null
+          tailor_resumes?: boolean
           target_role?: string | null
           updated_at?: string | null
           user_id?: string
@@ -880,6 +882,7 @@ export type Database = {
           salary_expectation?: number | null
           salary_min?: number | null
           state?: string | null
+          tailor_resumes?: boolean
           target_role?: string | null
           updated_at?: string | null
           user_id?: string
@@ -1201,6 +1204,7 @@ export type Database = {
       app_uid: { Args: never; Returns: string }
       app_uid_or_owner: { Args: never; Returns: string }
       applications_today: { Args: never; Returns: number }
+      catalogue_sync: { Args: { p_user?: string }; Returns: number }
       claim_next_job: {
         Args: never
         Returns: {
