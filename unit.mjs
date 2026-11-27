@@ -487,5 +487,14 @@ quiet.hideJob({ company: "ZQ" });
   ], [true, true, false, false, false, false, true, null]);
 }
 
+{
+  process.env.FORUSERS_IMPORT_ONLY = "1";
+  const fu = await import("./forusers.mjs");
+  check("the line: turned an hour at a time, and a job's time shared evenly", [
+    fu.turnOrder(["a", "b", "c"], 0), fu.turnOrder(["a", "b", "c"], 3_600_000), fu.turnOrder(["a", "b", "c"], 2 * 3_600_000), fu.turnOrder(["a"], 5 * 3_600_000), fu.turnOrder([], 1),
+    fu.shareOfTime(1, 300), fu.shareOfTime(2, 300), fu.shareOfTime(30, 300), fu.shareOfTime(100, 300),
+  ], [["a", "b", "c"], ["b", "c", "a"], ["c", "a", "b"], ["a"], [], 300, 135, 9, 8]);
+}
+
 console.log(failed ? `unit: ${failed} failed, ${passed} passed.` : `unit: all ${passed} passed.`);
 process.exit(failed ? 1 : 0);

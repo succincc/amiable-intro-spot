@@ -25,6 +25,19 @@ const [script, ...args] = process.argv.slice(2);
 /** Jobs that build the shared list of employers: run for the owner only. */
 export const ONE_LIST = new Set(["resolve.mjs", "indexes.mjs", "crawl.mjs", "nearby.mjs", "feeds.mjs"]);
 
+/** The line, turned so that it starts one place further on each hour. */
+export function turnOrder(line, now) {
+  if (line.length < 2) return [...line];
+  const k = Math.floor(now / 3_600_000) % line.length;
+  return [...line.slice(k), ...line.slice(0, k)];
+}
+
+/** Minutes each person gets of a job's time: an even part, and never under eight. */
+export function shareOfTime(people, whole) {
+  if (people <= 1) return whole;
+  return Math.max(8, Math.min(whole, Math.floor((whole * 0.9) / people)));
+}
+
 /** Who to run for, after the owner: approved people whose workspace exists. */
 export async function others(fetchImpl = fetch) {
   if (!SUPABASE_URL || !ANON_KEY || !process.env.APPLYPILOT_EMAIL || !process.env.APPLYPILOT_PASSWORD) return [];
@@ -59,18 +72,28 @@ if (process.env.FORUSERS_IMPORT_ONLY !== "1") {
     console.error("usage: node forusers.mjs <script.mjs>");
     process.exit(2);
   }
+  // Finding employers and working out which hiring system each is on fills
+  // one list that everybody reads. It is done once, not once per person.
+  const line = ONE_LIST.has(script) ? [] : await others();
+  // Whoever was last in the line an hour ago is first after the owner now.
+  // In a fixed order the same people would always be reached last, and on a
+  // day with full queues not reached at all.
+  const rest = turnOrder(line, Date.now());
+  // The time one job has, shared out. Applying is the one script that can
+  // fill hours; with a line of people each gets an even part of the job's
+  // time, the owner included, so that nobody's full queue is the reason
+  // somebody else's is not touched.
+  const share = shareOfTime(rest.length + 1, Number(process.env.RUN_BUDGET_MIN || 300));
   const run = (actAs) => {
     const env = { ...process.env };
     if (actAs) env.AP_ACT_AS = actAs;
     else delete env.AP_ACT_AS;
+    if (script === "apply.mjs" && rest.length) env.RUN_BUDGET_MIN = String(share);
     return spawnSync(process.execPath, [script, ...args], { stdio: "inherit", env }).status ?? 1;
   };
 
   // The owner's round first, as it has always run.
   const first = run(null);
-  // Finding employers and working out which hiring system each is on fills
-  // one list that everybody reads. It is done once, not once per person.
-  const rest = ONE_LIST.has(script) ? [] : await others();
   let failed = 0;
   for (let i = 0; i < rest.length; i++) {
     console.log(`\n==== person ${i + 2} of ${rest.length + 1} ====`);
