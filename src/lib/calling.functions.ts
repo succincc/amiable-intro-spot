@@ -35,8 +35,13 @@ export const saveCallingKeys = createServerFn({ method: "POST" })
       if (v) patch[k] = v.slice(0, 200);
     }
     if (!Object.keys(patch).length) return { ok: true as const, saved: 0 };
+    // The assistant and the number are set up in the voice account from
+    // these; anything changed here means setting them up again.
+    const fresh: Record<string, null> = {};
+    if (patch["voice_key"] || patch["voice_id"]) fresh["agent_id"] = null;
+    if (patch["voice_key"] || patch["phone_sid"] || patch["phone_token"] || patch["phone_number"]) fresh["phone_id"] = null;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { error } = await (supabaseAdmin as any).from("call_keys").upsert({ id: 1, ...patch, updated_at: new Date().toISOString() }, { onConflict: "id" });
+    const { error } = await (supabaseAdmin as any).from("call_keys").upsert({ id: 1, ...patch, ...fresh, updated_at: new Date().toISOString() }, { onConflict: "id" });
     return error ? { ok: false as const, message: error.message } : { ok: true as const, saved: Object.keys(patch).length };
   });
 

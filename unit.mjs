@@ -22,6 +22,7 @@ const pretailor = await import("./pretailor.mjs");
 const sf = await import("./successfactors.mjs");
 const quiet = await import("./quiet.mjs");
 const near = await import("./near.mjs");
+const school = await import("./school.mjs");
 process.env.PHONES_IMPORT_ONLY = "1";
 const phones = await import("./phones.mjs");
 process.env.USAJOBS_IMPORT_ONLY = "1";
@@ -369,6 +370,11 @@ quiet.hideJob({ company: "ZQ" });
   check("quiet: a file name", say("uploaded Pat_Example_Resume.pdf"), "uploaded […]");
   check("quiet: a short first name is not struck out of other words", say("dispatch the patrol"), "dispatch the patrol");
   check("quiet: what is not the owner's is left alone", say("step 2: advanced with \"Save and Continue\" at Acme"), "step 2: advanced with \"Save and Continue\" at Acme");
+  check("school: the name alone, whatever was tacked on", [school.schoolNameOnly("Example State University - Bachelor of Arts"), school.schoolNameOnly("Example College, Springfield (2019)"), school.schoolNameOnly("Example State University")], ["Example State University", "Example College", "Example State University"]);
+  check("school: the line that holds every word of the name, the shortest of them, and never a guess", [
+    school.schoolOption([{ text: "Example State University - Online Campus" }, { text: "Example State University" }, { text: "Other State University" }], "Example State University")?.text,
+    school.schoolOption([{ text: "Other State University" }, { text: "Sample College" }], "Example State University"),
+  ], ["Example State University", null]);
   check("quiet: nothing to strike out, nothing changed", quiet.scrub("plain line", [], null), "plain line");
 }
 

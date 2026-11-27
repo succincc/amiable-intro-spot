@@ -29,6 +29,7 @@ import { alignToPosting, composeAnswer } from "./ats.mjs";
 import { tailorResume, rolesText, standardResume, arrangedResume, structureResume } from "./tailor.mjs";
 import { guardLogs, hideJob, STATES } from "./quiet.mjs";
 import { FRESH_DAYS } from "./fresh.mjs";
+import { schoolNameOnly, schoolOption } from "./school.mjs";
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const ANON_KEY = process.env.SUPABASE_ANON_KEY;
@@ -6663,7 +6664,7 @@ function parseSchoolFromResume(resume) {
     if (!/\b(university|college|institute of technology|polytechnic)\b/i.test(line)) continue;
     // Strip a degree, a date or a location tacked onto the same line.
     const name = line
-      .split(/\s*(?:\||•|·|–|—|,|\u2013)\s*/)
+      .split(/\s+-\s+|\s*(?:\||•|·|–|—|,|\u2013)\s*/)
       .find((b) => /\b(university|college|institute|polytechnic)\b/i.test(b));
     if (name && name.trim().length > 3) return name.trim();
   }
@@ -9084,6 +9085,62 @@ async function applyToJobOnce(context, job, profile, answers) {
               // search matches. "Law & Justice Studies" matches nothing and
               // neither need its first word alone, while "Justice" finds
               // "Criminal Justice" at once.
+              // A school is on the list under the employer's wording of its
+              // name, not the resume's. One employer's list said "No Items."
+              // to the name five times over, entry after entry, and a
+              // finished application stopped there twice. So the name is
+              // asked for by its own distinctive words, one at a time, and
+              // where the list holds none of them, by the list's own entry
+              // for a school that is not on it.
+              if (
+                /\b(school|university|college|institution)\b/i.test(label) &&
+                !/high school (name|diploma)|type of school/i.test(label) &&
+                (await chosenCount()) === 0 &&
+                !(offered.length && bestOption(offered, want, label))
+              ) {
+                const plain = schoolNameOnly(want);
+                const words = plain
+                  .split(/[^A-Za-z]+/)
+                  .filter((w) => w.length > 3 && !/^(university|college|institute|school|state|community|campus|main)$/i.test(w));
+                const asks = [...new Set([plain, ...words, "Other", "Not Listed"])].filter(Boolean);
+                for (const word of asks) {
+                  const last = /^(other|not listed)$/i.test(word);
+                  await node.fill("", { timeout: 3000 }).catch(() => {});
+                  await node.type(word, { delay: 40 }).catch(() => {});
+                  await node.press("Enter").catch(() => {});
+                  await page.waitForTimeout(1500);
+                  if (((await chosenCount()) ?? 0) > 0) {
+                    clickedText = word;
+                    offered = [];
+                    console.log(`    "${label.slice(0, 28)}" the portal took the school ${last ? "as one not on its list" : "by a word of its name"}`);
+                    break;
+                  }
+                  const seen = (await popupOptions(form, node)).filter((o) => o.text && !/^no items/i.test(o.text));
+                  const pick = last
+                    ? seen.find((o) => /^(other|not listed|school not listed|unlisted)/i.test(o.text.trim()))
+                    : schoolOption(seen, plain);
+                  if (pick) {
+                    const inner = await pick.el.$('[data-automation-id="promptOption"]').catch(() => null);
+                    try {
+                      await (inner ?? pick.el).click({ timeout: 3000 });
+                    } catch {
+                      await (inner ?? pick.el).click({ force: true, timeout: 3000 }).catch(() => {});
+                    }
+                    await page.waitForTimeout(900);
+                    if (((await chosenCount()) ?? 0) === 0) {
+                      await page.keyboard.press("Enter").catch(() => {});
+                      await page.waitForTimeout(700);
+                    }
+                    if (((await chosenCount()) ?? 0) > 0) {
+                      clickedText = pick.text;
+                      offered = [];
+                      console.log(`    "${label.slice(0, 28)}" school chosen from ${seen.length} offered${last ? ", as one not on the list" : ""}`);
+                      break;
+                    }
+                  }
+                }
+              }
+
               if (
                 /field of study|major|discipline|area of study|concentration/i.test(label) &&
                 !(offered.length && bestOption(offered, want, label))

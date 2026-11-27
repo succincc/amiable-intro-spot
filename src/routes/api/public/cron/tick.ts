@@ -13,6 +13,9 @@ import { createFileRoute } from "@tanstack/react-router";
  *          a reply, and send the replies that have been cleared to go.
  *   watch  at most every half hour: wake the job on GitHub that starts
  *          whatever else has come round, in case its own chain has broken.
+ *   calls  at most every half hour, and only for a user who has connected
+ *          their own phone and voice accounts: read back the calls already
+ *          made, place the few that are due.
  *   health at most once in fifty minutes: is the mailbox being read, are
  *          rounds running, is anything going out. The owner is emailed
  *          when the answer changes.
@@ -48,7 +51,7 @@ async function claim(supabase: any, name: string, everyMin: number): Promise<boo
 }
 
 async function tick() {
-  const out: { ok: boolean; mail: string; watch: string; health?: string; counts?: { read: number; stored?: number; drafted?: number; sent?: number; failed?: number; told?: number; booked?: number } } = {
+  const out: { ok: boolean; mail: string; watch: string; health?: string; calls?: string; counts?: { read: number; stored?: number; drafted?: number; sent?: number; failed?: number; told?: number; booked?: number } } = {
     ok: true,
     mail: "not due",
     watch: "not due",
@@ -168,6 +171,18 @@ async function tick() {
     }
   } catch (e) {
     out.health = `failed: ${String((e as Error)?.message ?? e).slice(0, 80)}`;
+  }
+  // Calls, where the user has connected their own accounts and switched
+  // them on. Every round, because a call placed last round is read back on
+  // this one; without the accounts it is one small read and nothing more.
+  try {
+    if (await claim(supabase, "calls", WATCH_EVERY_MIN)) {
+      const { runCalls } = await import("@/lib/dial.server");
+      const c = await runCalls(supabase);
+      out.calls = c.state === "off" && !c.read ? "off" : `${c.state}: ${c.placed} placed, ${c.read} read back${c.booked ? `, ${c.booked} time(s) sent to the owner` : ""}`;
+    }
+  } catch (e) {
+    out.calls = `failed: ${String((e as Error)?.message ?? e).slice(0, 80)}`;
   }
   return out;
 }
