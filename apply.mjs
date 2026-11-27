@@ -9605,7 +9605,7 @@ async function applyToJobOnce(context, job, profile, answers) {
             let value = fieldValue(label, profile) ?? (existing && existing.trim() ? existing : null);
             // Under the other address where ADP has refused the first: in
             // this run, or on an earlier one that put this posting back.
-            if ((ADP_ALIAS.use || /plus-address/.test(String(job.last_error ?? ""))) && (type === "email" || /e-?mail/i.test(label)) && adpAlias(profile.email)) {
+            if (ADP_ALIAS.use && (type === "email" || /e-?mail/i.test(label)) && adpAlias(profile.email)) {
               value = adpAlias(profile.email);
               console.log("    ADP: the email box is given the mailbox's plus-address");
             }
@@ -11464,7 +11464,10 @@ async function applyToJobOnce(context, job, profile, answers) {
             // owner's to sign in.
             const alias = adpAlias(profile?.email);
             const wasPutBack = /plus-address/.test(String(job.last_error ?? ""));
-            if (alias && !ADP_ALIAS.tried.has(job.id) && !wasPutBack) {
+            // Tried, on two postings: ADP answered the plus-address exactly as
+            // it answered the address — it knows them for one mailbox. So it
+            // is not tried; the account is its owner's to sign in to.
+            if (false && alias && !ADP_ALIAS.tried.has(job.id) && !wasPutBack) {
               ADP_ALIAS.use = true;
               ADP_ALIAS.tried.add(job.id);
               for (const k of [...RETYPED]) if (k.startsWith(`${job.id}:`)) RETYPED.delete(k);
@@ -11482,13 +11485,18 @@ async function applyToJobOnce(context, job, profile, answers) {
         // apply with: its applications are taken only from an account on
         // that employer's board. Said as that, so it can be done from the
         // owner's own browser, where they are signed in.
-        if (filled === 0 && /ultipro\.com$|ukg\.(com|net)$/i.test(hostOf(page.url()) ?? "")) {
-          const wall = await form
+        const ukgHosts = [page.url(), ...page.frames().map((f) => f.url())].map((u) => hostOf(u) ?? "").filter(Boolean);
+        if (filled === 0 && (job.ats === "ukg" || ukgHosts.some((h) => /ultipro\.com$|ukg\.(com|net)$/i.test(h)))) {
+          const seen = await form
             .evaluate(() => {
+              const shownEl = (e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
               const text = (document.body?.innerText ?? "").toLowerCase();
-              return /\bsign in\b/.test(text) && !/\bapply now\b|\bapply for this (job|position)\b/.test(text);
+              const press = Array.from(document.querySelectorAll("a, button, [role=button], input[type=button], input[type=submit]")).filter(shownEl).map((b) => (b.innerText || b.value || "").replace(/\s+/g, " ").trim().toLowerCase());
+              return { signIn: /\bsign in\b/.test(text), apply: press.some((t) => /^apply( now| for this (job|position))?$/.test(t)), chars: text.length };
             })
-            .catch(() => false);
+            .catch((e) => ({ failed: String(e?.message ?? e).slice(0, 60) }));
+          console.log(`    UKG posting, as a visitor sees it: ${JSON.stringify(seen)}`);
+          const wall = seen?.signIn === true && seen?.apply === false;
           if (wall) {
             // What its sign-in and its registration ask for, by shape, so
             // an account can be made here as one is on Workday. Looked at
