@@ -97,7 +97,7 @@ jobs:
               for round in $(seq 1 14); do
                 if call discover; then
                   good=$((good + 1))
-                  jq -c '{round: '"${round}"', ms, found: .discover.found, kept: .discover.kept, inserted: .discover.inserted, filtered: .discover.filtered, errors: .discover.errors, employers: .discover.employers, not_read_yet: .discover.stale}' /tmp/sweep.json 2>/dev/null || head -c 400 /tmp/sweep.json
+                  jq -c '{round: '"${round}"', ms, found: .discover.found, kept: .discover.kept, inserted: .discover.inserted, filtered: .discover.filtered, why: .discover.filtered_by, errors: .discover.errors, employers: .discover.employers, not_read_yet: .discover.stale}' /tmp/sweep.json 2>/dev/null || head -c 400 /tmp/sweep.json
                   left=$(jq -r '.discover.stale // "unknown"' /tmp/sweep.json 2>/dev/null || echo unknown)
                   # Every employer read: done. A panel that does not say how
                   # many are left gets four rounds and no more.

@@ -249,9 +249,19 @@ async function usajobs(q: string, loc?: string): Promise<Job[]> {
 // filtering — free, runs before anything costs a token
 // --------------------------------------------------------------------------
 
+// One pattern per word, made once. A round reads three thousand postings
+// against every excluded title, and building the same pattern afresh for
+// each pairing was most of what a round spent its time on — enough that
+// some rounds were ended by the host before they could answer.
+const WORD_PATTERNS = new Map<string, RegExp>();
 function wordHit(haystack: string, needle: string): boolean {
-  const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(`(?<!\\w)${escaped}(?!\\w)`, "i").test(haystack);
+  let re = WORD_PATTERNS.get(needle);
+  if (!re) {
+    const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    re = new RegExp(`(?<!\\w)${escaped}(?!\\w)`, "i");
+    if (WORD_PATTERNS.size < 5000) WORD_PATTERNS.set(needle, re);
+  }
+  return re.test(haystack);
 }
 
 function keep(job: Job, cfg: any): { ok: boolean; why?: string } {
@@ -431,7 +441,9 @@ export async function runDiscover(supabase: any, opts: { since?: string | undefi
     // employers x search terms x pages is not, and against a host that
     // refuses this address every one of those pays its full timeout before
     // failing. That is a panel reading "running" for ten minutes.
-    const runDeadline = Date.now() + 40_000;
+    // Thirty-two seconds, not forty: with the measuring that follows, rounds
+    // were coming back at fifty and the host ends a request not long after.
+    const runDeadline = Date.now() + 32_000;
 
     // Which search terms this run uses.
     //
@@ -716,7 +728,7 @@ export async function runDiscover(supabase: any, opts: { since?: string | undefi
         // The budget is wall-clock, and running out is not a failure: an
         // unmeasured place comes back "deferred" and is measured on a later
         // run, which is what that status already exists for.
-        const geocodeDeadline = Date.now() + 25_000;
+        const geocodeDeadline = Date.now() + 15_000;
         // Three outcomes, not two. "Could not resolve this place" and "ran out
         // of budget before trying" both used to come back as null, so a
         // genuinely unresolvable location was treated as merely unmeasured
@@ -1061,6 +1073,7 @@ export async function runDiscover(supabase: any, opts: { since?: string | undefi
       ok: true as const,
       ...stats,
       by_source: bySource,
+      filtered_by: byReason,
       message,
       employers: list.length,
       unreached,
