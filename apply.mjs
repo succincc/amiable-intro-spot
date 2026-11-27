@@ -13026,7 +13026,14 @@ const main = async () => {
   // applications. It was also going down the line and filling forms, ready
   // to submit, for a person whose autopilot was off.
   if (process.env.RESPECT_AUTOPILOT === "true" || process.env.AP_ACT_AS) {
-    if (profileRow.autopilot !== true) {
+    // A rehearsal, started by hand, on the boards that ask for no account
+    // and mail nothing until a form is sent: forms are filled and read, and
+    // nothing is submitted, so what would stop this person's applications
+    // can be seen without their switch being touched.
+    const rehearsal = DRY_RUN && process.env.RESPECT_AUTOPILOT !== "true" && /^(greenhouse|ashby|lever)$/.test(String(process.env.ATS_ONLY ?? ""));
+    if (profileRow.autopilot !== true && rehearsal) {
+      console.log("Autopilot is off — this is a rehearsal: forms are filled and nothing is sent.");
+    } else if (profileRow.autopilot !== true) {
       // The checkbox is on the DASHBOARD, under "autopilot", and reads
       // "apply automatically every 3 hours". This said Settings, which is
       // where it is not, and sent someone looking for it twice.
@@ -13036,8 +13043,10 @@ const main = async () => {
       );
       process.exit(0);
     }
-    DRY_RUN = false;
-    console.log("Autopilot is on.");
+    if (profileRow.autopilot === true) {
+      DRY_RUN = false;
+      console.log("Autopilot is on.");
+    }
   }
 
   // --- how many may still go out today -------------------------------------
