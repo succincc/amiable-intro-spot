@@ -7253,6 +7253,8 @@ export function adpAlias(email) {
  * owner can see it, exactly as a Workday account is.
  */
 const UKG_SIGNED = new Set();
+// The host a UKG board's sign-in lives on, which is where its mail links point.
+const LOGIN_HOST = { at: null };
 async function ukgAccount(page, form, profile, job) {
   const where = [page.url(), ...page.frames().map((f) => f.url())].find((u) => /ultipro\.com|ukg\.(com|net)/i.test(u)) ?? page.url();
   const m = where.match(/https?:\/\/([^/]+)\/([^/]+)\/JobBoard\//i);
@@ -7288,6 +7290,11 @@ async function ukgAccount(page, form, profile, job) {
   await page.waitForTimeout(3500);
   let pass = await inAny('input[type=password]');
   if (!pass) return { ok: false, reason: "its sign-in showed no password box" };
+  {
+    const loginAt = page.frames().map((f) => f.url()).find((u) => /\/u\/(login|signup|reset)/i.test(u));
+    if (loginAt) LOGIN_HOST.at = hostOf(loginAt);
+    console.log(`    its sign-in lives on ${LOGIN_HOST.at === hostOf(where) ? "the board's own host" : "another host than the board's"}`);
+  }
 
   const stands = async () => {
     const t = (await said()).replace(/\S+@\S+/g, "[address]").replace(/\d/g, "#");
@@ -7296,7 +7303,9 @@ async function ukgAccount(page, form, profile, job) {
   };
   // The board's mail comes from UKG's own hosts, not the board's.
   const mailLink = async (kind, tries = 2) => {
-    for (const h of [hostOf(where), "ukg.com", "ultipro.com"].filter(Boolean)) {
+    const loginAt = page.frames().map((f) => f.url()).find((u) => /\/u\/(login|signup|reset)/i.test(u));
+    if (loginAt) LOGIN_HOST.at = hostOf(loginAt);
+    for (const h of [...new Set([LOGIN_HOST.at, hostOf(where)].filter(Boolean))]) {
       const link = await waitForVerificationLink(h, tries, 6000, kind).catch(() => null);
       if (link) {
         try { const u = new URL(link); console.log(`    its ${kind} mail's link is on ${u.hostname.split(".").slice(-2).join(".")}/${u.pathname.split("/").filter(Boolean)[0] ?? ""}`); } catch {}
@@ -7421,7 +7430,16 @@ async function ukgAccount(page, form, profile, job) {
   // nobody can ever sign in to.
   await saveAccount(key, email, password, "pending_verification", job.id, "being registered on this UKG board");
   if (!(await press(/^\s*(continue|sign up|create account|register)\s*$/i))) await pass.press("Enter").catch(() => {});
-  await page.waitForTimeout(7000);
+  {
+    const trail = [];
+    for (let i = 0; i < 6; i++) {
+      await page.waitForTimeout(1200);
+      const st = await stands();
+      const mark = `${(st.at[0] ?? "?")}${st.says.length ? " | " + st.says[0].slice(0, 70) : ""}`;
+      if (trail[trail.length - 1] !== mark) trail.push(mark);
+    }
+    console.log(`    its sign-up went: ${JSON.stringify(trail)}`);
+  }
   const after = await said();
   const stillAsks = !!(await inAny('input[type=password]'));
   const shape = {
@@ -11742,11 +11760,37 @@ async function applyToJobOnce(context, job, profile, answers) {
                     await page.keyboard.type(profile.email, { delay: 35 });
                     await page.waitForTimeout(500);
                     const askedAt = Date.now();
-                    const go = page.locator("sdf-button, button").filter({ hasText: /^\s*(continue|next)\s*$/i }).filter({ visible: true }).first();
-                    if (await go.isVisible().catch(() => false)) await go.click({ timeout: 5000 }).catch(() => {});
-                    else await page.keyboard.press("Enter").catch(() => {});
-                    await page.waitForTimeout(6000);
-                    const next = await lay(page);
+                    const held = await box.evaluate((b) => String(b.value ?? "").length).catch(() => -1);
+                    // Enter, in the box itself: the screen's Continue is the
+                    // guest form's too, and pressing it folded the sign-in away.
+                    await page.keyboard.press("Enter").catch(() => {});
+                    await page.waitForTimeout(1800);
+                    const glimpse = async () => {
+                      const t = ((await page.evaluate(() => {
+                        const deep = (r, out = []) => { for (const n of r.querySelectorAll("*")) { out.push(n); if (n.shadowRoot) deep(n.shadowRoot, out); } return out; };
+                        const on = (e) => { const b = e.getBoundingClientRect(); return b.width > 0 && b.height > 0; };
+                        return deep(document).filter((n) => /^(SDF-ALERT|SDF-ALERT-TOAST|SDF-FOCUS-PANE|SDF-MODAL|H1|H2|H3|LABEL|SDF-INPUT)$/.test(n.tagName) && on(n)).map((n) => (n.tagName === "SDF-INPUT" ? `[box ${n.getAttribute("label") || ""}]` : (n.innerText || "")).replace(/\s+/g, " ").trim().slice(0, 110)).filter(Boolean).slice(0, 10);
+                      }).catch(() => [])) || []);
+                      return t.map((x) => x.replace(/\S+@\S+/g, "[address]").replace(/\d/g, "#"));
+                    };
+                    console.log(`    the box held ${held} character(s); a moment after Enter ADP shows: ${JSON.stringify(await glimpse())}`);
+                    await page.waitForTimeout(4500);
+                    let next = await lay(page);
+                    if ((next?.boxes ?? []).length === 1 && /email or mobile/i.test(next.boxes[0])) {
+                      // Enter did nothing: the button that follows the box.
+                      const pressed = await box.evaluate((b) => {
+                        const deep = (r, out = []) => { for (const n of r.querySelectorAll("*")) { out.push(n); if (n.shadowRoot) deep(n.shadowRoot, out); } return out; };
+                        const all = deep(document);
+                        const at = all.indexOf(b);
+                        const btn = all.slice(at + 1).find((n) => /^(SDF-BUTTON|BUTTON)$/.test(n.tagName) && /^\s*(continue|next)\s*$/i.test(n.innerText || "") && n.getBoundingClientRect().width > 0);
+                        if (btn) { btn.click(); return true; }
+                        return false;
+                      }).catch(() => false);
+                      console.log(`    Enter left the screen as it was; the button after the box ${pressed ? "was pressed" : "was not found"}`);
+                      await page.waitForTimeout(6000);
+                      next = await lay(page);
+                      console.log(`    and then ADP shows: ${JSON.stringify(await glimpse())}`);
+                    }
                     console.log(`    after the email, ADP's sign-in asks: ${JSON.stringify(next)}`);
                     const text = ((await page.evaluate(() => (document.body?.innerText ?? "").slice(0, 6000)).catch(() => "")) || "").replace(/\S+@\S+/g, "[address]").replace(/\d/g, "#").replace(/\s+/g, " ");
                     console.log(`    it says: ${JSON.stringify((text.match(/[^.]{0,90}(code|password|verif|sent)[^.]{0,90}/gi) ?? []).slice(0, 4))}`);

@@ -324,7 +324,7 @@ export async function findVerificationLink(
       // activation lookup must not open a link that changes a password.
       const isReset = /reset|forgot|password/i.test(lower.replace(host, ""));
       if (kind === "reset" ? !isReset : isReset) continue;
-      if (kind !== "reset" && !/\/(activate|verify|confirm|activation)/i.test(lower)) continue;
+      if (kind !== "reset" && !/\/(activate|verify|confirm|activation|email-verif|verification)/i.test(lower)) continue;
       return url;
     }
   }
