@@ -30,7 +30,14 @@ jobs:
       - name: The applier's one dependency, without its browser
         env:
           PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
-        run: npm install --no-save --no-audit --no-fund playwright@1.49.0
+        # In its own folder, as the applying job does: the panel's own
+        # package list sits at the root and is not this job's business.
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/pw" && cd "$HOME/pw"
+          npm init -y >/dev/null
+          npm install --no-audit --no-fund playwright@1.49.0
+          ln -sfn "$HOME/pw/node_modules" "$GITHUB_WORKSPACE/node_modules"
       - name: Go through the questions
         env:
           SUPABASE_URL: https://inqhfkshqndkxyztzita.supabase.co
