@@ -6173,6 +6173,11 @@ function defaultYesNo(label, p) {
     return /\b(supervis\w*|manag(ed|er|ing)\w*|team lead\w*|led (a|the) team|director|mentor\w*|coach\w*|train(ed|ing) (new|staff|team|employees))\b/.test(resume) ? "Yes" : "No";
   }
 
+  // "Are you currently or previously an employee, intern or contractor of
+  // ours?" The resume lists every employer; one that is not on it is a no.
+  if (/\b(currently or previously|current or former|previously or currently|former or current|now or (ever|previously))\b[^?]{0,60}\b(employee|employed|intern|contractor|worker|worked|affiliat\w*)\b/.test(l)) {
+    return "No";
+  }
   // "Are you currently employed?" The resume says whether a job runs to now.
   if (/^are you (currently|presently) employed\b/.test(l)) {
     return /\b(present|current)\b/.test(resume) ? "Yes" : "No";
@@ -6210,6 +6215,12 @@ function lastResort(label, p, job) {
     const city = String(job?.location ?? "").split(/[,;|(/]/)[0].trim();
     if (city && !/remote|multiple|various|anywhere/i.test(city)) return city;
     return p.city ?? null;
+  }
+
+  // "Where do you plan to work from?" over a list of states. The posting was
+  // chosen because it is in reach of home, so home is where from.
+  if (/\bwhere (do|will|would) you (plan|intend|expect|want) to (work|be working|be located|be based)\b|\bwhere (will|would) you be (working|located|based)\b|\bwhich state (do|will|would) you\b[^?]{0,30}\b(work|live|reside)/i.test(l)) {
+    if (p?.state) return p.state;
   }
 
   // "Which best represents the size of the teams you have led?" The resume
