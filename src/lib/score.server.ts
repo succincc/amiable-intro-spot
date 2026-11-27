@@ -8,7 +8,7 @@ const MAX_BATCHES = 12; // ceiling per invocation; cron calls it again
 // the shared one otherwise, and their second key for when the first is spent.
 const KEYS: { first: string; second: string } = { first: "", second: "" };
 
-async function gemini(prompt: string, maxTokens = 8192): Promise<string> {
+async function gemini(prompt: string, maxTokens = 8192, firstOnly = false): Promise<string> {
   const { callGemini } = await import("@/lib/gemini.server");
   try {
     return await callGemini({
@@ -21,7 +21,9 @@ async function gemini(prompt: string, maxTokens = 8192): Promise<string> {
     // Spent for the day, or not answering: the second free model is asked
     // before the word counter is. Any other failure is the first model's
     // to report, as before.
-    if (!KEYS.second) throw e;
+    // A scoring batch is asked of the second model in pieces, by its
+    // caller: put to it whole, it is refused, and the asking is counted.
+    if (!KEYS.second || firstOnly) throw e;
     const { callSecond } = await import("@/lib/second-model.server");
     const other = await callSecond({ prompt, apiKey: KEYS.second, maxTokens, temperature: 0.2 });
     if (other === null) throw e;
@@ -38,26 +40,50 @@ async function scoreInPieces(
   resumeText: string,
   apiKey: string,
 ): Promise<{ done: Map<any, { score: number; reason: string }>; spent: boolean }> {
-  const { callSecond } = await import("@/lib/second-model.server");
+  const { callSecond, secondWait } = await import("@/lib/second-model.server");
   const done = new Map<any, { score: number; reason: string }>();
-  const resume = String(resumeText ?? "").slice(0, 3500);
-  const PIECE = 4;
+  // Its free allowance is a few thousand words a minute: one run scored four
+  // postings and was told to wait. So each request is kept small — the head
+  // of the resume, the head of each posting — and where it says how long to
+  // wait and the wait is short, it is waited out, within the time one
+  // request to the panel has.
+  const resume = String(resumeText ?? "").slice(0, 1800);
+  const PIECE = 5;
+  const began = Date.now();
+  const ROOM_MS = 26_000;
   for (let at = 0; at < batch.length; at += PIECE) {
     const piece = batch.slice(at, at + PIECE);
     const listing = piece
       .map(
         (j: any, i: number) =>
-          `--- JOB ${i + 1} ---\nTITLE: ${j.title}\nCOMPANY: ${j.company ?? "?"}\nLOCATION: ${j.location ?? "?"}\nDESCRIPTION:\n${String(j.description ?? "").slice(0, 700)}`,
+          `--- JOB ${i + 1} ---\nTITLE: ${j.title}\nCOMPANY: ${j.company ?? "?"}\nLOCATION: ${j.location ?? "?"}\nDESCRIPTION:\n${String(j.description ?? "").slice(0, 450)}`,
       )
       .join("\n\n");
-    const text = await callSecond({
-      prompt: `${SCORE_PROMPT}\n\nCANDIDATE RESUME:\n${resume}\n\n=== ${piece.length} JOBS ===\n\n${listing}`,
-      apiKey,
-      maxTokens: piece.length * 160 + 256,
-      temperature: 0.2,
-    });
+    const ask = () =>
+      callSecond({
+        prompt: `${SCORE_PROMPT}\n\nCANDIDATE RESUME:\n${resume}\n\n=== ${piece.length} JOBS ===\n\n${listing}`,
+        apiKey,
+        maxTokens: piece.length * 90 + 120,
+        temperature: 0.2,
+      });
+    let text = await ask();
+    if (!text) {
+      const wait = secondWait() * 1000;
+      if (wait > 0 && Date.now() - began + wait < ROOM_MS) {
+        await new Promise((r) => setTimeout(r, wait + 300));
+        text = await ask();
+      }
+    }
     const parsed = text ? extractArray(text) : null;
     if (!parsed) return { done, spent: true };
+    if (Date.now() - began > ROOM_MS) {
+      for (const item of parsed) {
+        const n = Number(item?.n);
+        if (!Number.isInteger(n) || n < 1 || n > piece.length) continue;
+        done.set(piece[n - 1].id, { score: Math.max(1, Math.min(10, Math.round(Number(item.score) || 1))), reason: String(item.reason ?? "").slice(0, 500) });
+      }
+      return { done, spent: true };
+    }
     for (const item of parsed) {
       const n = Number(item?.n);
       if (!Number.isInteger(n) || n < 1 || n > piece.length) continue;
@@ -366,6 +392,7 @@ export async function runScore(supabase: any) {
         const text = await gemini(
           `${SCORE_PROMPT}\n\nCANDIDATE RESUME:\n${resume}\n\n=== ${batch.length} JOBS ===\n\n${listing}`,
           Math.min(8192, batch.length * 160 + 512),
+          true,
         );
         parsed = extractArray(text);
       } catch (e) {

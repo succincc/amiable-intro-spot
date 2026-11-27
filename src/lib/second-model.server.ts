@@ -37,6 +37,10 @@ async function pickModel(apiKey: string): Promise<string | null> {
 let lastRefusal = "";
 export const secondRefusal = (): string => lastRefusal;
 
+/** How long the second model last asked to be left alone, in seconds; 0 where it did not say. */
+let lastWait = 0;
+export const secondWait = (): number => lastWait;
+
 /** Whether this looks like a Groq key at all. */
 export const looksLikeSecondKey = (key: unknown): key is string => /^gsk_[A-Za-z0-9]{20,120}$/.test(String(key ?? "").trim());
 
@@ -67,6 +71,8 @@ export async function callSecond(opts: { prompt: string; apiKey: string; maxToke
         named = "";
       }
       lastRefusal = `HTTP ${res.status}${named ? ` ${named}` : ""}`;
+      const after = Number(res.headers.get("retry-after") ?? "");
+      lastWait = res.status === 429 && Number.isFinite(after) && after > 0 ? Math.min(after, 120) : 0;
       return null;
     }
     const body = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
