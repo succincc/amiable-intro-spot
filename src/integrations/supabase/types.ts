@@ -543,6 +543,7 @@ export type Database = {
           skip_reason: string | null
           source: string | null
           status: string
+          submit_confidence: string | null
           tailored_at: string | null
           tailored_resume: string | null
           title: string
@@ -586,6 +587,7 @@ export type Database = {
           skip_reason?: string | null
           source?: string | null
           status?: string
+          submit_confidence?: string | null
           tailored_at?: string | null
           tailored_resume?: string | null
           title: string
@@ -629,6 +631,7 @@ export type Database = {
           skip_reason?: string | null
           source?: string | null
           status?: string
+          submit_confidence?: string | null
           tailored_at?: string | null
           tailored_resume?: string | null
           title?: string
