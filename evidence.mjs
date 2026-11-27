@@ -6,7 +6,7 @@
  * failures: things that are wrong whoever looks at them, and that a later
  * change must not bring back. No names in or out — counts and systems only.
  */
-import { jobKey } from "./samejob.mjs";
+import { jobKey, employerKey } from "./samejob.mjs";
 
 const count = (list, of) => { const o = {}; for (const x of list) { const k = of(x) ?? "none"; o[k] = (o[k] ?? 0) + 1; } return o; };
 const sys = (j) => j.ats ?? "own site";
@@ -58,6 +58,28 @@ export function evidence(sent, mail, tried = [], now = Date.now()) {
   const age = (j) => { const h = (now - new Date(j.applied_at ?? now).getTime()) / 3_600_000; return h < 24 ? "under a day old" : h < 72 ? "one to three days" : "over three days"; };
   if (bare.length) say(`  those on the applier's word only, by age: ${JSON.stringify(count(bare, age))}; by system: ${JSON.stringify(count(bare, sys))}`);
 
+  // Why the bare ones are bare. A receipt names the employer far more often
+  // than the job, so where several jobs went to one employer the receipts
+  // can pile up on one of them and leave the rest looking unanswered.
+  if (bare.length) {
+    const byEmp = {};
+    for (const j of sent) (byEmp[employerKey(j.company)] ??= []).push(j);
+    const acks = (j) => (mailOf[j.id] ?? []).filter((m) => m.kind === "acknowledgement");
+    const why = (j) => {
+      const sibs = (byEmp[employerKey(j.company)] ?? []).filter((x) => x.id !== j.id);
+      const spare = sibs.flatMap((x) => acks(x).slice(1).concat(acks(x).length > 1 ? acks(x).slice(0, 1) : []));
+      const t = new Date(j.applied_at ?? 0).getTime();
+      if (spare.some((m) => { const d = new Date(m.received_at ?? 0).getTime() - t; return d > -120_000 && d < 45 * 60_000; })) return "a receipt came within 45 minutes of it and is filed under another job at the same employer";
+      if (spare.length) return "another job at the same employer holds more than one receipt, none close in time";
+      if (sibs.some((x) => (mailOf[x.id] ?? []).length)) return "the employer has written, about another job only";
+      const key = employerKey(j.company).split(" ").filter((w) => w.length >= 4);
+      if (mail.some((m) => !m.job_id && key.some((w) => `${m.from_addr ?? ""} ${m.subject ?? ""}`.toLowerCase().includes(w)))) return "mail naming the employer is on file, matched to no job";
+      return "no mail from this employer at all";
+    };
+    say(`  why: ${JSON.stringify(count(bare, why))}`);
+    say(`  employers sent to more than once: ${Object.values(byEmp).filter((g) => g.length > 1).length} of ${Object.keys(byEmp).length}; jobs holding two or more receipts: ${sent.filter((j) => acks(j).length > 1).length}`);
+  }
+
   // Sent against the scorer's own rating: what it rated low should not have gone.
   say(`  by the scorer's rating when sent: ${JSON.stringify(count(sent, (j) => (j.score == null ? "unscored" : String(Math.round(j.score)))))}`);
 
@@ -98,6 +120,12 @@ export function evidence(sent, mail, tried = [], now = Date.now()) {
   say(`  about a job on record: ${mail.filter((m) => m.job_id).length}; about none: ${mail.filter((m) => !m.job_id).length}`);
   const lostReceipts = mail.filter((m) => m.kind === "acknowledgement" && !m.job_id).length;
   say(`  receipts matched to no job: ${lostReceipts}`);
+  if (lostReceipts) {
+    const keys = [...new Set(sent.map((j) => employerKey(j.company)))].map((k) => k.split(" ").filter((w) => w.length >= 4)).filter((w) => w.length);
+    const named = (m) => keys.some((ws) => ws.some((w) => `${m.from_addr ?? ""} ${m.subject ?? ""}`.toLowerCase().includes(w)));
+    const lost = mail.filter((m) => m.kind === "acknowledgement" && !m.job_id);
+    say(`    of those: ${lost.filter(named).length} name an employer that was applied to, ${lost.filter((m) => !named(m)).length} name none on record`);
+  }
 
   // 5. Each system on its own, from what really happened. A job counts as
   // an interview or an offer here only with the mail to show for it.

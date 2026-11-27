@@ -43,8 +43,8 @@ async function main() {
   for (const j of sent) { j.has_tailored = Boolean(j.tailored_resume); delete j.tailored_resume; }
   const tried = (await db("jobs?status=in.(needs_help,failed)&select=ats,status,help_reason&limit=5000").catch(() => [])) ?? [];
   // The finer kind is a newer column; without it the subject stands in.
-  let mail = await db("emails?direction=eq.in&select=category,kind,subject,job_id&order=received_at.desc&limit=3000").catch(() => null);
-  if (!mail) mail = await db("emails?direction=eq.in&select=category,subject,job_id&order=received_at.desc&limit=3000");
+  let mail = await db("emails?direction=eq.in&select=category,kind,subject,job_id,from_addr,received_at&order=received_at.desc&limit=3000").catch(() => null);
+  if (!mail) mail = await db("emails?direction=eq.in&select=category,subject,job_id,from_addr,received_at&order=received_at.desc&limit=3000");
 
   const { lines, failures, corrected } = evidence(sent, mail, tried);
   // What came back first, the evidence last: the end of the log is what is read.
