@@ -12,6 +12,8 @@ process.env.OUTREACH_IMPORT_ONLY = "1";
 process.env.JOBPOSTING_IMPORT_ONLY = "1";
 process.env.FEEDS_IMPORT_ONLY = "1";
 process.env.INDEXES_IMPORT_ONLY = "1";
+process.env.CRAWL_IMPORT_ONLY = "1";
+process.env.NEARBY_IMPORT_ONLY = "1";
 process.env.PRETAILOR_IMPORT_ONLY = "1";
 process.env.SF_IMPORT_ONLY = "1";
 
@@ -27,6 +29,8 @@ const school = await import("./school.mjs");
 const zip = await import("./zipmcp.mjs");
 const fp = await import("./fromprofile.mjs");
 const idx = await import("./indexes.mjs");
+const crawl = await import("./crawl.mjs");
+const nearby = await import("./nearby.mjs");
 process.env.PHONES_IMPORT_ONLY = "1";
 const phones = await import("./phones.mjs");
 process.env.USAJOBS_IMPORT_ONLY = "1";
@@ -411,6 +415,24 @@ quiet.hideJob({ company: "ZQ" });
   }
   check("indexes: the company in each row, not its ticker", idx.companiesIn('<table class="wikitable sortable" id="constituents"><tr><th>Symbol</th><th>Security</th></tr><tr><td><a rel="nofollow" class="external text" href="https://www.nyse.com/quote/XNYS:AA">AA</a></td><td><a href="/wiki/Alcoa" title="Alcoa">Alcoa</a></td><td><a href="/wiki/Materials" title="Materials">Materials</a></td></tr><tr><td><a class="external" href="https://x">BJ</a></td><td><a href="/wiki/BJ%27s_Wholesale_Club" title="x">BJ&#39;s Wholesale Club</a></td></tr></table>'), [{ title: "Alcoa", name: "Alcoa" }, { title: "BJ's Wholesale Club", name: "BJ's Wholesale Club" }]);
   check("indexes: an employer's name and where to start", [idx.employerName("Example Holdings, Inc."), idx.employerName("Sample Co (Class A)"), idx.careersFrom("https://www.example.com/en-us/home"), idx.careersFrom("example.org"), idx.careersFrom("")], ["Example Holdings", "Sample", "https://www.example.com/careers", "https://example.org/careers", null]);
+  check("crawl: an address as the board it belongs to", [
+    crawl.boardFrom("https://acme.wd5.myworkdayjobs.com/en-US/External/job/Town/Clerk_R1"),
+    crawl.boardFrom("https://acme.wd5.myworkdayjobs.com/wday/cxs/acme/External/jobs"),
+    crawl.boardFrom("https://boards.greenhouse.io/Acme/jobs/123"),
+    crawl.boardFrom("https://job-boards.greenhouse.io/embed/job_board?for=acme"),
+    crawl.boardFrom("https://jobs.lever.co/acme/abc-123/apply"),
+    crawl.boardFrom("https://jobs.ashbyhq.com/acme"),
+    crawl.boardFrom("https://example.com/careers"),
+  ].map((b) => (b ? `${b.ats} ${b.token}${b.site ? "/" + b.site : ""}` : null)), ["workday acme/External", null, "greenhouse acme", null, "lever acme", "ashby acme", null]);
+  check("crawl: a board is kept for a wanted title in reach, and for nothing else", [
+    crawl.forOwner("greenhouse", crawl.postingsOf("greenhouse", { jobs: [{ title: "Store Manager", location: { name: "Springfield, NJ" } }, { title: "Store Manager", location: { name: "Austin, TX" } }, { title: "Rocket Scientist", location: { name: "Springfield, NJ" } }] }), ["Store Manager"], [], near.nearPattern("NJ")),
+    crawl.forOwner("workday", crawl.postingsOf("workday", { jobPostings: [{ title: "Store Manager", locationsText: "3 Locations" }] }), ["Store Manager"], [], near.nearPattern("NJ")),
+    crawl.forOwner("lever", crawl.postingsOf("lever", [{ text: "Store Manager", categories: { location: "London" } }]), ["Store Manager"], [], near.nearPattern("NJ")),
+  ], [1, 1, 0]);
+  check("nearby: a business's own site, and the places of a chain counted as one employer", [
+    nearby.siteOf("https://locations.example.com/nj/springfield"), nearby.siteOf("facebook.com/somecafe"), nearby.siteOf(""),
+    nearby.employersFrom([{ tags: { name: "Example #12", brand: "Example", website: "https://www.example.com/a" } }, { tags: { name: "Example", brand: "Example", website: "example.com" } }, { tags: { name: "Corner Cafe", website: "https://cornercafe.test" } }, { tags: { name: "No Site" } }]).map((e) => `${e.name}:${e.site}:${e.places}`),
+  ], ["example.com", null, null, ["Example:example.com:2", "Corner Cafe:cornercafe.test:1"]]);
   check("quiet: nothing to strike out, nothing changed", quiet.scrub("plain line", [], null), "plain line");
 }
 

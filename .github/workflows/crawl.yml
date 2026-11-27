@@ -1,0 +1,38 @@
+name: crawl
+
+# Employers found by the hiring system they are on, from the public web
+# archive's index: see crawl.mjs. Daily, from the clock; a few pages a day.
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: "Save the employers found (true), or only report (false)"
+        required: false
+        default: "false"
+
+concurrency:
+  group: applypilot-crawl
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  crawl:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Read the archive's index
+        env:
+          SUPABASE_URL: https://inqhfkshqndkxyztzita.supabase.co
+          SUPABASE_ANON_KEY: sb_publishable_QK4kidijM8nk46uK6L22Qw_XA0RQu5U
+          APPLYPILOT_EMAIL: ${{ secrets.APPLYPILOT_EMAIL }}
+          APPLYPILOT_PASSWORD: ${{ secrets.APPLYPILOT_PASSWORD }}
+          APPLY: ${{ github.event.inputs.apply == 'true' }}
+          MAX_CHECK: "300"
+        run: node crawl.mjs
