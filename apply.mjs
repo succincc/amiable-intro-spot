@@ -7825,7 +7825,14 @@ async function dismissBanners(page) {
     // banner sat over the Apply button through four presses.
     for (const el of (await frame.$$("button, a, [role=button], sdf-button").catch(() => [])).slice(0, 80)) {
       try {
-        const t = ((await el.innerText().catch(() => "")) || "").replace(/\s+/g, " ").trim();
+        // A button drawn as its own element keeps its words where innerText
+        // does not look: in its label, or inside its own shadow.
+        const t = (
+          (await el.innerText().catch(() => "")) ||
+          (await el.getAttribute("aria-label").catch(() => "")) ||
+          (await el.evaluate((n) => n.shadowRoot?.textContent || n.textContent || "").catch(() => "")) ||
+          ""
+        ).replace(/\s+/g, " ").trim();
         if (!WORDS.test(t)) continue;
         if (!(await el.isVisible().catch(() => false))) continue;
         // Forced, like every other click on these portals. An ordinary one
