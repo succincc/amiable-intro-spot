@@ -40,7 +40,10 @@ function Dashboard() {
   const { data: agent } = useAgent();
   const stats = useStats();
   const emailStats = useEmailStats();
-  const runs = useRuns(10);
+  // Sixty, not ten: one sweep is eleven discovery rounds, and with ten the
+  // last application run fell off the end and the page said the agent had
+  // never run on a day it had sent twenty-one.
+  const runs = useRuns(60);
   useRealtimeInvalidate("jobs", [["jobs"]]);
   const help = useJobsByStatus("needs_help", 50);
 
@@ -97,7 +100,7 @@ function Dashboard() {
         <span className={agent?.online ? "text-success" : "text-muted-foreground"}>{agentLabel}</span>
         <span className="ml-4">queue <span className="text-cyan">{s?.queued ?? "…"}</span></span>
       </div>
-      {!agent?.online && !recentApply ? (
+      {!agent?.online && !recentApply && !(Number(s?.applied_today ?? 0) > 0) ? (
         <p className="border-l-2 border-warning pl-2 text-xs text-warning">
           No applications submitted yet. Press RUN APPLY, or wait for the scheduled run.
         </p>
@@ -185,7 +188,7 @@ function Dashboard() {
           <Empty>no runs yet. press RUN DISCOVERY.</Empty>
         ) : (
           <div className="overflow-x-auto border border-border bg-card p-2 text-xs leading-6">
-            {runs.data.map((r) => (
+            {runs.data.slice(0, 10).map((r) => (
               <div key={r.id} className="whitespace-nowrap">
                 <span className="text-muted-foreground">{clockTime(r.started_at)}</span>{"  "}
                 <span className="inline-block w-16">{r.kind}</span>

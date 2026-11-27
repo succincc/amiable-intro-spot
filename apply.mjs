@@ -36,6 +36,7 @@ import { schoolNameOnly, schoolOption } from "./school.mjs";
 import { fromProfile } from "./fromprofile.mjs";
 import { useOwnKey } from "./ownkey.mjs";
 import { isCoverLetter, writeCoverLetter } from "./coverletter.mjs";
+import { jobKey } from "./samejob.mjs";
 import { BOARD_HOSTS, applyStealth, detectBoardPlatform } from "./major-boards-selectors.mjs";
 import { applyBoardJob, restoreBoardSession } from "./major-boards-engine.mjs";
 
@@ -12010,8 +12011,27 @@ const main = async () => {
     if (walled) console.log(`employers whose portal asked for a human check three times in three days, resting until one of those days has passed: ${walled}`);
   }
 
-  // Applications already sent to each employer today.
-  const PER_EMPLOYER_DAILY = Math.max(1, Number(process.env.PER_EMPLOYER_DAILY || 5));
+  // Every job already applied to, as role + employer + place: see
+  // samejob.mjs. A posting that is one of these under another address is
+  // not applied to again; the same role in another town, or another role at
+  // the same employer, is a different job and goes ahead.
+  const APPLIED_JOBS = new Set();
+  {
+    for (let from = 0; from < 20000; from += 1000) {
+      const rows = (await db(`jobs?or=(status.eq.applied,help_reason.eq.unconfirmed)&select=title,company,location&order=id.asc&offset=${from}&limit=1000`).catch(() => null)) ?? [];
+      for (const r of rows) { const k = jobKey(r); if (k) APPLIED_JOBS.add(k); }
+      if (rows.length < 1000) break;
+    }
+    console.log(`jobs already applied to, by role, employer and place: ${APPLIED_JOBS.size}`);
+  }
+  // Taken up by a worker in this run and not yet finished.
+  const IN_HAND_JOBS = new Set();
+  let sameJobSkipped = 0;
+
+  // Applications already sent to each employer today. Ten, where it was
+  // five: the owner wants several jobs at one employer applied to, and the
+  // rule above is what keeps those from being the same job twice.
+  const PER_EMPLOYER_DAILY = Math.max(1, Number(process.env.PER_EMPLOYER_DAILY || 10));
   const SENT_TO = new Map();
   {
     // Whole seconds. Inside an or=(…) the fraction's full stop reads as the
@@ -12368,6 +12388,17 @@ const main = async () => {
               // Carvana this afternoon; a recruiter who sees one name on
               // eight requisitions reads it as noise, not interest.
               if ((SENT_TO.get(companyOf(row)) ?? 0) >= PER_EMPLOYER_DAILY) continue;
+              // The same job under another address: set aside, and said so
+              // on its own record.
+              {
+                const k = jobKey(row);
+                if (k && IN_HAND_JOBS.has(k)) continue;
+                if (k && APPLIED_JOBS.has(k)) {
+                  sameJobSkipped++;
+                  await patchJob(row.id, { status: "skipped", skip_reason: "the same role at this employer in this place was already applied to", updated_at: new Date().toISOString() }).catch(() => {});
+                  continue;
+                }
+              }
               // The status filter is the lock: whichever worker patches the
               // row first gets it, and the others see nothing come back.
               // Marked before the claim is asked for, not after it comes
@@ -12384,7 +12415,7 @@ const main = async () => {
                     updated_at: new Date().toISOString(),
                   }),
                 }).catch(() => null)) ?? [];
-              if (won.length) { job = { ...row, attempts: (row.attempts ?? 0) + 1 }; claimedCo = companyOf(row); break; }
+              if (won.length) { job = { ...row, attempts: (row.attempts ?? 0) + 1 }; claimedCo = companyOf(row); { const k = jobKey(row); if (k) IN_HAND_JOBS.add(k); } break; }
               CLAIMING.delete(companyOf(row));
             }
             if (!job) console.log(`No queued ${want} jobs left.`);
@@ -12555,6 +12586,7 @@ const main = async () => {
         const k = String(job.company ?? job.id ?? "").toLowerCase().trim();
         SENT_TO.set(k, (SENT_TO.get(k) ?? 0) + 1);
       }
+      { const k = jobKey(job); if (k) { IN_HAND_JOBS.delete(k); if (outcome.status === "applied" || outcome.help_reason === "unconfirmed") APPLIED_JOBS.add(k); } }
       if (outcome.status === "applied") {
         sentToday++;
         const k = String(job.company ?? job.id ?? "").toLowerCase().trim();
@@ -12672,6 +12704,7 @@ const main = async () => {
       console.log(`standing: ${Object.keys(firms).length} employers waiting; the largest holds ${top.length ? Math.max(...Object.values(firms)) : 0} postings`);
       console.log(`standing: sent in the last 24h ${sent.length} ${JSON.stringify(sentBy)}; today's cap ${dailyCap}`);
       console.log(`standing: resumes this run — ${TAILORED.already} already written for their posting, ${TAILORED.written} written now, ${TAILORED.arranged} arranged for their posting without the model, ${TAILORED.general} sent the general resume`);
+      if (sameJobSkipped) console.log(`standing: ${sameJobSkipped} posting(s) set aside as a job already applied to under another address`);
       console.log(
         `standing: per employer in the last 24h — ${SENT_TO.size} employers, counts ${JSON.stringify(
           [...SENT_TO.values()].sort((x, y) => y - x).slice(0, 14),

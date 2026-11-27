@@ -106,19 +106,28 @@ jobs:
           # as it ends, and applied to as the measuring ends. Measuring and
           # applying are listed here with longer intervals than the round, so
           # that this starts them only when that hand-off has not happened.
+          #
+          # The owner's rule, as of the twenty-seventh: the first START reads
+          # everything from the last thirty days and applies to all of it;
+          # after that, new postings are looked for twice a day, and only
+          # what is new is applied to. So every reader comes round each
+          # twelve hours. Applying still comes round hourly — it costs
+          # nothing when the queue is empty, and it is what works off a queue
+          # the first reading filled, and tries again what a portal turned
+          # away. Mail is read every half hour by its own clock, not here.
           jobs_list="
-          sweep.yml|1|-
+          sweep.yml|12|-
           tailor.yml|1|-
           measure.yml|2|apply=true,then_apply=true
           apply.yml|1|as_scheduled=true,max_jobs=60
-          oracle.yml|6|apply=true
+          oracle.yml|12|apply=true
           feeds.yml|12|apply=true
-          successfactors.yml|6|apply=true
+          successfactors.yml|12|apply=true
           jobposting.yml|12|apply=true
           icims.yml|12|apply=true
           adp.yml|12|apply=true
           ukg.yml|12|apply=true
-          boards.yml|6|apply=true
+          boards.yml|12|apply=true
           major-boards.yml|6|apply=true
           usajobs.yml|12|apply=true
           phones.yml|6|apply=true

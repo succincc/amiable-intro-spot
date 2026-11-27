@@ -471,5 +471,21 @@ quiet.hideJob({ company: "ZQ" });
   ], ["linkedin", "https://www.linkedin.com/jobs/view/4384228814/", "https://www.indeed.com/viewjob?jk=abcdef123456", "Bachelor's Degree", "verification_required", 1, 1]);
 }
 
+{
+  const sj = await import("./samejob.mjs");
+  const k = (t, c, l) => sj.jobKey({ title: t, company: c, location: l });
+  const a = k("Manager", "Example Goods", "Exampleton, NJ");
+  check("same job: the same role, employer and place under other spellings, and nothing else", [
+    a === k("Manager", "Example Goods Inc.", "Exampleton, New Jersey, United States"),
+    a === k("Manager - R12345", "Example Goods", "US-NJ-Exampleton"),
+    a === k("Manager", "Example Goods", "Sampleville, NJ"),
+    a === k("Manager", "Sample Foods", "Exampleton, NJ"),
+    a === k("Manager", "Example Goods", "Exampleton, NY"),
+    a === k("Cashier", "Example Goods", "Exampleton, NJ"),
+    k("Manager", "Example Goods", "") === k("Manager", "Example Goods", null),
+    k("", "Example Goods", "x"),
+  ], [true, true, false, false, false, false, true, null]);
+}
+
 console.log(failed ? `unit: ${failed} failed, ${passed} passed.` : `unit: all ${passed} passed.`);
 process.exit(failed ? 1 : 0);
