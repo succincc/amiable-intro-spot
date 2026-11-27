@@ -496,5 +496,18 @@ quiet.hideJob({ company: "ZQ" });
   ], [["a", "b", "c"], ["b", "c", "a"], ["c", "a", "b"], ["a"], [], 300, 135, 9, 8]);
 }
 
+{
+  process.env.SR_IMPORT_ONLY = "1";
+  const sr = await import("./smartrecruiters.mjs");
+  const r = sr.rowOf({ id: "744000012345678", name: " Store Manager ", releasedDate: "2026-11-20T10:00:00.000Z", location: { city: "Exampleton", region: "NJ", country: "us", remote: false }, company: { identifier: "ExampleGoods" } }, "examplegoods");
+  check("smartrecruiters: an opening as a row, and its text from its sections", [
+    r.title, r.location, r.country, r.href, r.remote, r.posted_at,
+    sr.rowOf({ id: "1", name: "" }, "x"),
+    sr.rowOf({ id: "2", name: "Clerk", location: { remote: true } }, "x").remote,
+    sr.textOf({ jobAd: { sections: { jobDescription: { text: "<p>Runs the store.</p>" }, qualifications: { text: "<ul><li>Two years</li></ul>" } } } }),
+    sr.textOf(null),
+  ], ["Store Manager", "Exampleton, NJ", "us", "https://jobs.smartrecruiters.com/ExampleGoods/744000012345678", false, "2026-11-20T10:00:00.000Z", null, true, "Runs the store.\n\nTwo years", ""]);
+}
+
 console.log(failed ? `unit: ${failed} failed, ${passed} passed.` : `unit: all ${passed} passed.`);
 process.exit(failed ? 1 : 0);

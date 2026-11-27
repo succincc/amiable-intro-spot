@@ -127,6 +127,7 @@ jobs:
           icims.yml|12|apply=true
           adp.yml|12|apply=true
           ukg.yml|12|apply=true
+          smartrecruiters.yml|12|apply=true
           boards.yml|12|apply=true
           major-boards.yml|6|apply=true
           usajobs.yml|12|apply=true
@@ -196,7 +197,7 @@ jobs:
               fi
             # Ten minutes' grace, so a job due on the hour is not left a
             # whole further round for being fifty-five minutes old.
-            elif [ "$age_m" -ge $(( every * 60 - 10 )) ] || { [ "${FORCE}" = "true" ] && echo "$wf" | grep -Eq '^(sweep|oracle|feeds|successfactors|jobposting|icims|adp|ukg|boards|major-boards|usajobs|resolve|crawl|nearby)\.yml$'; }; then
+            elif [ "$age_m" -ge $(( every * 60 - 10 )) ] || { [ "${FORCE}" = "true" ] && echo "$wf" | grep -Eq '^(sweep|oracle|feeds|successfactors|jobposting|icims|adp|ukg|smartrecruiters|boards|major-boards|usajobs|resolve|crawl|nearby)\.yml$'; }; then
               if start "$wf" "$give"; then
                 action="due; started"
                 started=$((started + 1))

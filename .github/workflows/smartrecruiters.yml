@@ -1,0 +1,52 @@
+name: smartrecruiters
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: "Save postings (true), or only report (false)"
+        required: false
+        default: "false"
+      host:
+        description: "Optional: one portal only, e.g. careers-acme.icims.com"
+        required: false
+        default: ""
+concurrency:
+  group: applypilot-smartrecruiters
+  cancel-in-progress: false
+jobs:
+  smartrecruiters:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Restore Playwright + Chromium
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/ms-playwright
+            ~/pw/node_modules
+          key: pw-1.49.0-${{ runner.os }}
+      - name: Install Playwright + Chromium
+        run: |
+          set -euo pipefail
+          PW_DIR="$HOME/pw"
+          mkdir -p "$PW_DIR"
+          cd "$PW_DIR"
+          if [ ! -d node_modules/playwright ]; then
+            npm init -y >/dev/null
+            npm install --no-audit --no-fund playwright@1.49.0
+          fi
+          npx playwright install --with-deps chromium
+          ln -sfn "$PW_DIR/node_modules" "$GITHUB_WORKSPACE/node_modules"
+      - name: Read SmartRecruiters employers
+        env:
+          SUPABASE_URL: https://inqhfkshqndkxyztzita.supabase.co
+          SUPABASE_ANON_KEY: sb_publishable_QK4kidijM8nk46uK6L22Qw_XA0RQu5U
+          APPLYPILOT_EMAIL: ${{ secrets.APPLYPILOT_EMAIL }}
+          APPLYPILOT_PASSWORD: ${{ secrets.APPLYPILOT_PASSWORD }}
+          APPLY: ${{ github.event_name == 'schedule' || github.event.inputs.apply == 'true' }}
+          ONLY_HOST: ${{ github.event.inputs.host }}
+        run: node forusers.mjs smartrecruiters.mjs
