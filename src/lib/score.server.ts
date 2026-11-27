@@ -4,14 +4,29 @@
 const BATCH = 20;
 const MAX_BATCHES = 12; // ceiling per invocation; cron calls it again
 
+// The keys this run scores on: the person's own where they have saved one,
+// the shared one otherwise, and their second key for when the first is spent.
+const KEYS: { first: string; second: string } = { first: "", second: "" };
+
 async function gemini(prompt: string, maxTokens = 8192): Promise<string> {
   const { callGemini } = await import("@/lib/gemini.server");
-  return callGemini({
-    prompt,
-    apiKey: process.env["GEMINI_API_KEY"] ?? "",
-    temperature: 0.2,
-    maxTokens,
-  });
+  try {
+    return await callGemini({
+      prompt,
+      apiKey: KEYS.first || (process.env["GEMINI_API_KEY"] ?? ""),
+      temperature: 0.2,
+      maxTokens,
+    });
+  } catch (e) {
+    // Spent for the day, or not answering: the second free model is asked
+    // before the word counter is. Any other failure is the first model's
+    // to report, as before.
+    if (!KEYS.second) throw e;
+    const { callSecond } = await import("@/lib/second-model.server");
+    const other = await callSecond({ prompt, apiKey: KEYS.second, maxTokens, temperature: 0.2 });
+    if (other === null) throw e;
+    return other;
+  }
 }
 
 /** Pull a JSON array out of a model response that may be fenced or chatty. */
@@ -220,7 +235,17 @@ export async function runScore(supabase: any) {
   const { data: run } = await supabase.from("runs").insert({ kind: "score" }).select().single();
   const stats = { scored: 0, tailored: 0, errors: 0 };
   let note = "";
-  const useAi = !!process.env["GEMINI_API_KEY"];
+  // This person's own keys, where they have saved any.
+  KEYS.first = "";
+  KEYS.second = "";
+  try {
+    const { data: own } = await supabase.from("user_keys").select("*").limit(1).maybeSingle();
+    if (/^[A-Za-z0-9_-]{20,80}$/.test(String(own?.gemini_key ?? "").trim())) KEYS.first = String(own.gemini_key).trim();
+    if (/^gsk_[A-Za-z0-9]{20,120}$/.test(String(own?.groq_key ?? "").trim())) KEYS.second = String(own.groq_key).trim();
+  } catch {
+    /* no keys of their own: the shared one stands */
+  }
+  const useAi = !!(KEYS.first || process.env["GEMINI_API_KEY"] || KEYS.second);
   // Set when the model stops answering mid-run, for any reason. Scoring then
   // carries on with the free local scorer instead of abandoning the run.
   let aiDead = false;
@@ -335,6 +360,32 @@ export async function runScore(supabase: any) {
           })
           .eq("id", batch[i].id);
         stats.scored++;
+      }
+    }
+
+    // What the word counter marked down while no model was answering is put
+    // back to be read properly. It counts shared words, which is a fair
+    // guess and a poor judge: one morning it set aside 184 postings as below
+    // the review score. Only once a model has answered through this whole
+    // run, only postings found in the last three days, and two hundred at a
+    // time — the next run scores them.
+    if (useAi && !aiDead) {
+      try {
+        const since = new Date(Date.now() - 3 * 86_400_000).toISOString();
+        const { data: marked } = await supabase
+          .from("jobs")
+          .select("id")
+          .eq("status", "skipped")
+          .like("score_reason", "%(free local scorer)%")
+          .gte("found_at", since)
+          .limit(200);
+        const ids = (marked ?? []).map((m: any) => m.id);
+        if (ids.length) {
+          await supabase.from("jobs").update({ status: "new", score: null, score_reason: null, skip_reason: null }).in("id", ids);
+          note = `${note ? `${note} ` : ""}${ids.length} posting(s) the word counter had marked down are put back to be read by the model.`;
+        }
+      } catch {
+        /* a second look is a courtesy; the scoring already done stands */
       }
     }
 
