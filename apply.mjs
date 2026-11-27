@@ -9359,6 +9359,13 @@ async function applyToJobOnce(context, job, profile, answers) {
             // A list with nothing on file for it is still opened and read:
             // what it offers often settles it — a notice with one answer,
             // the levels of education, the places one might be.
+            // A list that asks who the applicant is, with nothing on file
+            // for it — "Are you Hispanic/Latino?", "Select up to 2
+            // ethnicities" — is declined in the list's own words, which the
+            // chooser finds from any declining answer. Never a guess.
+            ((await el.getAttribute("role").catch(() => null)) === "combobox" && selfIdTopic(label) && !/\b(pronoun)/i.test(label)
+              ? "Prefer not to answer"
+              : null) ??
             ((await el.getAttribute("role").catch(() => null)) === "combobox" ? listProbe(label, profile) : null);
           if (want) {
             // A Workday "search" field is a combobox, not a text box.
