@@ -29,6 +29,47 @@ async function gemini(prompt: string, maxTokens = 8192): Promise<string> {
   }
 }
 
+/**
+ * A batch scored by the second model, a few postings to a request.
+ * Returns what it scored, and whether it stopped answering partway.
+ */
+async function scoreInPieces(
+  batch: any[],
+  resumeText: string,
+  apiKey: string,
+): Promise<{ done: Map<any, { score: number; reason: string }>; spent: boolean }> {
+  const { callSecond } = await import("@/lib/second-model.server");
+  const done = new Map<any, { score: number; reason: string }>();
+  const resume = String(resumeText ?? "").slice(0, 3500);
+  const PIECE = 4;
+  for (let at = 0; at < batch.length; at += PIECE) {
+    const piece = batch.slice(at, at + PIECE);
+    const listing = piece
+      .map(
+        (j: any, i: number) =>
+          `--- JOB ${i + 1} ---\nTITLE: ${j.title}\nCOMPANY: ${j.company ?? "?"}\nLOCATION: ${j.location ?? "?"}\nDESCRIPTION:\n${String(j.description ?? "").slice(0, 700)}`,
+      )
+      .join("\n\n");
+    const text = await callSecond({
+      prompt: `${SCORE_PROMPT}\n\nCANDIDATE RESUME:\n${resume}\n\n=== ${piece.length} JOBS ===\n\n${listing}`,
+      apiKey,
+      maxTokens: piece.length * 160 + 256,
+      temperature: 0.2,
+    });
+    const parsed = text ? extractArray(text) : null;
+    if (!parsed) return { done, spent: true };
+    for (const item of parsed) {
+      const n = Number(item?.n);
+      if (!Number.isInteger(n) || n < 1 || n > piece.length) continue;
+      done.set(piece[n - 1].id, {
+        score: Math.max(1, Math.min(10, Math.round(Number(item.score) || 1))),
+        reason: String(item.reason ?? "").slice(0, 500),
+      });
+    }
+  }
+  return { done, spent: false };
+}
+
 /** Pull a JSON array out of a model response that may be fenced or chatty. */
 function extractArray(text: string): any[] | null {
   const fenced = text.match(/```(?:json)?\s*(\[[\s\S]*?\])\s*```/);
@@ -249,6 +290,11 @@ export async function runScore(supabase: any) {
   // Set when the model stops answering mid-run, for any reason. Scoring then
   // carries on with the free local scorer instead of abandoning the run.
   let aiDead = false;
+  // How many postings a model scored in this run, and whether the second
+  // model has said it has no more to give for now.
+  let byModel = 0;
+  let secondSpent = false;
+  let firstSpent = false;
   try {
     const { data: profile } = await supabase.from("profile").select("*").eq("id", 1).single();
     if (!profile?.resume_text?.trim())
@@ -312,12 +358,38 @@ export async function runScore(supabase: any) {
         .join("\n\n");
       let parsed: any[] | null = null;
       try {
+        // Once the first model has said it is spent, it is not asked again
+        // for every batch of the run.
+        if (firstSpent) throw new Error("RATE_LIMIT: the first model is spent for now");
         const text = await gemini(
           `${SCORE_PROMPT}\n\nCANDIDATE RESUME:\n${resume}\n\n=== ${batch.length} JOBS ===\n\n${listing}`,
           Math.min(8192, batch.length * 160 + 512),
         );
         parsed = extractArray(text);
       } catch (e) {
+        // The second model's free allowance is counted by the minute and in
+        // words, and a whole batch with the whole resume is more than one
+        // request of it may hold — it was refused outright, every time, and
+        // the word counter did the scoring on a day the second key was
+        // there to be used. It is asked in small pieces instead: four
+        // postings at a time against the head of the resume.
+        firstSpent = true;
+        if (KEYS.second && !secondSpent) {
+          const lean = await scoreInPieces(batch, profile.resume_text, KEYS.second);
+          for (const [id, r] of lean.done) {
+            await supabase
+              .from("jobs")
+              .update({ score: r.score, score_reason: r.reason, scored_at: new Date().toISOString() })
+              .eq("id", id);
+            stats.scored++;
+            byModel++;
+          }
+          if (lean.spent) secondSpent = true;
+          // Whatever it did not reach is still unscored and comes round
+          // again as the next batch: to it, or to the word counter once it
+          // has nothing left this minute.
+          if (lean.done.size > 0) continue;
+        }
         // Any failure to reach the model is survivable, and the run must not
         // be thrown away over it. A quota reset tomorrow, a retired model and
         // an exhausted prepaid balance all arrive here, and only the first is
@@ -348,6 +420,7 @@ export async function runScore(supabase: any) {
         stats.errors++;
         continue;
       }
+      byModel += batch.length;
       for (let i = 0; i < batch.length; i++) {
         const r = byIndex.get(i + 1);
         const score = Math.max(1, Math.min(10, Math.round(Number(r.score) || 1)));
@@ -369,7 +442,10 @@ export async function runScore(supabase: any) {
     // the review score. Only once a model has answered through this whole
     // run, only postings found in the last three days, and two hundred at a
     // time — the next run scores them.
-    if (useAi && !aiDead) {
+    // "Answered throughout" has to mean it was asked: a run with nothing to
+    // score put two hundred back, the next run's model was spent and the
+    // word counter marked the same two hundred down again.
+    if (useAi && !aiDead && byModel > 0) {
       try {
         const since = new Date(Date.now() - 3 * 86_400_000).toISOString();
         const { data: marked } = await supabase

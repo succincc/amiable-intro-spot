@@ -766,6 +766,9 @@ export async function runDiscover(supabase: any, opts: { since?: string | undefi
     // about postings saved by an earlier round. Those are taken out first,
     // a hundred addresses to a question, and only what is new goes on.
     let knownAlready = 0;
+    const NEW_PER_ROUND = 600;
+    let capOff = false;
+    let lookedUp = 0;
     if (rows.length) {
       const have = new Set<string>();
       const urls = rows.map((r) => String(r.url));
@@ -800,14 +803,18 @@ export async function runDiscover(supabase: any, opts: { since?: string | undefi
       }
       // And of what is new, only so much is carried by one round: the
       // newest, with the rest left for the next round to find still new.
-      const NEW_PER_ROUND = 600;
-      if (!unanswered && rows.length > NEW_PER_ROUND) {
+      //
+      // The limit is on what has to be looked up, and is kept further down,
+      // where the looking up is. Kept here, on everything new, it was filled
+      // round after round by the same postings: remote ones for a person who
+      // takes none, and ones in other states — turned away below for
+      // nothing, never saved, and so new again next round and first in the
+      // line again. Thirteen rounds in a row saved nothing while a thousand
+      // new postings waited behind them.
+      if (rows.length > NEW_PER_ROUND) {
         rows.sort((a, b) => String(b.posted_at ?? "").localeCompare(String(a.posted_at ?? "")));
-        const over = rows.length - NEW_PER_ROUND;
-        rows.length = NEW_PER_ROUND;
-        stats.filtered += over;
-        byReason["new, and left for the next round"] = (byReason["new, and left for the next round"] ?? 0) + over;
       }
+      capOff = unanswered > 0;
     }
     await supabase.from("runs").update({ message: `measuring ${rows.length} new (${knownAlready} already in the list)` }).eq("id", run!.id);
     if (radius > 0) {
@@ -927,6 +934,7 @@ export async function runDiscover(supabase: any, opts: { since?: string | undefi
             // a separate choice from how far you will travel.
             if (cfg.include_remote === false) {
               stats.filtered++;
+              bump("remote, and remote work is switched off");
               continue;
             }
             // Remote is not the same as anywhere. A remote role advertised in
@@ -971,6 +979,14 @@ export async function runDiscover(supabase: any, opts: { since?: string | undefi
             continue;
           }
 
+          // Only so many are looked up in one round, the newest first; the
+          // rest are new again next round, when these have been saved.
+          if (!capOff && lookedUp >= NEW_PER_ROUND) {
+            stats.filtered++;
+            bump("new, and left for the next round");
+            continue;
+          }
+          lookedUp++;
           const place = cleanLocation(row.location);
           const found = place ? await locate(place) : ({ status: "miss" } as const);
 
