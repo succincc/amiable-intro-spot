@@ -9411,13 +9411,16 @@ async function applyToJobOnce(context, job, profile, answers) {
           // as it was, and ADP's first screen answered "Mobile Number is
           // required" to a form with everything else on it. The number is
           // typed in, key by key, as the pattern expects.
-          if (type === "tel" && existing && existing.trim() && !/\d/.test(existing)) {
+          // The same where it holds only a country's dialling code: "+1".
+          if (type === "tel" && existing && existing.trim() && existing.replace(/\D/g, "").length < 7) {
             const digits = String(profile.phone ?? "").replace(/\D/g, "").replace(/^1(?=\d{10}$)/, "");
             if (digits) {
               await el.click({ timeout: 3000 }).catch(() => {});
+              await el.press("End").catch(() => {});
               await el.type(digits, { delay: 35 }).catch(() => {});
+              await el.press("Tab").catch(() => {});
               filled++;
-              console.log("    typed the phone number into a box that shows its own pattern");
+              console.log(`    typed the phone number into a box that shows its own pattern; it now holds ${String(await el.inputValue().catch(() => "")).replace(/\D/g, "").length} digit(s)`);
             }
             continue;
           }
