@@ -45,5 +45,7 @@ jobs:
           APPLYPILOT_EMAIL: ${{ secrets.APPLYPILOT_EMAIL }}
           APPLYPILOT_PASSWORD: ${{ secrets.APPLYPILOT_PASSWORD }}
           ANSWERS_ONLY: "true"
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: ${{ secrets.GEMINI_MODEL || 'gemini-3.8-flash' }}
           DRY_RUN: "true"
         run: node forusers.mjs apply.mjs

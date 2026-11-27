@@ -11506,8 +11506,9 @@ async function refreshAnswers(profile) {
   let removed = 0;
   let modelAsked = 0;
   let modelFailed = 0;
-  const tallyHow = { rules: 0, declined: 0, assumed: 0, read: 0 };
+  const tallyHow = { rules: 0, declined: 0, assumed: 0, read: 0, writtenEachTime: 0 };
   const leftKinds = {};
+  const leftSaid = [];
   for (const row of rows) {
     const q = String(row.question ?? "").trim();
     try {
@@ -11558,7 +11559,22 @@ async function refreshAnswers(profile) {
           }
         }
       } else tallyHow.rules++;
+      // An open question — "why do you want to work here?" — is written
+      // afresh on every application, against that posting, by the same
+      // writer this asks here. Where that writer has an answer to give, the
+      // question is not one for the owner and comes off their page; a saved
+      // general answer would only be a worse one than the form gets anyway.
+      if (!want && !options.length) {
+        const drafted = composeAnswer({ question: plain, job: null, resume: profile?.resume_text, profile });
+        if (drafted) {
+          await db(`answers?id=eq.${row.id}`, { method: "DELETE", headers: { Prefer: "return=minimal" } });
+          removed++;
+          tallyHow.writtenEachTime++;
+          continue;
+        }
+      }
       if (!want) {
+        if (leftSaid.length < 70) leftSaid.push(`${options.length ? `[${options.length}] ` : ""}${plain.slice(0, 70)}`);
         const kind = /disabilit|veteran|\brace\b|ethnic|hispanic|gender|\bsex\b|orientation/i.test(plain) ? "about the person, no decline offered"
           : /sponsorship|\bvisa\b|authori[sz]ed to work/i.test(plain) ? "work status"
           : /salary|compensation|pay\b|rate\b/i.test(plain) ? "pay"
@@ -11576,8 +11592,9 @@ async function refreshAnswers(profile) {
       /* one row must not stop the rest */
     }
   }
-  console.log(`Answers page: ${rows.length} question(s) were waiting; ${answered} answered from the profile and the rules, ${removed} removed as never askable, ${rows.length - answered - removed} left for the owner${brought ? `; ${brought} saved answer(s) brought in line with the profile` : ""}.`);
+  console.log(`Answers page: ${rows.length} question(s) were waiting; ${answered} answered from the profile and the rules, ${removed} removed (never askable, or written afresh on each application), ${rows.length - answered - removed} left for the owner${brought ? `; ${brought} saved answer(s) brought in line with the profile` : ""}.`);
   console.log(`Answers page: how they were answered ${JSON.stringify(tallyHow)}; the model was asked ${modelAsked} time(s), failed ${modelFailed}; what is left ${JSON.stringify(leftKinds)}`);
+  for (const line of leftSaid) console.log(`    still waiting: ${line}`);
   if (answered || brought) await requeueForAnswers();
 }
 

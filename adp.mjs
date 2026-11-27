@@ -108,13 +108,17 @@ if (process.env.ADP_IMPORT_ONLY !== "1") {
     const rows = [];
     let said = "";
     try {
-      for (let skip = 0; skip < 400; skip += 100) {
-        const r = await ask(`${BASE}/careercenter/public/events/staffing/v1/job-requisitions?${q}&$top=100${skip ? `&$skip=${skip}` : ""}`);
+      // The address gives twenty at a time whatever is asked for, so it is
+      // asked until it has no more to give.
+      for (let skip = 0, total = Infinity; skip < 600 && skip < total; ) {
+        const r = await ask(`${BASE}/careercenter/public/events/staffing/v1/job-requisitions?${q}&$top=20${skip ? `&$skip=${skip}` : ""}`);
         statuses[r.status] = (statuses[r.status] ?? 0) + 1;
         const list = r.j?.jobRequisitions;
         if (!Array.isArray(list)) { said = `HTTP ${r.status}, ${r.bytes} bytes${r.j ? `, holds ${Object.keys(r.j).slice(0, 5).join(", ")}` : ", not data"}`; break; }
         rows.push(...list);
-        if (list.length < 100) break;
+        total = Number(r.j?.meta?.totalNumber ?? Infinity);
+        skip += list.length;
+        if (!list.length) break;
       }
     } catch (err) { said = String(err?.message ?? err).slice(0, 40); }
     if (!rows.length) {
