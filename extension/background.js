@@ -339,6 +339,246 @@ async function loop() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// The list worked with its owner at the keyboard
+// ---------------------------------------------------------------------------
+//
+// Some portals ask every automated visitor to prove it is a person before
+// they show the application; the runner stops there and says so, and those
+// postings wait under "needs you" with that reason. Nothing here gets round
+// that check. This opens each of those postings in the owner's own browser,
+// in front of them: where the portal asks, the person answers — they are
+// one — and the form behind it is then filled from the profile, the resume
+// attached, and sent. Where a question is left that nothing on file answers,
+// it is ringed and the tab waits for its owner to answer it and press send.
+
+let handRunning = false;
+let handNote = "";
+const HAND_WAIT_MS = 6 * 60_000;      // one posting, the person's part included
+const HAND_LEFT_OPEN_MAX = 3;         // tabs left for the person before stopping
+
+/** The resume file as it was uploaded to the panel, for the form's own box. */
+async function resumeFile(profile) {
+  const path = profile?.resume_file_path;
+  if (!path) return null;
+  try {
+    const { url, key } = await cfg();
+    const token = await accessToken();
+    const res = await fetch(`${url}/storage/v1/object/authenticated/artifacts/${path.split("/").map(encodeURIComponent).join("/")}`, {
+      headers: { apikey: key, Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) return null;
+    const blob = await res.blob();
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    let bin = "";
+    for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    return { name: profile.resume_file_name || "Resume.pdf", type: blob.type || "application/pdf", data: btoa(bin) };
+  } catch {
+    return null;
+  }
+}
+
+/** The frame of a tab that holds the most to fill in: the form's. */
+async function formFrame(tabId) {
+  try {
+    const found = await chrome.scripting.executeScript({
+      target: { tabId, allFrames: true },
+      func: () => {
+        const deep = (root, out = []) => {
+          for (const n of root.querySelectorAll("*")) {
+            if (/^(INPUT|TEXTAREA|SELECT)$/.test(n.tagName) && n.type !== "hidden") out.push(n);
+            if (n.shadowRoot) deep(n.shadowRoot, out);
+          }
+          return out;
+        };
+        return deep(document).length;
+      },
+    });
+    const best = (found ?? []).sort((a, b) => (b.result ?? 0) - (a.result ?? 0))[0];
+    return best && (best.result ?? 0) > 0 ? best.frameId : 0;
+  } catch {
+    return 0;
+  }
+}
+
+async function askFrame(tabId, frameId, message) {
+  try {
+    return await chrome.tabs.sendMessage(tabId, message, { frameId });
+  } catch {
+    await chrome.scripting.executeScript({ target: { tabId, allFrames: true }, files: ["content.js"] }).catch(() => {});
+    await sleep(800);
+    return await chrome.tabs.sendMessage(tabId, message, { frameId }).catch(() => null);
+  }
+}
+
+/**
+ * One posting from the list. Returns what became of it:
+ *   { status: "applied" } | { status: "skipped", skip_reason } |
+ *   { left: true, note }   — the tab is left open for its owner.
+ */
+async function assist(job, profile, answers, file, dryRun) {
+  const tab = await chrome.tabs.create({ url: job.apply_url || job.url, active: true });
+  let tabId = tab.id;
+  // A portal that opens its application in a tab of its own: follow it.
+  const followed = (t) => { if (t.openerTabId === tabId) tabId = t.id; };
+  chrome.tabs.onCreated.addListener(followed);
+  const began = Date.now();
+  let told = "";
+  let pressedApply = 0;
+  let attached = false;
+  let pages = 0;
+  let sent = false;
+  let asked = [];
+  const say = async (frameId, text) => {
+    if (text === told) return;
+    told = text;
+    handNote = text;
+    await askFrame(tabId, 0, { type: "BANNER", text }).catch(() => {});
+    if (frameId) await askFrame(tabId, frameId, { type: "BANNER", text: "" }).catch(() => {});
+  };
+  try {
+    await waitForLoad(tabId).catch(() => {});
+    while (Date.now() - began < HAND_WAIT_MS) {
+      if (!handRunning) return { left: true, note: "stopped" };
+      const alive = await chrome.tabs.get(tabId).catch(() => null);
+      if (!alive) return { left: false, note: "the tab was closed" };
+      const frameId = await formFrame(tabId);
+      const top = await askFrame(tabId, 0, { type: "STATE" });
+      const st = frameId ? (await askFrame(tabId, frameId, { type: "STATE" })) ?? top : top;
+      if (!top || !st) { await sleep(1500); continue; }
+
+      if (top.done || st.done) return { status: "applied" };
+      if ((top.closed || st.closed) && st.fields < 3) return { status: "skipped", skip_reason: "posting closed or filled" };
+
+      if (top.wall || st.wall) {
+        await say(0, "this site wants to see a person: answer its check and the form will be filled for you");
+        await sleep(2000);
+        continue;
+      }
+      if (st.fields < 3) {
+        if ((st.apply || top.apply) && pressedApply < 3) {
+          pressedApply++;
+          await askFrame(tabId, st.apply ? frameId : 0, { type: "CLICK_APPLY" });
+          await sleep(3500);
+          await waitForLoad(tabId, 20_000).catch(() => {});
+          continue;
+        }
+        await say(0, "looking for the application form…");
+        await sleep(2500);
+        continue;
+      }
+
+      if (sent) {
+        // Sent and not yet answered: wait for the page to say so.
+        await sleep(2500);
+        continue;
+      }
+
+      await say(0, "filling this in from your profile…");
+      const r = await askFrame(tabId, frameId, { type: "FILL", profile, answers });
+      asked = asked.concat(r?.unknown ?? []);
+      if (file && !attached && st.hasFileBox) {
+        const a = await askFrame(tabId, frameId, { type: "ATTACH", file });
+        attached = !!a?.ok;
+        if (attached) await sleep(2500);       // the portal reads the file
+      }
+      const ring = await askFrame(tabId, frameId, { type: "RING" });
+      const left = ring?.left ?? 0;
+      const now = await askFrame(tabId, frameId, { type: "STATE" });
+
+      if (left > 0) {
+        await say(0, `${left} question${left === 1 ? "" : "s"} left for you (ringed in orange): answer ${left === 1 ? "it" : "them"} and press ${now?.canSubmit ? "submit" : "next"}`);
+        await sleep(3000);
+        continue;
+      }
+      if (now?.hasNext && !now?.canSubmit && pages < 8) {
+        pages++;
+        await askFrame(tabId, frameId, { type: "CLICK_NEXT" });
+        await sleep(2500);
+        continue;
+      }
+      if (now?.canSubmit) {
+        if (st.hasFileBox && !attached && file) {
+          await say(0, "attach your resume and press submit");
+          await sleep(3000);
+          continue;
+        }
+        if (dryRun) {
+          await say(0, "dry run: filled and not sent. Look it over; press submit yourself if you want it sent");
+          await sleep(3000);
+          continue;
+        }
+        await say(0, "sending…");
+        await askFrame(tabId, frameId, { type: "SUBMIT" });
+        sent = true;
+        await sleep(4000);
+        const check = await askFrame(tabId, frameId, { type: "VERIFY" });
+        if (check?.success) return { status: "applied" };
+        if (check?.errors?.length) {
+          sent = false;       // the form said no: its owner is shown why
+          await say(0, `the form did not take it: ${String(check.errors[0]).slice(0, 90)}`);
+          await sleep(4000);
+        }
+        continue;
+      }
+      await say(0, "filled what is on file. Finish anything left and press submit");
+      await sleep(3000);
+    }
+    return { left: true, note: told || "not finished in time" };
+  } finally {
+    chrome.tabs.onCreated.removeListener(followed);
+    if (asked.length) await recordUnknowns(asked).catch(() => {});
+    currentTabId = null;
+    // Closed only where it is done with; a tab its owner has yet to finish stays.
+    handLastTab = tabId;
+  }
+}
+let handLastTab = null;
+
+async function handLoop() {
+  let leftOpen = 0;
+  let done = 0;
+  try {
+    const [profile] = await db("profile?id=eq.1&select=*");
+    if (!profile?.email || !profile?.full_name) { handNote = "Add your name and email in the panel first."; return; }
+    const answers = (await db("answers?confirmed=eq.true&select=q_key,answer,field_type")) ?? [];
+    const file = await resumeFile(profile);
+    const { dryRun } = await chrome.storage.local.get("dryRun");
+    const tried = new Set();
+    while (handRunning) {
+      const list = (await db("jobs?status=eq.needs_help&help_reason=eq.captcha&select=id,title,company,url,apply_url,ats&order=score.desc.nullslast,updated_at.desc&limit=60")) ?? [];
+      const job = list.find((j) => !tried.has(j.id));
+      if (!job) { handNote = done ? `Done: ${done} sent.` : "Nothing on the by-hand list."; break; }
+      tried.add(job.id);
+      handNote = `${job.title} — ${job.company ?? ""}`;
+      let outcome;
+      try {
+        outcome = await assist(job, profile, answers, file, !!dryRun);
+      } catch (e) {
+        outcome = { left: true, note: String(e?.message ?? e).slice(0, 200) };
+      }
+      if (outcome.status === "applied") {
+        done++;
+        await finishJob(job.id, { status: "applied", applied_at: new Date().toISOString(), confirm_state: "pending", help_reason: null, last_error: null });
+        notify("Applied", `${job.title} at ${job.company ?? ""}`);
+        if (handLastTab) await chrome.tabs.remove(handLastTab).catch(() => {});
+        await sleep(3000);
+      } else if (outcome.status === "skipped") {
+        await finishJob(job.id, { status: "skipped", skip_reason: outcome.skip_reason });
+        if (handLastTab) await chrome.tabs.remove(handLastTab).catch(() => {});
+      } else if (outcome.left) {
+        leftOpen++;
+        await finishJob(job.id, { last_error: `Opened in your browser and left for you: ${outcome.note}`.slice(0, 300) }).catch(() => {});
+        if (leftOpen >= HAND_LEFT_OPEN_MAX) { handNote = `${leftOpen} tabs are waiting for you. Finish those, then start again.`; break; }
+      }
+    }
+  } catch (e) {
+    handNote = String(e?.message ?? e) === "NOT_CONFIGURED" ? "Sign in first." : String(e?.message ?? e).slice(0, 160);
+  } finally {
+    handRunning = false;
+  }
+}
+
 function notify(title, message) {
   chrome.notifications?.create({
     type: "basic", iconUrl: "icon128.png", title: `ApplyPilot — ${title}`, message,
@@ -363,7 +603,13 @@ chrome.runtime.onMessage.addListener((msg, _s, reply) => {
     reply({ ok: true, running });
     return true;
   }
+  if (msg.type === "START_HAND") {
+    if (!handRunning && !running) { handRunning = true; handNote = "starting…"; handLoop(); }
+    reply({ ok: true, handRunning });
+    return true;
+  }
   if (msg.type === "STOP") {
+    handRunning = false;
     running = false;
     heartbeat({ state: "idle", online: false });
     if (currentTabId) chrome.tabs.remove(currentTabId).catch(() => {});
@@ -374,7 +620,12 @@ chrome.runtime.onMessage.addListener((msg, _s, reply) => {
     (async () => {
       try {
         const [stats] = await db("v_stats?select=*");
-        reply({ ok: true, running, stats });
+        let byHand = 0;
+        try {
+          const rows = await db("jobs?status=eq.needs_help&help_reason=eq.captcha&select=id&limit=200");
+          byHand = (rows ?? []).length;
+        } catch { byHand = 0; }
+        reply({ ok: true, running, handRunning, handNote, byHand, stats });
       } catch (e) {
         reply({ ok: false, running, error: String(e.message) });
       }

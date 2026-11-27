@@ -856,7 +856,16 @@ function AgentBlock() {
 6. sign in with the same email + password you use here
    (the database address is already filled in${origin ? `; panel: ${origin}` : ""})
 7. tick "dry run" → START APPLYING to watch it fill forms safely
-8. untick dry run → START APPLYING to submit for real`}</pre>
+8. untick dry run → START APPLYING to submit for real
+
+for the postings marked "needs you — human check":
+9. click APPLY TO MY BY-HAND LIST. each one opens in front of you.
+   where the site asks you to prove you are a person, do — the form
+   behind it is then filled from your profile, your resume attached,
+   and it is sent. a question nothing on file answers is ringed in
+   orange for you to answer.
+   (already installed? download again and press the reload arrow on
+   the extension's card to get this.)`}</pre>
     </Block>
   );
 }

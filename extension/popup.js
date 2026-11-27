@@ -31,13 +31,18 @@ async function refresh() {
     $("s_today").textContent = s.applied_today ?? 0;
     $("s_help").textContent = s.needs_help ?? 0;
 
-    $("dot").className = res.running ? "dot live" : "dot";
-    $("state").textContent = res.running ? "applying" : "idle";
-    $("start").style.display = res.running ? "none" : "block";
-    $("stop").style.display = res.running ? "block" : "none";
+    const busy = res.running || res.handRunning;
+    $("dot").className = busy ? "dot live" : "dot";
+    $("state").textContent = res.handRunning ? "working your by-hand list" : res.running ? "applying" : "idle";
+    $("start").style.display = busy ? "none" : "block";
+    $("stop").style.display = busy ? "block" : "none";
+    $("hand").style.display = busy ? "none" : "block";
+    $("s_hand").textContent = res.byHand ?? 0;
+    $("handnote").style.display = res.handNote ? "block" : "none";
+    $("handnote").textContent = res.handNote ?? "";
     $("start").disabled = false;
 
-    if (!res.running && (s.queued ?? 0) === 0) {
+    if (!busy && (s.queued ?? 0) === 0 && (res.byHand ?? 0) === 0) {
       say("Queue is empty. Run discovery in the panel first.", "warn");
     }
   });
@@ -86,6 +91,16 @@ $("dry").onchange = async (e) => {
 $("start").onclick = () => {
   chrome.runtime.sendMessage({ type: "START" }, () => {
     say("Running. You can close this popup — it keeps going.", "ok");
+    setTimeout(refresh, 600);
+  });
+};
+
+// The postings a portal's human check stopped: opened here, in front of
+// you, one at a time. You answer the check where one is shown; the form is
+// filled, the resume attached, and it is sent.
+$("hand").onclick = () => {
+  chrome.runtime.sendMessage({ type: "START_HAND" }, () => {
+    say("Opening the first one. Keep this window in front: where a site asks you to prove you are a person, do, and the rest is done for you.", "ok");
     setTimeout(refresh, 600);
   });
 };

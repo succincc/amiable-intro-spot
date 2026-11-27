@@ -30,6 +30,21 @@
 
   const log = (...a) => console.log("%c[ApplyPilot]", "color:#10b981", ...a);
 
+  // Every element that matches, including the ones a portal draws inside
+  // components of its own. SmartRecruiters builds its whole application out
+  // of those, and a plain search of the page finds none of its boxes.
+  const deepAll = (sel, root = document, out = []) => {
+    for (const n of root.querySelectorAll("*")) {
+      if (n.matches(sel)) out.push(n);
+      if (n.shadowRoot) deepAll(sel, n.shadowRoot, out);
+    }
+    return out;
+  };
+  const shown = (el) => {
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0;
+  };
+
   // ------------------------------------------------------------------
   // React-safe value setting
   // ------------------------------------------------------------------
@@ -45,9 +60,10 @@
     if (setter) setter.call(el, value);
     else el.value = value;
 
-    el.dispatchEvent(new Event("input", { bubbles: true }));
-    el.dispatchEvent(new Event("change", { bubbles: true }));
-    el.dispatchEvent(new Event("blur", { bubbles: true }));
+    // composed, so a component that holds the box hears it too.
+    el.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+    el.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
+    el.dispatchEvent(new Event("blur", { bubbles: true, composed: true }));
   }
 
   // ------------------------------------------------------------------
@@ -55,10 +71,19 @@
   // ------------------------------------------------------------------
   function labelFor(el) {
     const parts = [];
-
+    const root = el.getRootNode?.() ?? document;
     if (el.id) {
-      const lab = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+      const lab = root.querySelector?.(`label[for="${CSS.escape(el.id)}"]`);
       if (lab) parts.push(lab.innerText);
+    }
+    // A box inside a component: the component carries the question.
+    for (let host = root.host, d = 0; host && d < 3; host = host.getRootNode?.().host, d++) {
+      for (const attr of ["label", "aria-label", "placeholder", "name", "data-test", "data-testid"]) {
+        const v = host.getAttribute?.(attr);
+        if (v) parts.push(v);
+      }
+      const near = host.closest?.("label") ?? host.parentElement?.querySelector?.("label");
+      if (near?.innerText) parts.push(near.innerText);
     }
     const wrapping = el.closest("label");
     if (wrapping) parts.push(wrapping.innerText);
@@ -259,9 +284,7 @@
     const unknown = [];
     const seenRadioGroups = new Set();
 
-    const controls = Array.from(
-      document.querySelectorAll("input, select, textarea"),
-    ).filter((el) => {
+    const controls = deepAll("input, select, textarea").filter((el) => {
       if (el.disabled || el.readOnly) return false;
       if (["hidden", "submit", "button", "image", "reset"].includes(el.type)) return false;
       const r = el.getBoundingClientRect();
@@ -280,7 +303,7 @@
           const name = el.name;
           if (!name || seenRadioGroups.has(name)) continue;
           seenRadioGroups.add(name);
-          const group = Array.from(document.querySelectorAll(`input[type=radio][name="${CSS.escape(name)}"]`));
+          const group = Array.from((el.getRootNode?.() ?? document).querySelectorAll(`input[type=radio][name="${CSS.escape(name)}"]`));
           const groupLabel = labelFor(group[0]) + " " + (group[0].closest("fieldset")?.innerText ?? "").slice(0, 200).toLowerCase();
           const want = booleanAnswer(groupLabel, p) ?? lookupSaved(groupLabel);
           if (clickRadio(group, want)) filled.push(groupLabel.slice(0, 60));
@@ -356,9 +379,7 @@
   }
 
   function findSubmit() {
-    const candidates = Array.from(document.querySelectorAll(
-      'button, input[type=submit], a[role=button], div[role=button]',
-    ));
+    const candidates = deepAll('button, input[type=submit], a[role=button], div[role=button]').filter(shown);
     const wanted = /^(submit|submit application|apply|send application|finish|complete application)$/i;
     const loose = /(submit|apply now|send application)/i;
 
@@ -369,7 +390,7 @@
   }
 
   function findNext() {
-    const candidates = Array.from(document.querySelectorAll("button, a[role=button]"));
+    const candidates = deepAll("button, a[role=button]").filter(shown);
     return candidates.find((b) =>
       /^(next|continue|save and continue|save & continue)$/i.test((b.innerText || "").trim())
       && !b.disabled) ?? null;
@@ -395,8 +416,105 @@
   // ------------------------------------------------------------------
   // Message handling from the background worker
   // ------------------------------------------------------------------
+  // ---- for the list worked with its owner at the keyboard -----------------
+
+  /** A check that wants a person, standing in front of the page right now. */
+  function wallUp() {
+    const frame = deepAll("iframe").find((f) => shown(f) && f.getBoundingClientRect().height > 80 &&
+      /captcha-delivery|datadome|hcaptcha\.com|recaptcha\/api2\/bframe|challenges\.cloudflare|arkoselabs|px-captcha/i.test(f.src || ""));
+    if (frame) return true;
+    const text = (document.body?.innerText ?? "").slice(0, 1500).toLowerCase();
+    return /verify (that )?you are (a )?human|are you a robot|press (and|&) hold|unusual activity|checking your browser/.test(text);
+  }
+  const APPLY_WORDS = /^(apply|apply now|apply for this job|apply to this job|apply online|start application|start your application|i'?m interested|apply for this position)$/i;
+  function findApply() {
+    return deepAll("a, button, [role=button]").filter(shown)
+      .find((b) => APPLY_WORDS.test((b.innerText || b.value || "").replace(/\s+/g, " ").trim())) ?? null;
+  }
+  function fieldCount() {
+    return deepAll("input, select, textarea").filter((el) =>
+      shown(el) && !el.disabled && !["hidden", "submit", "button", "search"].includes(el.type)).length;
+  }
+  /** The resume, put in the form's own resume box as if it had been chosen. */
+  function attach(file) {
+    const boxes = deepAll("input[type=file]");
+    if (!boxes.length) return { ok: false, why: "no file box" };
+    const about = (b) => `${labelFor(b)} ${(b.closest("div, section, fieldset")?.innerText ?? "").slice(0, 120)}`.toLowerCase();
+    const box = boxes.find((b) => /resume|cv|curriculum/.test(about(b)) && !/cover/.test(labelFor(b))) ?? boxes[0];
+    if (box.files?.length) return { ok: true, already: true };
+    const bytes = Uint8Array.from(atob(file.data), (c) => c.charCodeAt(0));
+    const dt = new DataTransfer();
+    dt.items.add(new File([bytes], file.name, { type: file.type || "application/pdf" }));
+    box.files = dt.files;
+    box.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+    box.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
+    return { ok: box.files.length > 0 };
+  }
+  /** What is still empty and wanted, ringed so the eye finds it. */
+  function ringLeft() {
+    let n = 0;
+    for (const el of deepAll("input, select, textarea")) {
+      if (!shown(el) || el.disabled || ["hidden", "submit", "button", "file", "checkbox", "radio", "search"].includes(el.type)) continue;
+      const wanted = el.required || el.getAttribute("aria-required") === "true";
+      if (wanted && !String(el.value ?? "").trim()) {
+        el.style.outline = "3px solid #f59e0b";
+        el.style.outlineOffset = "2px";
+        n++;
+      } else if (el.style.outline.includes("245, 158, 11") || el.style.outline.includes("#f59e0b")) {
+        el.style.outline = "";
+      }
+    }
+    return n;
+  }
+  function banner(text) {
+    let b = document.getElementById("__applypilot_banner");
+    if (!text) { b?.remove(); return; }
+    if (!b) {
+      b = document.createElement("div");
+      b.id = "__applypilot_banner";
+      b.style.cssText = "position:fixed;z-index:2147483647;left:50%;top:10px;transform:translateX(-50%);background:#0b1220;color:#e5e7eb;border:1px solid #10b981;padding:8px 14px;font:13px/1.4 system-ui,sans-serif;border-radius:6px;box-shadow:0 6px 24px rgba(0,0,0,.35);max-width:80vw";
+      document.documentElement.appendChild(b);
+    }
+    b.textContent = `ApplyPilot — ${text}`;
+  }
+
   chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
     try {
+      if (msg.type === "STATE") {
+        const text = (document.body?.innerText ?? "").toLowerCase();
+        reply({
+          ok: true,
+          wall: wallUp(),
+          fields: fieldCount(),
+          apply: !!findApply(),
+          canSubmit: !!findSubmit(),
+          hasNext: !!findNext(),
+          hasFileBox: deepAll("input[type=file]").length > 0,
+          done: /thank you for applying|application (has been )?(received|submitted|sent)|we('ve| have) received your application|successfully (applied|submitted)|thanks for applying|your application was sent/.test(text),
+          closed: /no longer accepting|position (has been )?filled|posting (is )?closed|job (is )?no longer available|this job has expired/.test(text),
+          text: text.length,
+        });
+        return true;
+      }
+      if (msg.type === "CLICK_APPLY") {
+        const b = findApply();
+        if (b) { b.scrollIntoView({ block: "center" }); b.click(); }
+        reply({ ok: !!b });
+        return true;
+      }
+      if (msg.type === "ATTACH") {
+        reply(attach(msg.file));
+        return true;
+      }
+      if (msg.type === "RING") {
+        reply({ ok: true, left: ringLeft() });
+        return true;
+      }
+      if (msg.type === "BANNER") {
+        banner(msg.text);
+        reply({ ok: true });
+        return true;
+      }
       if (msg.type === "PING") {
         reply({ ok: true, ats: detectATS(), url: location.href });
         return true;
