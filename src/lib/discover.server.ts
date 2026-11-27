@@ -696,7 +696,13 @@ export async function runDiscover(supabase: any, opts: { since?: string | undefi
         salary_text: j.salary_text,
         salary_min: min,
         salary_max: max,
-        description: (j.description ?? "").slice(0, 20000),
+        // Read when the row is saved, not here: most rows are turned away
+        // on where the job is, and never needed their description opened.
+        get description() {
+          const text = (j.description ?? "").slice(0, 20000);
+          Object.defineProperty(this, "description", { value: text, writable: true, enumerable: true, configurable: true });
+          return text;
+        },
         source: j.source,
         ats: j.ats ?? null,
         posted_at: j.posted_at ?? null,
@@ -708,7 +714,15 @@ export async function runDiscover(supabase: any, opts: { since?: string | undefi
     // where the owner's pass a few dozen — each with its whole description —
     // and the host ended those rounds before they could answer. The newest
     // are carried; the rest belong to employers that are read again.
-    const ROUND_CARRIES = 400;
+    //
+    // Four hundred was far too few, and in the wrong place: this is counted
+    // before a posting's place has been looked at, where the owner's own
+    // search has a thousand or more each round — and the cut threw away all
+    // but the newest of them, so a day's sweep kept seven where it had kept
+    // fifty-four. Descriptions are no longer opened here at all, which was
+    // the cost this guarded against; the limit stays only as a ceiling no
+    // ordinary round reaches.
+    const ROUND_CARRIES = 6000;
     if (rows.length > ROUND_CARRIES) {
       rows.sort((a, b) => String(b.posted_at ?? "").localeCompare(String(a.posted_at ?? "")));
       const over = rows.length - ROUND_CARRIES;
