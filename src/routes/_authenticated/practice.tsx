@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Btn, Cursor, Empty, ErrorLine, Section } from "@/components/mission-control/async-state";
 import { supabase } from "@/integrations/supabase/client";
 import { questionsFor, readAnswer } from "@/lib/practice";
+import { CallRehearsal } from "@/components/mission-control/call-rehearsal";
 
 export const Route = createFileRoute("/_authenticated/practice")({
   head: () => ({
@@ -40,12 +41,12 @@ function Practice() {
     queryFn: async () => {
       const [jobs, profile] = await Promise.all([
         supabase.from("jobs").select("id,title,company,description,status").in("status", ["interview", "applied", "offer"]).order("applied_at", { ascending: false, nullsFirst: false }).limit(60),
-        supabase.from("profile").select("resume_text").eq("id", 1).maybeSingle(),
+        supabase.from("profile").select("*").eq("id", 1).maybeSingle(),
       ]);
       if (jobs.error) throw jobs.error;
       // Interviews first: those are what this is for.
       const list = ((jobs.data ?? []) as JobLite[]).sort((a, b) => Number(b.status === "interview") - Number(a.status === "interview"));
-      return { jobs: list, resume: String(profile.data?.resume_text ?? "") };
+      return { jobs: list, resume: String(profile.data?.resume_text ?? ""), me: (profile.data ?? {}) as Record<string, unknown> };
     },
   });
 
@@ -147,6 +148,7 @@ function Practice() {
             </div>
           )}
         </Section>
+        {q.data?.jobs.length ? <CallRehearsal jobs={q.data.jobs} me={q.data.me} /> : null}
       </div>
     );
   }
