@@ -55,6 +55,32 @@ console.log(`search: ${(cfg?.titles ?? []).length} title(s), ${(cfg?.exclude_tit
 const cos = (await db("companies?select=ats&limit=2000").catch(() => [])) ?? [];
 const by = {}; for (const c of cos) by[c.ats] = (by[c.ats] ?? 0) + 1;
 console.log(`employers by system: ${JSON.stringify(by)}`);
+// Every hiring system, by what has become of its postings: how many were
+// ever sent, how many are waiting, how many stopped for a person, and how
+// many were set aside. Which systems have been proven end to end, and which
+// have only ever been read.
+{
+  const by = {};
+  for (let from = 0; from < 40000; from += 1000) {
+    const rows = (await db(`jobs?select=ats,status,help_reason&order=id.asc&offset=${from}&limit=1000`).catch(() => [])) ?? [];
+    for (const r of rows) {
+      const a = (by[r.ats ?? "none"] ??= { sent: 0, unconfirmed: 0, ready: 0, need_you: 0, set_aside: 0, other: 0 });
+      if (r.status === "applied" || r.status === "interview" || r.status === "offer" || r.status === "rejected") a.sent++;
+      else if (r.help_reason === "unconfirmed") a.unconfirmed++;
+      else if (r.status === "queued" || r.status === "review" || r.status === "new") a.ready++;
+      else if (r.status === "needs_help") a.need_you++;
+      else if (r.status === "skipped") a.set_aside++;
+      else a.other++;
+    }
+    if (rows.length < 1000) break;
+  }
+  console.log("by hiring system, all time:");
+  for (const [k, v] of Object.entries(by).sort((x, y) => y[1].sent - x[1].sent)) console.log(`  ${k}: ${JSON.stringify(v)}`);
+  const stuck = (await db("jobs?status=eq.needs_help&select=ats,help_reason&limit=3000").catch(() => [])) ?? [];
+  const why = {};
+  for (const r of stuck) { const k = `${r.ats ?? "none"} / ${r.help_reason ?? "?"}`; why[k] = (why[k] ?? 0) + 1; }
+  console.log(`stopped for a person, by system and reason: ${JSON.stringify(Object.fromEntries(Object.entries(why).sort((x, y) => y[1] - x[1]).slice(0, 24)))}`);
+}
 // The mailbox: when it was last read and what the last reading said, with
 // anything that looks like an address taken out.
 const plain = (t) => String(t ?? "").replace(/[\w.+-]+@[\w.-]+/g, "[address]").replace(/\s+/g, " ").slice(0, 160);
