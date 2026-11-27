@@ -1,0 +1,38 @@
+name: indexes
+
+# The companies of the S&P MidCap 400 and SmallCap 600, added to the
+# employers the resolver looks at: see indexes.mjs. Monthly, from the clock;
+# the lists change a few names a quarter.
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: "Save the employers found (true), or only report (false)"
+        required: false
+        default: "false"
+
+concurrency:
+  group: applypilot-indexes
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  indexes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Read the lists
+        env:
+          SUPABASE_URL: https://inqhfkshqndkxyztzita.supabase.co
+          SUPABASE_ANON_KEY: sb_publishable_QK4kidijM8nk46uK6L22Qw_XA0RQu5U
+          APPLYPILOT_EMAIL: ${{ secrets.APPLYPILOT_EMAIL }}
+          APPLYPILOT_PASSWORD: ${{ secrets.APPLYPILOT_PASSWORD }}
+          APPLY: ${{ github.event.inputs.apply == 'true' }}
+        run: node indexes.mjs

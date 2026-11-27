@@ -11,6 +11,7 @@
 process.env.OUTREACH_IMPORT_ONLY = "1";
 process.env.JOBPOSTING_IMPORT_ONLY = "1";
 process.env.FEEDS_IMPORT_ONLY = "1";
+process.env.INDEXES_IMPORT_ONLY = "1";
 process.env.PRETAILOR_IMPORT_ONLY = "1";
 process.env.SF_IMPORT_ONLY = "1";
 
@@ -25,6 +26,7 @@ const near = await import("./near.mjs");
 const school = await import("./school.mjs");
 const zip = await import("./zipmcp.mjs");
 const fp = await import("./fromprofile.mjs");
+const idx = await import("./indexes.mjs");
 process.env.PHONES_IMPORT_ONLY = "1";
 const phones = await import("./phones.mjs");
 process.env.USAJOBS_IMPORT_ONLY = "1";
@@ -407,6 +409,8 @@ quiet.hideJob({ company: "ZQ" });
       fp.fromProfile("How did you hear about us? LinkedIn", { linkedin_url: "https://linkedin.com/in/x" }),
     ], ["https://github.com/example", "https://github.com/example", null, null, null]);
   }
+  check("indexes: the company in each row, not its ticker", idx.companiesIn('<table class="wikitable sortable" id="constituents"><tr><th>Symbol</th><th>Security</th></tr><tr><td><a rel="nofollow" class="external text" href="https://www.nyse.com/quote/XNYS:AA">AA</a></td><td><a href="/wiki/Alcoa" title="Alcoa">Alcoa</a></td><td><a href="/wiki/Materials" title="Materials">Materials</a></td></tr><tr><td><a class="external" href="https://x">BJ</a></td><td><a href="/wiki/BJ%27s_Wholesale_Club" title="x">BJ&#39;s Wholesale Club</a></td></tr></table>'), [{ title: "Alcoa", name: "Alcoa" }, { title: "BJ's Wholesale Club", name: "BJ's Wholesale Club" }]);
+  check("indexes: an employer's name and where to start", [idx.employerName("Example Holdings, Inc."), idx.employerName("Sample Co (Class A)"), idx.careersFrom("https://www.example.com/en-us/home"), idx.careersFrom("example.org"), idx.careersFrom("")], ["Example Holdings", "Sample", "https://www.example.com/careers", "https://example.org/careers", null]);
   check("quiet: nothing to strike out, nothing changed", quiet.scrub("plain line", [], null), "plain line");
 }
 
