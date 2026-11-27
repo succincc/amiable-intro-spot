@@ -7230,6 +7230,8 @@ const MODEL_FAILURES = new Set();
 const selfIdSeen = new Set();
 // What was worked out for a group of pick-one buttons, by the group's name.
 const RADIO_PICKS = new Map();
+// Whether ADP's sign-in has been looked at in this run.
+const ADP_LOOKED = { done: false };
 // ADP and an email it already holds an account for: see adpAlias.
 const ADP_ALIAS = { use: false, tried: new Set() };
 /** name@gmail.com as name+jobs@gmail.com: the same mailbox, another address. */
@@ -11464,6 +11466,46 @@ async function applyToJobOnce(context, job, profile, answers) {
             // owner's to sign in.
             const alias = adpAlias(profile?.email);
             const wasPutBack = /plus-address/.test(String(job.last_error ?? ""));
+            // What ADP offers a person who does have an account: looked at
+            // once a run, by shape, and nothing pressed beyond the way in.
+            if (!ADP_LOOKED.done) {
+              ADP_LOOKED.done = true;
+              const lay = (pg) =>
+                pg
+                  .evaluate(() => {
+                    const deep = (r, out = []) => {
+                      for (const n of r.querySelectorAll("*")) {
+                        out.push(n);
+                        if (n.shadowRoot) deep(n.shadowRoot, out);
+                      }
+                      return out;
+                    };
+                    const all = deep(document);
+                    const on = (e) => { const b = e.getBoundingClientRect(); return b.width > 0 && b.height > 0; };
+                    const words = (e) => (e.innerText || e.getAttribute("label") || e.getAttribute("aria-label") || e.value || "").replace(/\s+/g, " ").trim().slice(0, 34);
+                    return {
+                      host: location.hostname.split(".").slice(-2).join("."),
+                      path: location.pathname.split("/").filter(Boolean).map((x) => (x.length > 22 ? "#" : x)).slice(0, 5).join("/"),
+                      ways: all.filter((n) => /^(A|BUTTON|SDF-BUTTON|SDF-LINK)$/.test(n.tagName) && on(n)).map(words).filter((t) => /sign ?in|log ?in|forgot|already|register|create|user id|password|next|continue|verify/i.test(t)).slice(0, 14),
+                      boxes: all.filter((n) => /^(INPUT|SDF-INPUT)$/.test(n.tagName) && on(n) && n.type !== "hidden").map((n) => `${n.type || n.tagName.toLowerCase()}:${(n.getAttribute("label") || n.getAttribute("aria-label") || n.name || n.id || "").slice(0, 24)}`).slice(0, 12),
+                      frames: document.querySelectorAll("iframe").length,
+                    };
+                  })
+                  .catch(() => null);
+              console.log(`    ADP, to someone with an account, offers: ${JSON.stringify(await lay(page))}`);
+              try {
+                const way = page.locator("a, button, sdf-button, sdf-link").filter({ hasText: /^\s*(sign in|log in|already have an account\??( sign in)?)\s*$/i }).first();
+                if (await way.isVisible().catch(() => false)) {
+                  await way.click({ timeout: 5000 }).catch(() => {});
+                  await page.waitForTimeout(5000);
+                  console.log(`    ADP's sign-in screen: ${JSON.stringify(await lay(page))}`);
+                } else {
+                  console.log("    ADP shows no plain sign-in on this screen");
+                }
+              } catch (e) {
+                console.log(`    ADP's sign-in could not be looked at: ${String(e?.message ?? e).slice(0, 80)}`);
+              }
+            }
             // Tried, on two postings: ADP answered the plus-address exactly as
             // it answered the address — it knows them for one mailbox. So it
             // is not tried; the account is its owner's to sign in to.
