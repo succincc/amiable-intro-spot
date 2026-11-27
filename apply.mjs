@@ -7362,7 +7362,7 @@ async function ukgAccount(page, form, profile, job) {
       words = words.concat(w);
     }
     const kinds = words.filter((t) => /apply|sign|log ?out|account|profile|presence|welcome|my /i.test(t)).map((t) => t.replace(/welcome,?\s+.*/i, "Welcome [name]")).filter((t, i, a) => a.indexOf(t) === i).slice(0, 10);
-    console.log(`    back at the posting it offers: ${JSON.stringify(kinds)}`);
+    console.log(`    back at the posting it offers: ${JSON.stringify(kinds)} among ${words.length} thing(s) to press`);
     if (words.some((t) => /^apply( now| for this (job|position))?$/i.test(t)) || words.some((t) => /^(sign|log) ?out$/i.test(t))) return null;
     for (const f of page.frames()) {
       const b = f.getByText(/^\s*sign in\s*$/i).first();
@@ -7390,7 +7390,7 @@ async function ukgAccount(page, form, profile, job) {
     const why = (await said()).match(/(wrong|incorrect|invalid)[^.]{0,60}/)?.[0] ?? "the sign-in did not go through";
     console.log(`    this board's saved account did not sign in: ${why}`);
     // An account made and never confirmed: its activation mail, if one came.
-    const act = await mailLink("activate", 2);
+    const act = null;
     if (act) {
       const tab = await page.context().newPage();
       await tab.goto(act, { waitUntil: "domcontentloaded", timeout: 45_000 }).catch(() => {});
@@ -7400,7 +7400,7 @@ async function ukgAccount(page, form, profile, job) {
     }
     // The board's own "Create or reset your password", for the account this
     // bot made there: a link is mailed, and a new password set through it.
-    if (await press(/create or reset your password|forgot (your )?password|reset (your )?password/i)) {
+    if (process.env.UKG_RESET === "1" && (await press(/create or reset your password|forgot (your )?password|reset (your )?password/i))) {
       await page.waitForTimeout(3500);
       console.log(`    its reset screen: ${JSON.stringify(await shapeNow())}`);
       const box = await inAny('input[name=email], input[type=email], input[name=username], input[type=text]');
@@ -7569,7 +7569,7 @@ async function ukgAccount(page, form, profile, job) {
     return { ok: false, reason: "the board says an account already exists under this email" };
   }
   if (shape.accept) await press(/^\s*(accept|authorize|allow|continue)\s*$/i);
-  if (shape.verify || !stillAsks) {
+  if (shape.verify) {
     const link = await mailLink("activate", 4);
     if (!link && !shape.verify) {
       // nothing asked for and nothing mailed: on to the proof below
