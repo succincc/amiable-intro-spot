@@ -19,7 +19,8 @@ import { FRESH_MS } from "./fresh.mjs";
 import { nearPattern } from "./near.mjs";
 // Nothing this prints names an employer, a posting or a place: see quiet.mjs.
 guardLogs();
-import { chromium } from "playwright";
+// The browser is loaded where it is used: this file is also read for its
+// title-matching alone, by jobs that have no browser installed.
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const ANON_KEY = process.env.SUPABASE_ANON_KEY;
@@ -269,6 +270,7 @@ if (process.env.ICIMS_IMPORT_ONLY !== "1") {
   hideNames(employers.map((e) => e.name));
   console.log(`${employers.length} employer(s) on iCIMS; ${titles.length} title(s) to search; ${APPLY ? "saving postings" : "report only"}.`);
 
+  const { chromium } = await import("playwright");
   const browser = await chromium.launch({ args: ["--disable-blink-features=AutomationControlled", "--no-sandbox"] });
   const context = await browser.newContext({
     userAgent:
