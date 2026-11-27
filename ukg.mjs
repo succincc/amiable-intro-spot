@@ -97,6 +97,13 @@ if (process.env.UKG_IMPORT_ONLY !== "1") {
   const [prof] = (await db("profile?id=eq.1&select=state,home_state").catch(() => [])) ?? [];
   const NEAR = nearPattern(prof?.home_state || prof?.state || process.env.HOME_STATE);
 
+  // Applications that stopped before any form was reached are put back: the
+  // applier is still being taught this portal.
+  if (APPLY) {
+    await db("jobs?ats=eq.ukg&status=eq.needs_help&help_reason=in.(error,no_form)", {
+      method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ status: "queued", help_reason: null, attempts: 0 }),
+    }).catch(() => {});
+  }
   const found = (await db("company_candidates?note=ilike.*runs%20on%20ukg*&select=id,name,note,careers_url,resolved_url&limit=500")) ?? [];
   hideNames(found.map((r) => r.name));
   const tally = { employers: found.length, noBoard: 0, refused: 0, empty: 0, read: 0, rows: 0, wanted: 0, fresh: 0, near: 0, saved: 0 };
