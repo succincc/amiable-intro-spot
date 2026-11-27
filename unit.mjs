@@ -546,5 +546,28 @@ quiet.hideJob({ company: "ZQ" });
   ], [true, true, true, false, true, true, true, true, 1, 0, ["48%", "PMP"], true, true]);
 }
 
+{
+  // What came back, against how it was sent: counted, and no rate drawn
+  // from a handful.
+  const o = await import("./outcomes.mjs");
+  const day = (n) => new Date(Date.UTC(2026, 10, n)).toISOString();
+  const few = [
+    { status: "interview", ats: "greenhouse", score: 9, posted_at: day(1), applied_at: day(2), ats_match: 85, has_tailored: true },
+    { status: "rejected", ats: "greenhouse", score: 6, posted_at: day(1), applied_at: day(20), ats_match: 50, has_tailored: false },
+    { status: "applied", ats: "workday", score: 7, posted_at: null, applied_at: day(3), has_tailored: true },
+    { status: "queued", ats: "workday" },
+  ];
+  const many = Array.from({ length: 40 }, (_, i) => ({ status: i < 4 ? "interview" : "applied", ats: "workday", score: 8, posted_at: day(1), applied_at: day(2), ats_match: 90, has_tailored: true }));
+  const a = o.outcomes(few);
+  const b = o.outcomes(many);
+  check("outcomes: only what was sent is counted, each by what was known of it, and a rate is given only over enough", [
+    a.all.sent, a.all.interviews, a.all.rejections, a.all.waiting, a.all.rate,
+    a.by.system.greenhouse.sent, a.by["posting age when sent"]["0-2 days"].interviews, a.by["posting age when sent"]["15+ days"].rejections,
+    a.by["posting age when sent"]["not dated"].sent, a.by["match to requirements"]["not measured"].sent,
+    b.all.rate, b.by.resume["written for the posting"].rate,
+    o.outcomeLines(a)[1].includes("counts only"),
+  ], [3, 1, 1, 1, null, 2, 1, 1, 1, 1, 10, 10, true]);
+}
+
 console.log(failed ? `unit: ${failed} failed, ${passed} passed.` : `unit: all ${passed} passed.`);
 process.exit(failed ? 1 : 0);

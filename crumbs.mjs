@@ -114,6 +114,17 @@ console.log(`employers by system: ${JSON.stringify(by)}`);
       console.log(`resume against posting, last ${rows.length}: average match ${avg}%; asked for and not shown: ${top.join(", ") || "nothing"}`);
     }
   } catch { /* the two columns are not on this panel yet */ }
+  // What was sent, against what came back, by what was known at sending.
+  try {
+    const { outcomes, outcomeLines } = await import("./outcomes.mjs");
+    let rows = await db("jobs?status=in.(applied,interview,offer,rejected)&select=status,ats,score,posted_at,applied_at,ats_match,tailored_resume&limit=3000").catch(() => null);
+    // A panel without the match column yet still has the rest.
+    if (!rows) rows = (await db("jobs?status=in.(applied,interview,offer,rejected)&select=status,ats,score,posted_at,applied_at,tailored_resume&limit=3000").catch(() => null)) ?? [];
+    for (const r of rows) { r.has_tailored = Boolean(r.tailored_resume); delete r.tailored_resume; }
+    for (const line of outcomeLines(outcomes(rows))) console.log(line);
+  } catch (e) {
+    console.log(`applications and what came back: could not be read (${String(e?.message ?? e).slice(0, 60)})`);
+  }
   console.log("what was written on the ones not finished:");
   for (const [k, n] of Object.entries(said).sort((x, y) => y[1] - x[1]).slice(0, 34)) console.log(`  ${n} x ${k}`);
 }
