@@ -4,7 +4,7 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { supabase } from "@/integrations/supabase/client";
 import { agentOnline, useAgent, useAnswersNeedingCount, useEmailStats } from "@/hooks/use-mission-control";
 
-const NAV = [
+const PAGES = [
   { to: "/dashboard", label: "dashboard" },
   { to: "/jobs", label: "jobs" },
   { to: "/review", label: "review" },
@@ -14,7 +14,7 @@ const NAV = [
   { to: "/settings", label: "settings" },
 ] as const;
 
-export function AppShell({ children }: { children: ReactNode }) {
+export function AppShell({ children, isOwner = false }: { children: ReactNode; isOwner?: boolean }) {
   const navigate = useNavigate();
   const { data: agent } = useAgent();
   const { data: needAnswers = 0 } = useAnswersNeedingCount();
@@ -27,7 +27,9 @@ export function AppShell({ children }: { children: ReactNode }) {
     void navigate({ to: "/", replace: true });
   }
 
-  const item = (n: (typeof NAV)[number], mobile = false) => (
+  // The owner has one page more than anyone else.
+  const NAV = isOwner ? [...PAGES, { to: "/admin", label: "admin" } as const] : PAGES;
+  const item = (n: { to: string; label: string }, mobile = false) => (
     <Link
       key={n.to}
       to={n.to}

@@ -44,7 +44,7 @@ function AuthenticatedLayout() {
     );
   }
   return (
-    <AppShell>
+    <AppShell isOwner={access === "owner"}>
       <Outlet />
     </AppShell>
   );

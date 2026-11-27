@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as PrivacyRouteImport } from './routes/privacy'
+import { Route as AuthenticatedAdminRouteImport } from './routes/_authenticated/admin'
 import { Route as AuthenticatedAnswersRouteImport } from './routes/_authenticated/answers'
 import { Route as AuthenticatedDashboardRouteImport } from './routes/_authenticated/dashboard'
 import { Route as AuthenticatedInboxRouteImport } from './routes/_authenticated/inbox'
@@ -19,6 +20,7 @@ import { Route as AuthenticatedJobsRouteImport } from './routes/_authenticated/j
 import { Route as AuthenticatedPracticeRouteImport } from './routes/_authenticated/practice'
 import { Route as AuthenticatedReviewRouteImport } from './routes/_authenticated/review'
 import { Route as AuthenticatedSettingsRouteImport } from './routes/_authenticated/settings'
+import { Route as ApiPublicAccessRequestRouteImport } from './routes/api/public/access/request'
 import { Route as ApiPublicCronSweepRouteImport } from './routes/api/public/cron/sweep'
 import { Route as ApiPublicCronTickRouteImport } from './routes/api/public/cron/tick'
 import { Route as ApiPublicEmailIngestRouteImport } from './routes/api/public/email/ingest'
@@ -42,6 +44,11 @@ const PrivacyRoute = PrivacyRouteImport.update({
   id: '/privacy',
   path: '/privacy',
   getParentRoute: () => rootRouteImport,
+} as any)
+const AuthenticatedAdminRoute = AuthenticatedAdminRouteImport.update({
+  id: '/admin',
+  path: '/admin',
+  getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
 const AuthenticatedAnswersRoute = AuthenticatedAnswersRouteImport.update({
   id: '/answers',
@@ -77,6 +84,11 @@ const AuthenticatedSettingsRoute = AuthenticatedSettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
   getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const ApiPublicAccessRequestRoute = ApiPublicAccessRequestRouteImport.update({
+  id: '/api/public/access/request',
+  path: '/api/public/access/request',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const ApiPublicCronSweepRoute = ApiPublicCronSweepRouteImport.update({
   id: '/api/public/cron/sweep',
@@ -129,6 +141,7 @@ const ApiPublicGoogleCallbackRoute = ApiPublicGoogleCallbackRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/privacy': typeof PrivacyRoute
+  '/admin': typeof AuthenticatedAdminRoute
   '/answers': typeof AuthenticatedAnswersRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
   '/inbox': typeof AuthenticatedInboxRoute
@@ -136,6 +149,7 @@ export interface FileRoutesByFullPath {
   '/practice': typeof AuthenticatedPracticeRoute
   '/review': typeof AuthenticatedReviewRoute
   '/settings': typeof AuthenticatedSettingsRoute
+  '/api/public/access/request': typeof ApiPublicAccessRequestRoute
   '/api/public/cron/sweep': typeof ApiPublicCronSweepRoute
   '/api/public/cron/tick': typeof ApiPublicCronTickRoute
   '/api/public/email/ingest': typeof ApiPublicEmailIngestRoute
@@ -149,6 +163,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/privacy': typeof PrivacyRoute
+  '/admin': typeof AuthenticatedAdminRoute
   '/answers': typeof AuthenticatedAnswersRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
   '/inbox': typeof AuthenticatedInboxRoute
@@ -156,6 +171,7 @@ export interface FileRoutesByTo {
   '/practice': typeof AuthenticatedPracticeRoute
   '/review': typeof AuthenticatedReviewRoute
   '/settings': typeof AuthenticatedSettingsRoute
+  '/api/public/access/request': typeof ApiPublicAccessRequestRoute
   '/api/public/cron/sweep': typeof ApiPublicCronSweepRoute
   '/api/public/cron/tick': typeof ApiPublicCronTickRoute
   '/api/public/email/ingest': typeof ApiPublicEmailIngestRoute
@@ -171,6 +187,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
   '/privacy': typeof PrivacyRoute
+  '/_authenticated/admin': typeof AuthenticatedAdminRoute
   '/_authenticated/answers': typeof AuthenticatedAnswersRoute
   '/_authenticated/dashboard': typeof AuthenticatedDashboardRoute
   '/_authenticated/inbox': typeof AuthenticatedInboxRoute
@@ -178,6 +195,7 @@ export interface FileRoutesById {
   '/_authenticated/practice': typeof AuthenticatedPracticeRoute
   '/_authenticated/review': typeof AuthenticatedReviewRoute
   '/_authenticated/settings': typeof AuthenticatedSettingsRoute
+  '/api/public/access/request': typeof ApiPublicAccessRequestRoute
   '/api/public/cron/sweep': typeof ApiPublicCronSweepRoute
   '/api/public/cron/tick': typeof ApiPublicCronTickRoute
   '/api/public/email/ingest': typeof ApiPublicEmailIngestRoute
@@ -193,6 +211,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/privacy'
+    | '/admin'
     | '/answers'
     | '/dashboard'
     | '/inbox'
@@ -200,6 +219,7 @@ export interface FileRouteTypes {
     | '/practice'
     | '/review'
     | '/settings'
+    | '/api/public/access/request'
     | '/api/public/cron/sweep'
     | '/api/public/cron/tick'
     | '/api/public/email/ingest'
@@ -213,6 +233,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/privacy'
+    | '/admin'
     | '/answers'
     | '/dashboard'
     | '/inbox'
@@ -220,6 +241,7 @@ export interface FileRouteTypes {
     | '/practice'
     | '/review'
     | '/settings'
+    | '/api/public/access/request'
     | '/api/public/cron/sweep'
     | '/api/public/cron/tick'
     | '/api/public/email/ingest'
@@ -234,6 +256,7 @@ export interface FileRouteTypes {
     | '/'
     | '/_authenticated'
     | '/privacy'
+    | '/_authenticated/admin'
     | '/_authenticated/answers'
     | '/_authenticated/dashboard'
     | '/_authenticated/inbox'
@@ -241,6 +264,7 @@ export interface FileRouteTypes {
     | '/_authenticated/practice'
     | '/_authenticated/review'
     | '/_authenticated/settings'
+    | '/api/public/access/request'
     | '/api/public/cron/sweep'
     | '/api/public/cron/tick'
     | '/api/public/email/ingest'
@@ -256,6 +280,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   PrivacyRoute: typeof PrivacyRoute
+  ApiPublicAccessRequestRoute: typeof ApiPublicAccessRequestRoute
   ApiPublicCronSweepRoute: typeof ApiPublicCronSweepRoute
   ApiPublicCronTickRoute: typeof ApiPublicCronTickRoute
   ApiPublicEmailIngestRoute: typeof ApiPublicEmailIngestRoute
@@ -289,6 +314,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/privacy'
       preLoaderRoute: typeof PrivacyRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/_authenticated/admin': {
+      id: '/_authenticated/admin'
+      path: '/admin'
+      fullPath: '/admin'
+      preLoaderRoute: typeof AuthenticatedAdminRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/answers': {
       id: '/_authenticated/answers'
@@ -338,6 +370,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/settings'
       preLoaderRoute: typeof AuthenticatedSettingsRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/api/public/access/request': {
+      id: '/api/public/access/request'
+      path: '/api/public/access/request'
+      fullPath: '/api/public/access/request'
+      preLoaderRoute: typeof ApiPublicAccessRequestRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/api/public/cron/sweep': {
       id: '/api/public/cron/sweep'
@@ -406,6 +445,7 @@ declare module '@tanstack/react-router' {
 }
 
 interface AuthenticatedRouteRouteChildren {
+  AuthenticatedAdminRoute: typeof AuthenticatedAdminRoute
   AuthenticatedAnswersRoute: typeof AuthenticatedAnswersRoute
   AuthenticatedDashboardRoute: typeof AuthenticatedDashboardRoute
   AuthenticatedInboxRoute: typeof AuthenticatedInboxRoute
@@ -416,6 +456,7 @@ interface AuthenticatedRouteRouteChildren {
 }
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
+  AuthenticatedAdminRoute: AuthenticatedAdminRoute,
   AuthenticatedAnswersRoute: AuthenticatedAnswersRoute,
   AuthenticatedDashboardRoute: AuthenticatedDashboardRoute,
   AuthenticatedInboxRoute: AuthenticatedInboxRoute,
@@ -432,6 +473,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   PrivacyRoute: PrivacyRoute,
+  ApiPublicAccessRequestRoute: ApiPublicAccessRequestRoute,
   ApiPublicCronSweepRoute: ApiPublicCronSweepRoute,
   ApiPublicCronTickRoute: ApiPublicCronTickRoute,
   ApiPublicEmailIngestRoute: ApiPublicEmailIngestRoute,

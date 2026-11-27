@@ -81,20 +81,26 @@ function LoginPage() {
         toast.error(problem);
         return;
       }
-      const made = await supabase.auth.signUp({ email: email.trim(), password, options: { data: { full_name: fullName.trim() } } });
-      if (made.error) {
+      // The request is made by the panel's server: signing up on one's own
+      // is switched off, so a login only ever exists as a request the owner
+      // has yet to answer.
+      let answer: { ok?: boolean; message?: string } = {};
+      try {
+        const res = await fetch("/api/public/access/request", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ full_name: fullName.trim(), email: email.trim(), password }),
+        });
+        answer = ((await res.json()) as typeof answer) ?? {};
+      } catch {
+        answer = { ok: false, message: "The request could not be sent. Check your connection and try again." };
+      }
+      if (!answer.ok) {
         setBusy(false);
-        toast.error(made.error.message);
+        toast.error(answer.message ?? "The request could not be made.");
         return;
       }
-      if (made.data.session) {
-        // Signed in at once: file the request, then out again until it is answered.
-        await standing(fullName.trim());
-        await supabase.auth.signOut();
-        setNotice("Sign-up request sent. Approval is decided by the owner.");
-      } else {
-        setNotice("Check your email to confirm your address, then sign in once here. That files your request; approval is decided by the owner.");
-      }
+      setNotice("Sign-up request sent. Approval is decided by the owner.");
       setBusy(false);
       setMode("in");
       setPassword("");

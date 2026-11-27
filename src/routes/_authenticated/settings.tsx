@@ -1,6 +1,5 @@
 import { AiKey } from "@/components/mission-control/ai-key";
 import { CallingExtra } from "@/components/mission-control/calling-extra";
-import { PeopleAdmin } from "@/components/mission-control/people-admin";
 import { useEffect, useState, type ReactNode } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -70,8 +69,6 @@ function SaveLine({ onSave }: { onSave: () => Promise<void> }) {
 }
 
 function Settings() {
-  // The people list is the owner's; the database would show nobody else anything in it anyway.
-  const isOwner = (Route.useRouteContext() as { access?: string }).access === "owner";
   const search = Route.useSearch();
   const navigate = Route.useNavigate();
   const [gmailBanner, setGmailBanner] = useState<{ ok: boolean; text: string } | null>(null);
@@ -116,11 +113,6 @@ function Settings() {
       <Block title="calling (optional extra)">
         <CallingExtra initial={q.data.profile as unknown as Record<string, unknown>} />
       </Block>
-      {isOwner ? (
-        <Block title="people (admin)">
-          <PeopleAdmin />
-        </Block>
-      ) : null}
     </div>
   );
 }
