@@ -761,7 +761,11 @@ function fieldValue(label, p) {
     }
     return p.current_company || from || undefined;
   }
-  if (has(label, "current company", "current employer", "employer name", "company name")) {
+  // Not where the label is a yes-or-no question that happens to name an
+  // employer: "To your knowledge, do you or a close relative work for a
+  // current employer of ..." was handed the applicant's own employer's name.
+  const asksYesNo = /^\s*(to (the best of )?your knowledge,?\s*)?(do|does|did|have|has|are|is|were|was|will|would|can|could)\b/i.test(String(label));
+  if (!asksYesNo && has(label, "current company", "current employer", "employer name", "company name")) {
     return p.current_company;
   }
   if (has(label, "current title", "current role", "job title", "position title")) return p.target_role;
