@@ -97,7 +97,7 @@ if (process.env.ADP_IMPORT_ONLY !== "1") {
   // applier is still being taught this portal, and each lesson deserves a
   // second look at the same postings.
   if (APPLY) {
-    await db("jobs?ats=eq.adp&status=eq.needs_help&help_reason=in.(error,no_form)", {
+    await db("jobs?ats=eq.adp&status=eq.needs_help&help_reason=in.(error,no_form,login)", {
       method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ status: "queued", help_reason: null, attempts: 0 }),
     }).catch(() => {});
   }
