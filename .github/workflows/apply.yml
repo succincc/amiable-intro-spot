@@ -89,7 +89,58 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # The shared check, once a round.
+  #
+  # Every lane used to run the same form self-test before it started: 14
+  # lanes, 86 seconds each, twenty runner-minutes a round proving one thing
+  # fourteen times. It is proved once here, and the lanes wait for it. If it
+  # fails, no lane starts: GitHub skips every job that needs a failed one.
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Every script parses
+        run: for f in *.mjs; do node --check "$f"; done
+      - name: Unit checks
+        run: node unit.mjs
+      - name: Restore Playwright + Chromium
+        id: pw-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/ms-playwright
+            ~/pw/node_modules
+          key: pw-1.49.0-${{ runner.os }}
+
+      - name: Install Playwright + Chromium
+        run: |
+          set -euo pipefail
+          PW_DIR="$HOME/pw"
+          mkdir -p "$PW_DIR"
+          cd "$PW_DIR"
+          if [ ! -d node_modules/playwright ]; then
+            npm init -y >/dev/null
+            npm install --no-audit --no-fund playwright@1.49.0
+          fi
+          # --with-deps installs system libraries, which live outside the
+          # cached directory and so are needed even on a hit; the browser
+          # download itself is skipped when it is already there.
+          npx playwright install --with-deps chromium
+          # pdftotext: the resume PDF is read back as a parser would read it.
+          command -v pdftotext >/dev/null || sudo apt-get install -y -q poppler-utils >/dev/null 2>&1 || true
+          # apply.mjs runs from the repo root and imports "playwright", so the
+          # resolver needs to find it there.
+          ln -sfn "$PW_DIR/node_modules" "$GITHUB_WORKSPACE/node_modules"
+      - name: Self-test
+        if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.quick == 'true' && github.event.inputs.as_scheduled != 'true') }}
+        run: node selftest.mjs
+
   apply:
+    needs: gate
     runs-on: ubuntu-latest
     # One runner per portal on a scheduled run.
     #
@@ -178,9 +229,11 @@ jobs:
       - name: Unit checks
         run: node unit.mjs
 
-      - name: Self-test
-        if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.quick == 'true' && github.event.inputs.as_scheduled != 'true') }}
-        run: node selftest.mjs
+      # The form self-test is the gate job's, once for the round. What a
+      # lane still checks for itself is what can differ on its own machine:
+      # that the browser it was given starts.
+      - name: This lane's browser starts
+        run: node -e "import('playwright').then(async ({chromium})=>{const b=await chromium.launch();await b.close();console.log('browser starts')})"
 
       - name: Apply
         env:
@@ -236,4 +289,13 @@ jobs:
           # Only a scheduled run defers to the stored autopilot setting. A
           # button press means a person is present and said what they wanted.
           RESPECT_AUTOPILOT: ${{ github.event_name == 'schedule' || github.event.inputs.as_scheduled == 'true' }}
-        run: node forusers.mjs apply.mjs
+        run: |
+          set -o pipefail
+          node forusers.mjs apply.mjs 2>&1 | tee "$RUNNER_TEMP/apply.txt"
+
+      # The run again, in the few lines that say how it went: for whoever
+      # reads only the end.
+      - name: In short
+        if: always()
+        run: |
+          grep -hE "^(what this run spent|parts of the engine reached|why each one did not go|last look at|applied [0-9]+, need you|  - |rehearsed, never sent|review: )" "$RUNNER_TEMP/apply.txt" | cut -c1-600 | tail -40 || true

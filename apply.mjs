@@ -131,7 +131,16 @@ async function token() {
 // ---------------------------------------------------------------------------
 // Supabase REST
 // ---------------------------------------------------------------------------
+// What a run spends, counted, for one line at its end: nothing can be made
+// cheaper that was never measured.
+const COST = { dbCalls: 0, dbMs: 0, dbByTable: {}, pdfs: 0, contexts: 0, started: Date.now() };
 async function db(path, init = {}) {
+  const t0 = Date.now();
+  COST.dbCalls++;
+  { const table = String(path).split("?")[0]; const k = `${init.method ?? "GET"} ${table}`; COST.dbByTable[k] = (COST.dbByTable[k] ?? 0) + 1; }
+  try { return await dbOnce(path, init); } finally { COST.dbMs += Date.now() - t0; }
+}
+async function dbOnce(path, init = {}) {
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
     ...init,
     headers: {
@@ -8349,7 +8358,7 @@ async function attachResumeOnly(context, page, form, profile, job) {
     return { wanted: true, note: "form wants a file but the profile has no resume text" };
   }
   if (ownOnly) {
-    const plain = await buildResumePdf(context, resumeText, profile, job.id);
+    const plain = await (COST.pdfs++, buildResumePdf)(context, resumeText, profile, job.id);
     if (!plain) return { wanted: true, note: "resume PDF could not be built" };
     const put = await fileInputs[0].setInputFiles(plain).then(() => true).catch((e) => String(e?.message ?? e).slice(0, 80));
     if (put !== true) return { wanted: true, note: `attaching the resume failed: ${put}` };
@@ -8441,7 +8450,7 @@ async function attachResumeOnly(context, page, form, profile, job) {
     }
   } catch { /* as it was */ }
 
-  const pdf = await buildResumePdf(context, finalText, profile, job.id);
+  const pdf = await (COST.pdfs++, buildResumePdf)(context, finalText, profile, job.id);
   if (!pdf) return { wanted: true, note: "resume PDF could not be built" };
   try {
     const check = documentCheck({ text: finalText, source: ownMaterial, posting: job.description ?? "", company: job.company ?? "", pdfPath: pdf, profile });
@@ -9227,7 +9236,7 @@ async function applyToJobOnce(context, job, profile, answers) {
       try {
         const own = ownResumeFile(profile);
         if (own && profile.tailor_resumes === false) resumePath = own;
-        else if (resumeText) resumePath = await buildResumePdf(context, resumeText, profile, job.id);
+        else if (resumeText) resumePath = await (COST.pdfs++, buildResumePdf)(context, resumeText, profile, job.id);
       } catch {
         resumePath = null;
       }
@@ -13630,6 +13639,7 @@ const main = async () => {
     const companyOf = (j) => String(j?.company ?? j?.id ?? "").toLowerCase().trim();
 
     async function worker(slot) {
+      COST.contexts++;
       const ctx = await browser.newContext(CONTEXT_OPTIONS);
       let claimedCo = null;
       try {
@@ -14051,6 +14061,12 @@ const main = async () => {
     if (sameJobSkipped) used("same job under another address set aside", sameJobSkipped);
     if (ATS_REPORT.size) used("requirements report kept", ATS_REPORT.size);
     for (const [k, v] of Object.entries(TAILORED)) if (v) used(`resume ${k}`, v);
+    {
+      const top = Object.entries(COST.dbByTable).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([k, n]) => `${k} ${n}`).join(", ");
+      const secs = Math.round((Date.now() - COST.started) / 1000);
+      const tried = tally.applied + (tally.needs_help ?? 0) + (tally.errors ?? 0);
+      console.log(`what this run spent: ${secs}s in all; ${COST.dbCalls} database call(s) taking ${Math.round(COST.dbMs / 1000)}s together (most: ${top}); ${COST.pdfs} PDF(s) written; ${COST.contexts} browser window(s) opened; ${USED["model asked for an answer"] ?? 0} + ${USED["model asked to pick from a list"] ?? 0} question(s) put to the model; ${tried ? `${Math.round(secs / tried)}s per application tried (${tried})` : "no application tried"}`);
+    }
     console.log(`parts of the engine reached this run: ${Object.keys(USED).length ? JSON.stringify(USED) : "none of the counted ones"}`);
     if (STOPS.length) console.log(`what stopped them, one line each:\n${STOPS.map((x) => "  - " + x).join("\n")}`);
 
