@@ -770,15 +770,28 @@ export async function runDiscover(supabase: any, opts: { since?: string | undefi
       const have = new Set<string>();
       const urls = rows.map((r) => String(r.url));
       const chunks: string[][] = [];
-      for (let i = 0; i < urls.length; i += 100) chunks.push(urls.slice(i, i + 100));
-      for (let i = 0; i < chunks.length; i += 6) {
+      // Twenty addresses to a question. A hundred made a question too long
+      // to be asked at all: it was refused, nothing was found to be known,
+      // and the newest six hundred — every one already in the list — were
+      // carried while what was really new was left behind. A question that
+      // fails is now counted, and where any did, nothing is left behind on
+      // the strength of an answer that never came.
+      for (let i = 0; i < urls.length; i += 20) chunks.push(urls.slice(i, i + 20));
+      let unanswered = 0;
+      for (let i = 0; i < chunks.length; i += 10) {
         await Promise.all(
-          chunks.slice(i, i + 6).map(async (c) => {
-            const { data } = await supabase.from("jobs").select("url").in("url", c);
-            for (const d of data ?? []) have.add(String(d.url));
+          chunks.slice(i, i + 10).map(async (c) => {
+            const { data, error } = await supabase.from("jobs").select("url").in("url", c);
+            if (error || !data) {
+              unanswered++;
+              return;
+            }
+            for (const d of data) have.add(String(d.url));
           }),
         );
       }
+      if (unanswered) byReason["questions about the list that went unanswered"] = unanswered;
+      if (unanswered) problems.push(`${unanswered} of ${chunks.length} questions about what is already in the list went unanswered`);
       if (have.size) {
         const fresh = rows.filter((r) => !have.has(String(r.url)));
         knownAlready = rows.length - fresh.length;
@@ -788,7 +801,7 @@ export async function runDiscover(supabase: any, opts: { since?: string | undefi
       // And of what is new, only so much is carried by one round: the
       // newest, with the rest left for the next round to find still new.
       const NEW_PER_ROUND = 600;
-      if (rows.length > NEW_PER_ROUND) {
+      if (!unanswered && rows.length > NEW_PER_ROUND) {
         rows.sort((a, b) => String(b.posted_at ?? "").localeCompare(String(a.posted_at ?? "")));
         const over = rows.length - NEW_PER_ROUND;
         rows.length = NEW_PER_ROUND;
