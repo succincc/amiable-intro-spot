@@ -7,6 +7,15 @@
 
 /** Takes the script's own way of asking the database. Says only whether a key was found. */
 export async function useOwnKey(db) {
+  // The second key, for when the first has no allowance left: asked for on
+  // its own, since the column is newer than some databases.
+  try {
+    const rows = await db("user_keys?select=groq_key&limit=1");
+    const second = String(rows?.[0]?.groq_key ?? "").trim();
+    if (/^gsk_[A-Za-z0-9]{20,120}$/.test(second)) process.env.GROQ_API_KEY = second;
+  } catch {
+    /* no such column yet, or nothing saved: the shared one, if any, stands */
+  }
   try {
     const rows = await db("user_keys?select=gemini_key&limit=1");
     const key = String(rows?.[0]?.gemini_key ?? "").trim();

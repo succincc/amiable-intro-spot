@@ -79,6 +79,8 @@ jobs:
           APP_URL: https://applynow.lol
           ENGINE_API_KEY: ${{ secrets.ENGINE_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           GEMINI_MODEL: ${{ secrets.GEMINI_MODEL || 'gemini-3.8-flash' }}
           MODE: ${{ github.event_name == 'schedule' && 'send' || github.event.inputs.mode }}
           MAX: ${{ github.event.inputs.max || '12' }}

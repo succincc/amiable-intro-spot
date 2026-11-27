@@ -190,6 +190,8 @@ jobs:
           # touching the saved setting. Empty means use the panel's.
           RADIUS_MILES: ${{ github.event.inputs.radius || '' }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           GEMINI_MODEL: ${{ secrets.GEMINI_MODEL || 'gemini-3.8-flash' }}
           # Per run. Eight scheduled runs a day, so this is also the ceiling
           # on a day's volume whatever daily_cap says: at 25 the cap could

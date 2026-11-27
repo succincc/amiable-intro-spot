@@ -8,9 +8,9 @@ export const aiKeyStatus = createServerFn({ method: "POST" })
   .handler(async ({ context }) => {
     // user_keys is newer than the generated types.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data, error } = await (context.supabase as any).from("user_keys").select("gemini_key, updated_at").limit(1).maybeSingle();
+    const { data, error } = await (context.supabase as any).from("user_keys").select("*").limit(1).maybeSingle();
     if (error) return { ok: false as const, message: error.message };
-    return { ok: true as const, set: Boolean(data?.gemini_key), since: (data?.updated_at as string | null) ?? null };
+    return { ok: true as const, set: Boolean(data?.gemini_key), backup: Boolean(data?.groq_key), since: (data?.updated_at as string | null) ?? null };
   });
 
 /**
@@ -41,5 +41,35 @@ export const clearAiKey = createServerFn({ method: "POST" })
   .handler(async ({ context }) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { error } = await (context.supabase as any).from("user_keys").update({ gemini_key: null, updated_at: new Date().toISOString() }).eq("user_id", context.userId);
+    return error ? { ok: false as const, message: error.message } : { ok: true as const };
+  });
+
+/**
+ * Save the second key: Groq's, asked only when the first has no allowance
+ * left. Checked by asking Groq which models it may use, which spends nothing.
+ */
+export const saveBackupKey = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: { key: string }) => d)
+  .handler(async ({ context, data }) => {
+    const key = String(data.key ?? "").trim();
+    if (!/^gsk_[A-Za-z0-9]{20,120}$/.test(key)) return { ok: false as const, message: "That does not look like a Groq key. It starts with gsk_ — copy the whole key from console.groq.com." };
+    try {
+      const res = await fetch("https://api.groq.com/openai/v1/models", { headers: { Authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(10_000) });
+      if (res.status === 401 || res.status === 403) return { ok: false as const, message: "Groq did not accept that key. Make a new one and paste it whole." };
+    } catch {
+      /* Groq not answering is no reason to turn a key away */
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error } = await (context.supabase as any).from("user_keys").upsert({ user_id: context.userId, groq_key: key, updated_at: new Date().toISOString() }, { onConflict: "user_id" });
+    return error ? { ok: false as const, message: error.message } : { ok: true as const };
+  });
+
+/** Take the second key away again. */
+export const clearBackupKey = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error } = await (context.supabase as any).from("user_keys").update({ groq_key: null, updated_at: new Date().toISOString() }).eq("user_id", context.userId);
     return error ? { ok: false as const, message: error.message } : { ok: true as const };
   });

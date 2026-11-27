@@ -110,7 +110,7 @@ async function anotherModel(apiKey) {
 // goes round them for ever while the job it belongs to waits.
 const MAX_HOPS = 5;
 
-async function gemini(prompt, apiKey, maxTokens = 600, attempt = 0, temperature = 0.6, hops = 0) {
+async function geminiOnly(prompt, apiKey, maxTokens = 600, attempt = 0, temperature = 0.6, hops = 0) {
   const res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`,
     {
@@ -141,7 +141,7 @@ async function gemini(prompt, apiKey, maxTokens = 600, attempt = 0, temperature 
     if (next) {
       console.warn(`[answers] ${MODEL} is at its free limit for now; using ${next}.`);
       MODEL = next;
-      return gemini(prompt, apiKey, maxTokens, attempt, temperature, hops + 1);
+      return geminiOnly(prompt, apiKey, maxTokens, attempt, temperature, hops + 1);
     }
     throw new Error("RATE_LIMIT");
   }
@@ -150,7 +150,7 @@ async function gemini(prompt, apiKey, maxTokens = 600, attempt = 0, temperature 
     const wait = 1500 * 2 ** attempt;
     console.warn(`[answers] Gemini ${res.status}; retrying in ${wait}ms.`);
     await new Promise((r) => setTimeout(r, wait));
-    return gemini(prompt, apiKey, maxTokens, attempt + 1, temperature, hops);
+    return geminiOnly(prompt, apiKey, maxTokens, attempt + 1, temperature, hops);
   }
 
   // Google's deprecation error names the model to move to, so one retry
@@ -169,7 +169,7 @@ async function gemini(prompt, apiKey, maxTokens = 600, attempt = 0, temperature 
       // A retired model is not asked again this run, however the list reads.
       SPENT.set(MODEL, Infinity);
       MODEL = next;
-      return gemini(prompt, apiKey, maxTokens, attempt, temperature, hops + 1);
+      return geminiOnly(prompt, apiKey, maxTokens, attempt, temperature, hops + 1);
     }
   }
 
@@ -181,7 +181,7 @@ async function gemini(prompt, apiKey, maxTokens = 600, attempt = 0, temperature 
       console.warn(`[answers] ${MODEL} is still answering ${res.status}; using ${next}.`);
       MODEL = next;
       // One quick retry on the next model, not the full three.
-      return gemini(prompt, apiKey, maxTokens, 2, temperature, hops + 1);
+      return geminiOnly(prompt, apiKey, maxTokens, 2, temperature, hops + 1);
     }
   }
 
@@ -210,6 +210,88 @@ async function gemini(prompt, apiKey, maxTokens = 600, attempt = 0, temperature 
   if (!text) throw new Error("empty response");
   return text.trim();
 }
+
+// --------------------------------------------------------------------------
+// A second free model, for the hours the first has none left to give.
+// --------------------------------------------------------------------------
+// One night every free Gemini model was at its limit by eleven, and until
+// three in the morning every list question on every form went unanswered.
+// Groq and OpenRouter each give a free allowance of their own on a key of
+// their own, and both speak the same plain chat protocol. Where a key for
+// either is set, a request Gemini cannot take is put to it instead: same
+// prompt, same checks on the reply afterwards, and still nothing to pay.
+// (The fall-back order and the protocol follow billmal071/job-agent, MIT.)
+const SECOND = [
+  { name: "groq", key: () => process.env.GROQ_API_KEY, base: "https://api.groq.com/openai/v1", model: () => process.env.GROQ_MODEL, prefer: /llama.*70b|versatile/i },
+  { name: "openrouter", key: () => process.env.OPENROUTER_API_KEY, base: "https://openrouter.ai/api/v1", model: () => process.env.OPENROUTER_MODEL, prefer: /:free$/i },
+];
+const SECOND_MODEL = new Map();
+const SECOND_SPENT = new Map();
+
+/** Which of a provider's models to ask: the one named, or one it offers now. */
+async function secondModel(p) {
+  if (p.model()) return p.model();
+  if (SECOND_MODEL.has(p.name)) return SECOND_MODEL.get(p.name);
+  let pick = null;
+  try {
+    const res = await fetch(`${p.base}/models`, { headers: { Authorization: `Bearer ${p.key()}` }, signal: AbortSignal.timeout(15_000) });
+    const ids = ((await res.json())?.data ?? []).map((m) => String(m.id ?? "")).filter((id) => id && !/whisper|guard|tts|embed|vision|audio|image/i.test(id));
+    // OpenRouter lists paid models beside free ones; only a free one is ever chosen there.
+    const usable = p.name === "openrouter" ? ids.filter((id) => /:free$/i.test(id)) : ids;
+    pick = usable.find((id) => p.prefer.test(id) && /llama|gemini|mistral|qwen|deepseek/i.test(id)) ?? usable.find((id) => p.prefer.test(id)) ?? usable[0] ?? null;
+  } catch {
+    /* the list did not come; nothing is asked of this provider */
+  }
+  SECOND_MODEL.set(p.name, pick);
+  return pick;
+}
+
+/** Whether a second free model is there to ask at all. */
+export function hasSecondModel() {
+  return SECOND.some((p) => p.key());
+}
+
+async function secondOpinion(prompt, maxTokens, temperature) {
+  for (const p of SECOND) {
+    if (!p.key()) continue;
+    if (Date.now() - (SECOND_SPENT.get(p.name) ?? 0) < 60_000) continue;
+    const model = await secondModel(p);
+    if (!model) continue;
+    try {
+      const res = await fetch(`${p.base}/chat/completions`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${p.key()}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ model, messages: [{ role: "user", content: prompt }], max_tokens: maxTokens, temperature }),
+        signal: AbortSignal.timeout(90_000),
+      });
+      if (res.status === 429) { SECOND_SPENT.set(p.name, Date.now()); continue; }
+      if (!res.ok) continue;
+      const text = String((await res.json())?.choices?.[0]?.message?.content ?? "").trim();
+      if (!text) continue;
+      if (!SECOND_SAID.has(p.name)) { SECOND_SAID.add(p.name); console.warn(`[answers] Gemini has no free allowance left for now; ${p.name} is answering instead.`); }
+      return text;
+    } catch {
+      /* this one did not answer; the next is asked */
+    }
+  }
+  return null;
+}
+const SECOND_SAID = new Set();
+
+async function gemini(prompt, apiKey, maxTokens = 600, attempt = 0, temperature = 0.6, hops = 0) {
+  try {
+    return await geminiOnly(prompt, apiKey, maxTokens, attempt, temperature, hops);
+  } catch (e) {
+    // Only where Gemini is spent or not answering — a reply it did give is
+    // never swapped for another model's.
+    const why = String(e?.message ?? e);
+    if (!hasSecondModel() || !/RATE_LIMIT|\b(429|500|502|503|504)\b|timeout|aborted/i.test(why)) throw e;
+    const other = await secondOpinion(prompt, maxTokens, temperature);
+    if (other === null) throw e;
+    return other;
+  }
+}
+
 
 const PROMPT = `You are answering one question on a job application, as the candidate.
 

@@ -49,6 +49,8 @@ jobs:
           APPLYPILOT_EMAIL: ${{ secrets.APPLYPILOT_EMAIL }}
           APPLYPILOT_PASSWORD: ${{ secrets.APPLYPILOT_PASSWORD }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           GEMINI_MODEL: ${{ secrets.GEMINI_MODEL || 'gemini-3.8-flash' }}
           MAX: ${{ github.event.inputs.max || '30' }}
           WRITE: ${{ github.event.inputs.write || 'true' }}
