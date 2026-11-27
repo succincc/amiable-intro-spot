@@ -102,6 +102,18 @@ console.log(`employers by system: ${JSON.stringify(by)}`);
     const k = `${r.ats ?? "none"} | ${note}`;
     said[k] = (said[k] ?? 0) + 1;
   }
+  // What postings ask for that the resumes sent could not honestly show,
+  // most asked first: experience the person lacks, or has and never wrote.
+  try {
+    const rows = (await db("jobs?ats_gaps=not.is.null&select=ats_match,ats_gaps&order=applied_at.desc.nullslast&limit=400")) ?? [];
+    if (rows.length) {
+      const count = {};
+      for (const r of rows) for (const g of r.ats_gaps ?? []) count[g] = (count[g] ?? 0) + 1;
+      const top = Object.entries(count).sort((x, y) => y[1] - x[1]).slice(0, 12).map(([g, n]) => `${g} x${n}`);
+      const avg = Math.round(rows.reduce((t, r) => t + (r.ats_match ?? 0), 0) / rows.length);
+      console.log(`resume against posting, last ${rows.length}: average match ${avg}%; asked for and not shown: ${top.join(", ") || "nothing"}`);
+    }
+  } catch { /* the two columns are not on this panel yet */ }
   console.log("what was written on the ones not finished:");
   for (const [k, n] of Object.entries(said).sort((x, y) => y[1] - x[1]).slice(0, 34)) console.log(`  ${n} x ${k}`);
 }

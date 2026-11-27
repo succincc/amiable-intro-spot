@@ -6879,6 +6879,8 @@ function highestDegree(resume) {
 let WORK;
 // What stopped each application of this run, in a line.
 const STOPS = [];
+// For each job of this run: how its resume matched the posting, and what it could not show.
+const ATS_REPORT = new Map();
 
 // Hosts whose inbox has already been checked for a verification link.
 const CHECKED_INBOX = new Set();
@@ -8313,6 +8315,7 @@ async function attachResumeOnly(context, page, form, profile, job) {
   // candidate's own text does not prove, and what is missing is reported as
   // a gap rather than written in.
   const aligned = alignToPosting(resumeText, job.description ?? "", job.company ?? "");
+  if (aligned.after !== undefined) ATS_REPORT.set(job.id, { match: aligned.after, gaps: (aligned.gaps ?? []).slice(0, 12) });
   if (aligned.added.length || aligned.before !== undefined) {
     console.log(
       `    ATS match ${aligned.before}% -> ${aligned.after}%` +
@@ -13705,6 +13708,17 @@ const main = async () => {
       // what the applier saw on that form.
       if (outcome.note) patch.last_error = outcome.note;
       await patchJob(job.id, patch);
+      // How the resume sent matched the posting, and the posting's terms it
+      // could not honestly show. On its own, so that a panel without these
+      // two columns yet loses nothing else.
+      const report = ATS_REPORT.get(job.id);
+      if (report && !DRY_RUN) {
+        await db(`jobs?id=eq.${job.id}`, {
+          method: "PATCH", headers: { Prefer: "return=minimal" },
+          body: JSON.stringify({ ats_match: report.match, ats_gaps: report.gaps }),
+        }).catch(() => {});
+      }
+      ATS_REPORT.delete(job.id);
 
       // Stalled, at an employer whose portal emails a code for each attempt:
       // no more of its postings in this run.
