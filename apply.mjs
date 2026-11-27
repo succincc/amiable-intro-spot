@@ -6658,7 +6658,7 @@ const plainLog = console.log.bind(console);
 // two rounds into one.
 const EVIDENCE = new Map();
 const EVIDENCE_RE =
-  /offered \[|offers to press|offers \[|offering \[|-> empty|did not take|refused|missing "|no options|never enabled|no box was found|what the form shows|own verdict|what was clicked|page offered|no form here|registering at|source trace|skills trace|prompt skeleton|password reset|    oracle |oracle:|resume reader|from the resume|is yes\/no but|self-identified|opened a second|pressed "|pressing "|pressed it|form state|click did not land|asked for a box|still on the login|page complaints|assumed "|wall|code lookup|no security code|has no answer|required but no answer|page says|second list|found a subject|code in the boxes|after the code/;
+  /offered \[|offers to press|dismissed a banner|offers \[|offering \[|-> empty|did not take|refused|missing "|no options|never enabled|no box was found|what the form shows|own verdict|what was clicked|page offered|no form here|registering at|source trace|skills trace|prompt skeleton|password reset|    oracle |oracle:|resume reader|from the resume|is yes\/no but|self-identified|opened a second|pressed "|pressing "|pressed it|form state|click did not land|asked for a box|still on the login|page complaints|assumed "|wall|code lookup|no security code|has no answer|required but no answer|page says|second list|found a subject|code in the boxes|after the code/;
 console.log = (...parts) => {
   const n = TAG.getStore();
   if (n === undefined) return plainLog(...parts);
@@ -7832,10 +7832,13 @@ async function dismissBanners(page) {
         // hangs on "scrolling into view" and the catch swallowed it, so six
         // applications reported a page with no fields on it while a cookie
         // banner sat over the sign-in form saying "Accept Cookies".
-        const landed = await el
-          .click({ timeout: 3000, force: true })
-          .then(() => true)
-          .catch(() => false);
+        const own = await el.evaluate((n) => n.tagName.toLowerCase() === "sdf-button").catch(() => false);
+        const landed = own
+          ? await el.evaluate((n) => { (n.shadowRoot?.querySelector("button") ?? n).click(); return true; }).catch(() => false)
+          : await el
+              .click({ timeout: 3000, force: true })
+              .then(() => true)
+              .catch(() => false);
         if (landed) {
           console.log(`    dismissed a banner: "${t.slice(0, 24)}"`);
           await page.waitForTimeout(600);
@@ -10841,6 +10844,27 @@ async function applyToJobOnce(context, job, profile, answers) {
           )
           .catch(() => null);
         console.log(`    no submit button; what the form offers to press: ${JSON.stringify(pressable)}`);
+        const made = await form
+          .evaluate(() => {
+            const shown = (e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+            const deep = (root, sel, out = []) => {
+              for (const n of root.querySelectorAll("*")) {
+                if (n.matches(sel)) out.push(n);
+                if (n.shadowRoot) deep(n.shadowRoot, sel, out);
+              }
+              return out;
+            };
+            return {
+              path: location.pathname.split("/").slice(-2).join("/").slice(0, 40),
+              query: location.search.replace(/=[^&]*/g, "=").slice(0, 80),
+              headings: deep(document, "h1, h2, h3, [role=heading]").filter(shown).map((h) => (h.innerText || "").replace(/\s+/g, " ").trim().length).slice(0, 6),
+              dialogs: deep(document, "[role=dialog], dialog, sdf-dialog, sdf-focus-pane, sdf-modal").filter(shown).map((d) => d.tagName.toLowerCase()).slice(0, 4),
+              inputs: deep(document, "input, textarea, select, sdf-input, sdf-select").filter(shown).map((i) => `${i.tagName.toLowerCase()}:${i.getAttribute("type") ?? ""}:${(i.getAttribute("name") || i.id || i.getAttribute("label") || "").replace(/[0-9a-f]{8,}/gi, "#").slice(0, 18)}`).slice(0, 14),
+              frames: document.querySelectorAll("iframe").length,
+            };
+          })
+          .catch(() => null);
+        console.log(`    no submit button; the page offered ${JSON.stringify(made)}`);
       }
       return { status: "needs_help", help_reason: "error",
                note: `No submit button found after filling ${filled} fields.` };
