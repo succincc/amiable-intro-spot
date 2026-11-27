@@ -7240,6 +7240,123 @@ export function adpAlias(email) {
   return m ? `${m[1]}+jobs@${m[2]}` : null;
 }
 
+/**
+ * An account on a UKG job board, made or signed in to.
+ *
+ * UKG shows a visitor the posting and a Sign In, and takes applications
+ * only from an account on that employer's board. Its sign-in is a username
+ * and a password; its sign-up an email and a password; neither asks for
+ * anything else. One account is kept for each board — the board's own
+ * address is its key — with a password made for it alone, saved where the
+ * owner can see it, exactly as a Workday account is.
+ */
+const UKG_SIGNED = new Set();
+async function ukgAccount(page, form, profile, job) {
+  const where = [page.url(), ...page.frames().map((f) => f.url())].find((u) => /ultipro\.com|ukg\.(com|net)/i.test(u)) ?? page.url();
+  const m = where.match(/https?:\/\/([^/]+)\/([^/]+)\/JobBoard\//i);
+  const key = m ? `${m[1].toLowerCase()}/${m[2].toLowerCase()}` : (hostOf(where) ?? "ukg");
+  const rows = (await db(`site_accounts?host=eq.${encodeURIComponent(key)}&select=*`).catch(() => [])) ?? [];
+  const existing = rows.find((r) => r.status !== "failed") ?? null;
+  const email = profile.email;
+  const password = existing?.password || generatePassword();
+  if (!email) return { ok: false, reason: "no email on file" };
+
+  const inAny = async (sel) => {
+    for (const f of page.frames()) {
+      for (const c of await f.$$(sel).catch(() => [])) {
+        if (await c.isVisible().catch(() => false)) return c;
+      }
+    }
+    return null;
+  };
+  const press = async (re) => {
+    for (const f of page.frames()) {
+      const b = f.locator('button, a, input[type=submit], [role=button]').filter({ hasText: re }).first();
+      if (await b.isVisible().catch(() => false)) { await b.click({ timeout: 5000 }).catch(() => {}); return true; }
+    }
+    return false;
+  };
+  const said = async () => {
+    let t = "";
+    for (const f of page.frames()) t += " " + ((await f.evaluate(() => (document.body?.innerText ?? "").slice(0, 2500)).catch(() => "")) || "");
+    return t.replace(/\s+/g, " ").toLowerCase();
+  };
+
+  await form.getByText(/^\s*sign in\s*$/i).first().click({ timeout: 6000 }).catch(() => {});
+  await page.waitForTimeout(3500);
+  let pass = await inAny('input[type=password]');
+  if (!pass) return { ok: false, reason: "its sign-in showed no password box" };
+
+  const signIn = async () => {
+    const user = await inAny('input[name=username], input[name=email], input[type=email], input[type=text]');
+    const pw = await inAny('input[type=password]');
+    if (!user || !pw) return false;
+    await user.fill(email, { timeout: 4000 }).catch(() => {});
+    await pw.fill(password, { timeout: 4000 }).catch(() => {});
+    if (!(await press(/^\s*(sign in|log in|continue)\s*$/i))) await pw.press("Enter").catch(() => {});
+    await page.waitForTimeout(6000);
+    return !(await inAny('input[type=password]'));
+  };
+
+  if (existing) {
+    if (await signIn()) {
+      console.log("    signed in to this board's account");
+      return { ok: true, key };
+    }
+    const why = (await said()).match(/(wrong|incorrect|invalid)[^.]{0,60}/)?.[0] ?? "the sign-in did not go through";
+    console.log(`    this board's saved account did not sign in: ${why}`);
+    await saveAccount(key, email, existing.password, "failed", job.id, `sign-in refused: ${why}`.slice(0, 120));
+    return { ok: false, reason: `the saved account was refused (${why})` };
+  }
+
+  // No account yet: its sign-up, an email and a password.
+  if (!(await press(/^\s*sign up\s*$/i))) return { ok: false, reason: "no way to sign up was shown" };
+  await page.waitForTimeout(3500);
+  const mail = await inAny('input[name=email], input[type=email], input[type=text]');
+  pass = await inAny('input[type=password]');
+  if (!mail || !pass) return { ok: false, reason: "its sign-up showed no email and password boxes" };
+  await mail.fill(email, { timeout: 4000 }).catch(() => {});
+  await pass.fill(password, { timeout: 4000 }).catch(() => {});
+  // Saved before it is sent: an account made and not remembered is one
+  // nobody can ever sign in to.
+  await saveAccount(key, email, password, "pending", job.id, "being registered on this UKG board");
+  if (!(await press(/^\s*(continue|sign up|create account|register)\s*$/i))) await pass.press("Enter").catch(() => {});
+  await page.waitForTimeout(7000);
+  const after = await said();
+  const stillAsks = !!(await inAny('input[type=password]'));
+  const shape = {
+    stillAsks,
+    exists: /already (exists|registered|in use)|user already/.test(after),
+    verify: /verify your email|verification (email|link|code)|check your (email|inbox)|confirm your email/.test(after),
+    accept: /\b(accept|authorize|allow)\b/.test(after),
+  };
+  console.log(`    after its sign-up: ${JSON.stringify(shape)}`);
+  if (shape.exists) {
+    await saveAccount(key, email, password, "failed", job.id, "the board says an account already exists under this email");
+    return { ok: false, reason: "the board says an account already exists under this email" };
+  }
+  if (shape.accept) await press(/^\s*(accept|authorize|allow|continue)\s*$/i);
+  if (shape.verify) {
+    const link = await waitForVerificationLink(hostOf(where) ?? "ultipro.com", 8, 8000, "activate").catch(() => null);
+    if (link) {
+      const tab = await page.context().newPage();
+      await tab.goto(link, { waitUntil: "domcontentloaded", timeout: 45_000 }).catch(() => {});
+      await tab.waitForTimeout(4000);
+      await tab.close().catch(() => {});
+      console.log("    opened the board's verification link");
+    } else {
+      await saveAccount(key, email, password, "pending", job.id, "registered; its verification email had not arrived");
+      return { ok: false, reason: "registered, and its verification email had not arrived yet" };
+    }
+  }
+  if (stillAsks && !shape.verify) {
+    return { ok: false, reason: `its sign-up did not go through: ${after.match(/(password|email)[^.]{0,80}(must|should|invalid|required|least)[^.]{0,60}/)?.[0] ?? "no reason shown"}`.slice(0, 200) };
+  }
+  await saveAccount(key, email, password, "active", job.id, "registered on this UKG board");
+  console.log("    registered an account on this board");
+  return { ok: true, key };
+}
+
 // Whether UKG's sign-in has been looked at in this run.
 const UKG_LOOKED = { done: false };
 // Jobs whose phone box has been typed into again, key by key, once.
@@ -11539,6 +11656,21 @@ async function applyToJobOnce(context, job, profile, answers) {
             .catch((e) => ({ failed: String(e?.message ?? e).slice(0, 60) }));
           console.log(`    UKG posting, as a visitor sees it: ${JSON.stringify(seen)}`);
           const wall = seen?.signIn === true && seen?.apply === false;
+          if (wall && profile.create_accounts === true && !UKG_SIGNED.has(job.id)) {
+            UKG_SIGNED.add(job.id);
+            const account = await ukgAccount(page, form, profile, job).catch((e) => ({ ok: false, reason: String(e?.message ?? e).slice(0, 120) }));
+            console.log(`    UKG account: ${account.ok ? "in" : account.reason}`);
+            if (account.ok) {
+              // Signed in, in this same browser: the posting is taken up
+              // again from the top, where it now offers its application.
+              return await applyToJobOnce(context, job, profile, answers);
+            }
+            return {
+              status: "needs_help",
+              help_reason: "login",
+              note: `This employer's board takes applications only from an account, and one could not be made or signed in to: ${account.reason}`.slice(0, 300),
+            };
+          }
           if (wall) {
             // What its sign-in and its registration ask for, by shape, so
             // an account can be made here as one is on Workday. Looked at
