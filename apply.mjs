@@ -11320,6 +11320,19 @@ async function applyToJobOnce(context, job, profile, answers) {
         // employer's job search: a keyword box, a location box, nothing to
         // fill in and nothing to send. That is not a form that failed and
         // not something for a person to finish; the posting is gone.
+        // ADP, asked to send its code, answered that the email on the form
+        // already has an ADP account: it will not take that person as a
+        // guest, only signed in. An account's password is its owner's.
+        {
+          const said = await page.evaluate(() => (document.body?.innerText ?? "").slice(0, 8000)).catch(() => "");
+          if (/another user account already exists with the provided email/i.test(said)) {
+            return {
+              status: "needs_help",
+              help_reason: "login",
+              note: "ADP says an account already exists under this email, and takes applications from it only signed in. Open the posting, sign in to ADP, and apply.",
+            };
+          }
+        }
         // UKG shows a visitor the posting and a "Sign In", and nothing to
         // apply with: its applications are taken only from an account on
         // that employer's board. Said as that, so it can be done from the
