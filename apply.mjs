@@ -6221,6 +6221,35 @@ function defaultYesNo(label, p) {
 function lastResort(label, p, job) {
   const l = String(label ?? "");
 
+  // "Are you currently a U.S. citizen or national, an alien lawfully
+  // admitted for permanent residence, a refugee…" — the export-control
+  // question. A citizen is the first thing on its list, so a profile that
+  // says United States answers it; nothing else on file does.
+  if (/\bu\.?s\.? citizen or national\b|lawfully admitted for permanent residence|\bare you a u\.?s\.? person\b/i.test(l)) {
+    return /^united states\b/i.test(String(p?.citizenship ?? "").trim()) ? "Yes" : null;
+  }
+  // "Please select the country or countries you anticipate working in":
+  // the posting's own country, which every posting kept is in.
+  if (/\bcountr(y|ies)\b[^?]{0,40}\b(anticipate|expect|plan|intend|will be) (to )?work/i.test(l) || /\bwhich countr(y|ies) (will|would|do) you (be )?work/i.test(l)) {
+    const c = String(p?.country ?? "").trim();
+    return !c || /^(us|usa|united states)/i.test(c) ? "United States" : c;
+  }
+  // "Are you a licensed RN?" The resume says so or it does not; a licence
+  // is never claimed on the strength of applying.
+  {
+    const m = l.match(/\b(?:are you|do you (?:have|hold)|have you)\b[^?]{0,20}\b(?:a |an |your )?(?:currently |actively )?(?:licensed|certified|registered|credentialed)\s+([a-z][a-z .&/-]{1,40}?)\s*\*?\s*(\?|$)/i);
+    if (m) {
+      const what = m[1].trim().toLowerCase();
+      const text = String(p?.resume_text ?? "").toLowerCase();
+      const words = what.split(/[^a-z0-9]+/).filter((w) => w.length > 1);
+      const there = words.length > 0 && (text.includes(what) || (words.length === 1 && new RegExp(`\\b${words[0]}\\b`).test(text)));
+      console.log(`    assumed "${there ? "Yes" : "No"}" for "${l.slice(0, 50)}" (${there ? "the resume names it" : "the resume does not name it"})`);
+      return there ? "Yes" : "No";
+    }
+  }
+  // "Do you want to work in <the place the posting is in>?" Applying says so.
+  if (/^\s*(do|would) you (want|like|wish) to work (in|at|out of|from)\b/i.test(l)) return "Yes";
+
   // "In what cities are you available to work?" over a list of offices. The
   // posting was chosen because it is within reach, so its own city is the
   // answer; a posting with no city falls back to the profile's.
@@ -6547,8 +6576,11 @@ function bestOption(offered, want, label) {
 // even when it is accurate, because they did not make it. Convictions and
 // sponsorship carry legal weight. Salary and willingness to relocate or
 // commute are preferences a resume does not hold.
+// And nothing about who the person is in law or in years: one run read
+// "a U.S. person is a citizen, legal permanent resident…" off a resume and
+// chose "None of the above", and another gave an age band.
 const NEVER_INFER =
-  /disabilit|veteran|\brace\b|ethnic|hispanic|latino|gender|\bsex\b|pronoun|felony|convict|criminal|sponsorship|\bvisa\b|salary|compensation|relocat|commut|willing to|desired|expected pay/i;
+  /disabilit|veteran|\brace\b|ethnic|hispanic|latino|gender|\bsex\b|pronoun|felony|convict|criminal|sponsorship|\bvisa\b|salary|compensation|relocat|commut|willing to|desired|expected pay|citizen|u\.?s\.? person|permanent resident|national origin|immigration|work authori[sz]|\bage\b|how old|date of birth|religio|marital|pregnan|orientation|transgender/i;
 
 // What the resume says about education, read from its own words. No model
 // call, so it still works on a day when Gemini is returning 503 — which is
