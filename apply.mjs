@@ -7289,6 +7289,11 @@ async function ukgAccount(page, form, profile, job) {
   let pass = await inAny('input[type=password]');
   if (!pass) return { ok: false, reason: "its sign-in showed no password box" };
 
+  const stands = async () => {
+    const t = (await said()).replace(/\S+@\S+/g, "[address]").replace(/\d/g, "#");
+    const at = page.frames().map((f) => { try { const u = new URL(f.url()); return /ultipro|ukg/i.test(u.hostname) ? u.pathname.split("/").filter(Boolean).map((x) => (x.length > 22 ? "#" : x)).slice(-2).join("/") : null; } catch { return null; } }).filter(Boolean);
+    return { at, says: (t.match(/[^.]{0,70}(verif|confirm|activat|sent|check your|welcome|sign out|log out|my (profile|presence|applications)|incorrect|invalid|wrong)[^.]{0,70}/g) ?? []).slice(0, 4) };
+  };
   const signIn = async () => {
     const user = await inAny('input[name=username], input[name=email], input[type=email], input[type=text]');
     const pw = await inAny('input[type=password]');
@@ -7297,6 +7302,7 @@ async function ukgAccount(page, form, profile, job) {
     await pw.fill(password, { timeout: 4000 }).catch(() => {});
     if (!(await press(/^\s*(sign in|log in|continue)\s*$/i))) await pw.press("Enter").catch(() => {});
     await page.waitForTimeout(6000);
+    console.log(`    after its sign-in, the board stands: ${JSON.stringify(await stands())}`);
     return !(await inAny('input[type=password]'));
   };
 
@@ -7321,7 +7327,7 @@ async function ukgAccount(page, form, profile, job) {
   await pass.fill(password, { timeout: 4000 }).catch(() => {});
   // Saved before it is sent: an account made and not remembered is one
   // nobody can ever sign in to.
-  await saveAccount(key, email, password, "pending", job.id, "being registered on this UKG board");
+  await saveAccount(key, email, password, "pending_verification", job.id, "being registered on this UKG board");
   if (!(await press(/^\s*(continue|sign up|create account|register)\s*$/i))) await pass.press("Enter").catch(() => {});
   await page.waitForTimeout(7000);
   const after = await said();
@@ -7329,10 +7335,11 @@ async function ukgAccount(page, form, profile, job) {
   const shape = {
     stillAsks,
     exists: /already (exists|registered|in use)|user already/.test(after),
-    verify: /verify your email|verification (email|link|code)|check your (email|inbox)|confirm your email/.test(after),
+    verify: /verify your email|verification (email|link|code)|check your (email|inbox)|confirm your email|sent (you )?an? (email|link)|activate your/.test(after),
     accept: /\b(accept|authorize|allow)\b/.test(after),
   };
   console.log(`    after its sign-up: ${JSON.stringify(shape)}`);
+  console.log(`    and the board stands: ${JSON.stringify(await stands())}`);
   if (shape.exists) {
     await saveAccount(key, email, password, "failed", job.id, "the board says an account already exists under this email");
     return { ok: false, reason: "the board says an account already exists under this email" };
@@ -7347,7 +7354,7 @@ async function ukgAccount(page, form, profile, job) {
       await tab.close().catch(() => {});
       console.log("    opened the board's verification link");
     } else {
-      await saveAccount(key, email, password, "pending", job.id, "registered; its verification email had not arrived");
+      await saveAccount(key, email, password, "pending_verification", job.id, "registered; its verification email had not arrived");
       return { ok: false, reason: "registered, and its verification email had not arrived yet" };
     }
   }
