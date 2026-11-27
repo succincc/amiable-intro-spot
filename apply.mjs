@@ -755,9 +755,17 @@ function fieldValue(label, p) {
   if (/\b(where|which company)\b[^?]{0,30}\bmost recent(ly)?\b[^?]{0,20}\b(work|employ)|\bmost recent (employer|company)\b|\bcurrent or (most recent|last|previous) (employer|company)\b/i.test(String(label))) {
     let from = null;
     try { from = latestRoleFrom(null, p)?.company || parseWorkFromResume(p.resume_text)?.company || null; } catch { from = null; }
+    // The roles the person has entered themselves: the one with no end, or
+    // the one that ended latest. A resume without dates on it gave nothing.
+    if (!p.current_company && !from && Array.isArray(ROLE_ROWS) && ROLE_ROWS.length) {
+      const yearOf = (d) => Number(String(d ?? "").match(/(19|20)\d{2}/)?.[0] ?? 0);
+      const current = ROLE_ROWS.find((r) => r.company && (!String(r.end_date ?? "").trim() || /present|current|now/i.test(String(r.end_date))));
+      const latest = [...ROLE_ROWS].filter((r) => r.company).sort((x, y) => yearOf(y.end_date) - yearOf(x.end_date) || yearOf(y.start_date) - yearOf(x.start_date))[0];
+      from = (current ?? latest)?.company || null;
+    }
     if (!p.current_company && !from) {
       const r = String(p.resume_text ?? "");
-      console.log(`    "most recently worked" has no answer: no current employer on file; the resume is ${r.length} character(s) with ${(r.match(/(19|20)\d{2}\s*(-|–|—|to|through)\s*(present|current|now|(19|20)\d{2})/gi) ?? []).length} date range(s) and ${(r.match(/\n/g) ?? []).length} line break(s)`);
+      console.log(`    "most recently worked" has no answer: no current employer on file; the resume is ${r.length} character(s) with ${(r.match(/(19|20)\d{2}/g) ?? []).length} year(s) written in it, ${(r.match(/\n/g) ?? []).length} line break(s), and ${ROLE_ROWS.length} role(s) entered by hand`);
     }
     return p.current_company || from || undefined;
   }
