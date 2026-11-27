@@ -6983,6 +6983,37 @@ const selfIdSeen = new Set();
  * any other count, the smallest line is taken — the one claim on the list
  * that cannot overstate anything — and it is printed as assumed.
  */
+/**
+ * "Which of the following automotive repairs have you done hands-on?" over a
+ * list of kinds of work, on a day the model is not answering.
+ *
+ * The line whose own words the resume uses is the one taken. Where the
+ * resume uses none of them and the list has a line for exactly that —
+ * "None of the above", "No experience" — that line is taken, which is the
+ * resume's answer and not a guess. A list with neither is left alone.
+ */
+function evidenceOption(question, options, resume) {
+  const q = String(question ?? "").toLowerCase();
+  if (!/\b(which|what|where|do you (have|hold)|have you|select|in what)\b/.test(q)) return null;
+  if (options.length < 2 || options.length > 40) return null;
+  const text = String(resume ?? "").toLowerCase();
+  if (!text.trim()) return null;
+  const STOP = /^(with|from|that|this|have|been|work|worked|working|experience|years?|other|some|none|above|following|and\/or|such|like|using|including|general|basic|related)$/;
+  const isNone = (o) => /^\s*(none|no\b|not applicable|n\/a|i have not|i do not|i don'?t|neither)/i.test(o) || /none of (the|these)|no (prior |previous |formal )?experience/i.test(o);
+  let best = null;
+  let bestHits = 0;
+  for (const o of options) {
+    if (isNone(o)) continue;
+    const words = String(o).toLowerCase().split(/[^a-z0-9+#]+/).filter((w) => w.length > 3 && !STOP.test(w));
+    if (!words.length) continue;
+    const hits = words.filter((w) => text.includes(w.replace(/(ing|s)$/, ""))).length;
+    if (hits * 2 >= words.length && hits > bestHits) { best = o; bestHits = hits; }
+  }
+  const pick = best ?? options.find(isNone) ?? null;
+  if (pick) console.log(`    assumed "${String(pick).slice(0, 24)}" for "${q.slice(0, 50)}" (${best ? "the resume's own words" : "the resume shows none of them"})`);
+  return pick;
+}
+
 function rangeOption(question, options, profile) {
   const q = String(question ?? "").toLowerCase();
   if (!/\bhow (many|much|long)\b|\bnumber of\b|\byears? of\b|\bsize of\b/.test(q)) return null;
@@ -7020,7 +7051,7 @@ async function answerFromResume(question, options, profile, job) {
   }
 
   if (!options.length) return null;
-  if (!process.env.GEMINI_API_KEY) return rangeOption(q, options, profile);
+  if (!process.env.GEMINI_API_KEY) return rangeOption(q, options, profile) ?? evidenceOption(q, options, resume);
 
   const reply = await chooseOption({
     question: q,
@@ -7037,7 +7068,7 @@ async function answerFromResume(question, options, profile, job) {
     }
     return null;
   });
-  if (!reply) return rangeOption(q, options, profile);
+  if (!reply) return rangeOption(q, options, profile) ?? evidenceOption(q, options, resume);
 
   // Accept it only if it is literally one of the employer's own options.
   // Anything else is the model writing its own answer onto a real
@@ -12014,6 +12045,7 @@ const main = async () => {
     const BUSY_COMPANIES = new Set();
     const CLAIMING = new Set();
     const STALLED_COMPANIES = new Set();
+    const INCOMPLETE_AT = new Map();
     // What a portal's session is made of once it has been verified, by
     // employer: handed to the next application there so that it is not
     // asked for a second emailed code.
@@ -12290,6 +12322,14 @@ const main = async () => {
       if (outcome.status === "needs_help" && CODE_ASKED.has(String(job.company ?? "").toLowerCase().trim())) {
         STALLED_COMPANIES.add(companyOf(job));
         console.log("    this employer's portal emails a code for each attempt and this one stalled; its other postings wait for a later run");
+      }
+      // A form that stopped two of an employer's applications on something
+      // left empty stops the third on the same thing: three postings of one
+      // employer each stalled on the same six boxes in a single run.
+      if (outcome.status === "needs_help" && outcome.help_reason === "incomplete") {
+        const n = (INCOMPLETE_AT.get(companyOf(job)) ?? 0) + 1;
+        INCOMPLETE_AT.set(companyOf(job), n);
+        if (n >= 2) STALLED_COMPANIES.add(companyOf(job));
       }
       // A portal that met one application with a human check, or with "try
       // again later", meets the next the same way: six of one employer's
