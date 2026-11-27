@@ -7180,6 +7180,8 @@ const MODEL_FAILURES = new Set();
 const selfIdSeen = new Set();
 // What was worked out for a group of pick-one buttons, by the group's name.
 const RADIO_PICKS = new Map();
+// Whether UKG's sign-in has been looked at in this run.
+const UKG_LOOKED = { done: false };
 // Jobs whose phone box has been typed into again, key by key, once.
 const RETYPED = new Set();
 
@@ -11407,6 +11409,35 @@ async function applyToJobOnce(context, job, profile, answers) {
             })
             .catch(() => false);
           if (wall) {
+            // What its sign-in and its registration ask for, by shape, so
+            // an account can be made here as one is on Workday. Looked at
+            // once a run; nothing is typed.
+            if (!UKG_LOOKED.done) {
+              UKG_LOOKED.done = true;
+              const shapeNow = () =>
+                page
+                  .evaluate(() => ({
+                    path: location.pathname.split("/").slice(-2).map((x) => (x.length > 20 ? "#" : x)).join("/"),
+                    inputs: Array.from(document.querySelectorAll("input, select, textarea")).filter((i) => i.type !== "hidden").map((i) => `${i.type || i.tagName.toLowerCase()}:${(i.name || i.id || i.getAttribute("aria-label") || "").slice(0, 26)}${i.required ? "*" : ""}`).slice(0, 24),
+                    buttons: Array.from(document.querySelectorAll("button, a.btn, input[type=submit], a[role=button]")).map((b) => (b.innerText || b.value || "").replace(/\s+/g, " ").trim().slice(0, 26)).filter(Boolean).slice(0, 16),
+                    links: Array.from(document.querySelectorAll("a")).map((a) => (a.innerText || "").replace(/\s+/g, " ").trim()).filter((t) => /regist|create|new user|sign up|forgot/i.test(t)).slice(0, 6),
+                    checks: Array.from(document.querySelectorAll("iframe")).map((f) => (f.src.match(/recaptcha|hcaptcha|turnstile|captcha/i) ?? [""])[0]).filter(Boolean).length,
+                  }))
+                  .catch(() => null);
+              try {
+                await page.locator('a:has-text("Sign In"), button:has-text("Sign In")').first().click({ timeout: 5000 });
+                await page.waitForTimeout(3500);
+                console.log(`    UKG sign-in page: ${JSON.stringify(await shapeNow())}`);
+                const reg = page.locator('a, button').filter({ hasText: /regist|create (an )?account|new user|sign up/i }).first();
+                if (await reg.isVisible().catch(() => false)) {
+                  await reg.click({ timeout: 5000 }).catch(() => {});
+                  await page.waitForTimeout(3500);
+                  console.log(`    UKG registration page: ${JSON.stringify(await shapeNow())}`);
+                }
+              } catch (e) {
+                console.log(`    UKG sign-in could not be looked at: ${String(e?.message ?? e).slice(0, 80)}`);
+              }
+            }
             return {
               status: "needs_help",
               help_reason: "login",
