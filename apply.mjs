@@ -12239,6 +12239,21 @@ const main = async () => {
   // line is not a different commute.
   const RADIUS_SET = Number(process.env.RADIUS_MILES || 0) || Number(cfgRow?.radius_miles ?? 0);
   const RADIUS = RADIUS_SET > 0 ? RADIUS_SET + 3 : 0;
+
+  // What sits in the queue measured and beyond the radius is never picked
+  // up either — eighty-seven of one system's hundred and seven "ready" were
+  // these. Taken out, with the distance as the reason; only where the radius
+  // is the panel's own and not one given to this run alone.
+  if (RADIUS > 0 && !process.env.RADIUS_MILES) {
+    try {
+      const far = await db(`jobs?status=eq.queued&distance_miles=gt.${RADIUS}&or=(remote.is.null,remote.is.false)`, {
+        method: "PATCH",
+        headers: { Prefer: "return=representation" },
+        body: JSON.stringify({ status: "skipped", skip_reason: `beyond the ${RADIUS_SET} mi radius`, updated_at: new Date().toISOString() }),
+      });
+      if (far?.length) console.log(`taken out of the queue as beyond the radius: ${far.length}`);
+    } catch { /* the queue is as it was */ }
+  }
   const withinReach = (j) =>
     !(RADIUS > 0) || j?.remote === true || (j?.distance_miles != null && Number(j.distance_miles) <= RADIUS);
   const dailyCap = Number(cfgRow?.daily_cap ?? 50);
