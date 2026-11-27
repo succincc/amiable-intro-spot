@@ -5266,6 +5266,29 @@ async function adpVerify(page, job) {
   // answered that the email belonged to an account with another number.
   // The email's button is chosen by its value, and what is chosen is read
   // back before anything is sent.
+  // They turned out not to be inputs at all but ADP's own components, each
+  // carrying its value: nothing read as chosen, before or after.
+  const own = pane.locator('sdf-radio[value="EMAIL" i], sdf-radio-button[value="EMAIL" i], [role=radio][value="EMAIL" i], [data-value="EMAIL" i]').first();
+  if ((await own.count().catch(() => 0)) > 0) {
+    await own.click({ force: true, timeout: 3000 }).catch(() => {});
+    await own.evaluate((r) => {
+      const inner = r.shadowRoot?.querySelector("input, [role=radio], label, button");
+      if (inner && !(r.checked || r.hasAttribute("checked") || r.getAttribute("aria-checked") === "true")) inner.click();
+    }).catch(() => {});
+    const state = await pane
+      .evaluate((root) => {
+        const deep = (r, out = []) => {
+          for (const n of r.querySelectorAll("*")) {
+            if (/^SDF-RADIO/.test(n.tagName) || n.getAttribute("role") === "radio") out.push(n);
+            if (n.shadowRoot) deep(n.shadowRoot, out);
+          }
+          return out;
+        };
+        return deep(root).map((n) => `${n.getAttribute("value") ?? n.value ?? "?"}:${n.checked === true || n.hasAttribute("checked") || n.getAttribute("aria-checked") === "true" ? "on" : "off"}`);
+      })
+      .catch(() => null);
+    console.log(`    ADP's choices now read: ${JSON.stringify(state)}`);
+  }
   const mail = pane.locator('input[type=radio][value="EMAIL" i]').first();
   if ((await mail.count().catch(() => 0)) > 0) {
     await mail.check({ force: true, timeout: 3000 }).catch(() => {});
@@ -5338,7 +5361,34 @@ async function workdayAvailability(page, form) {
     await box.click({ force: true, timeout: 3000 }).catch(() => {});
     ticked++;
   }
-  console.log(ticked ? `    availability: "any time" ticked on ${ticked} row(s)` : `    availability: nothing reads as "any time"; the boxes say ${JSON.stringify(seen)}`);
+  if (ticked) console.log(`    availability: "any time" ticked on ${ticked} row(s)`);
+  // The other shape of the same screen: "In general, employees work a
+  // variety of days… which days are you available?" over a box for each
+  // day, and again for shifts. Every box under such a sentence carries the
+  // sentence as its label; its own word — Monday, Evenings — sits beside
+  // it. Each is ticked, except one that says none or not available.
+  if (!ticked) {
+    const own = [];
+    for (const box of boxes.slice(0, 80)) {
+      const label = ((await box.evaluate(readLabel).catch(() => "")) || "").toLowerCase();
+      if (!/employees work a variety of|in addition to employees working/.test(label)) continue;
+      const word = await box
+        .evaluate((n) => {
+          const byFor = n.id ? document.querySelector(`label[for="${CSS.escape(n.id)}"]`) : null;
+          const near = byFor?.innerText || n.closest("label")?.innerText || n.getAttribute("aria-label") || n.parentElement?.innerText || "";
+          return String(near).replace(/\s+/g, " ").trim().slice(0, 40);
+        })
+        .catch(() => "");
+      if (own.length < 20) own.push(word);
+      if (/\b(none|not available|unavailable|unable|n\/a)\b/i.test(word)) continue;
+      const on = (await box.isChecked().catch(() => false)) || (await box.getAttribute("aria-checked").catch(() => null)) === "true";
+      if (on) continue;
+      await box.click({ force: true, timeout: 3000 }).catch(() => {});
+      ticked++;
+    }
+    if (own.length) console.log(`    availability: ${ticked} day/shift box(es) ticked; they read ${JSON.stringify(own)}`);
+  }
+  console.log(ticked ? `    availability: ticked ${ticked} in all` : `    availability: nothing reads as "any time"; the boxes say ${JSON.stringify(seen)}`);
   return ticked;
 }
 
