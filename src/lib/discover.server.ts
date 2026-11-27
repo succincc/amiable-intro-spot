@@ -467,7 +467,11 @@ export async function runDiscover(supabase: any, opts: { since?: string | undefi
     // failing. That is a panel reading "running" for ten minutes.
     // Thirty-two seconds, not forty: with the measuring that follows, rounds
     // were coming back at fifty and the host ends a request not long after.
-    const runDeadline = Date.now() + 32_000;
+    // Twenty-four, where it was thirty-two: with a wider search there is more
+    // to measure and save after the reading, rounds were coming back at
+    // seventy seconds, and the host was ending some. A round reads fewer
+    // employers and the sweep asks for more rounds.
+    const runDeadline = Date.now() + 24_000;
 
     // Which search terms this run uses.
     //
@@ -821,7 +825,7 @@ export async function runDiscover(supabase: any, opts: { since?: string | undefi
         // The budget is wall-clock, and running out is not a failure: an
         // unmeasured place comes back "deferred" and is measured on a later
         // run, which is what that status already exists for.
-        const geocodeDeadline = Date.now() + 15_000;
+        const geocodeDeadline = Date.now() + 10_000;
         // Three outcomes, not two. "Could not resolve this place" and "ran out
         // of budget before trying" both used to come back as null, so a
         // genuinely unresolvable location was treated as merely unmeasured

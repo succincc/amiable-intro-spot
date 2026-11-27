@@ -46,7 +46,7 @@ permissions:
 jobs:
   sweep:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 180
     steps:
       - name: Run discovery and scoring
         env:
@@ -94,7 +94,7 @@ jobs:
             SINCE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
             if [ "${ONLY}" != "score" ]; then
-              for round in $(seq 1 14); do
+              for round in $(seq 1 22); do
                 if call discover; then
                   good=$((good + 1))
                   jq -c '{round: '"${round}"', ms, found: .discover.found, kept: .discover.kept, inserted: .discover.inserted, filtered: .discover.filtered, why: .discover.filtered_by, errors: .discover.errors, employers: .discover.employers, not_read_yet: .discover.stale}' /tmp/sweep.json 2>/dev/null || head -c 400 /tmp/sweep.json
