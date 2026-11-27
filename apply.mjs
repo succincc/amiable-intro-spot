@@ -7230,6 +7230,14 @@ const MODEL_FAILURES = new Set();
 const selfIdSeen = new Set();
 // What was worked out for a group of pick-one buttons, by the group's name.
 const RADIO_PICKS = new Map();
+// ADP and an email it already holds an account for: see adpAlias.
+const ADP_ALIAS = { use: false, tried: false };
+/** name@gmail.com as name+jobs@gmail.com: the same mailbox, another address. */
+export function adpAlias(email) {
+  const m = String(email ?? "").trim().match(/^([^@+\s]+)@(gmail\.com|googlemail\.com)$/i);
+  return m ? `${m[1]}+jobs@${m[2]}` : null;
+}
+
 // Whether UKG's sign-in has been looked at in this run.
 const UKG_LOOKED = { done: false };
 // Jobs whose phone box has been typed into again, key by key, once.
@@ -9594,7 +9602,8 @@ async function applyToJobOnce(context, job, profile, answers) {
           // screen's complaint moved on to "Email is required" over an email
           // that was plainly there. Each is typed once, key by key.
           if (onAdp && (type === "text" || type === "email" || !type) && !RETYPED.has(boxKey)) {
-            const value = fieldValue(label, profile) ?? (existing && existing.trim() ? existing : null);
+            let value = fieldValue(label, profile) ?? (existing && existing.trim() ? existing : null);
+            if (ADP_ALIAS.use && (type === "email" || /e-?mail/i.test(label)) && adpAlias(profile.email)) value = adpAlias(profile.email);
             if (value) {
               RETYPED.add(boxKey);
               await el.click({ timeout: 3000 }).catch(() => {});
@@ -11440,6 +11449,22 @@ async function applyToJobOnce(context, job, profile, answers) {
         {
           const said = await page.evaluate(() => (document.body?.innerText ?? "").slice(0, 8000)).catch(() => "");
           if (/another user account already exists with the provided email/i.test(said)) {
+            // ADP takes a guest only under an address it holds no account
+            // for, and says to use another. A Gmail address has others that
+            // are the same mailbox: anything after a plus sign before the @
+            // is delivered to the same person, and the code ADP sends
+            // arrives where every other code is read. The posting is put
+            // back and taken up again under that address; where the mailbox
+            // is not Gmail, or that address has been tried, it is the
+            // owner's to sign in.
+            const alias = adpAlias(profile?.email);
+            if (alias && !ADP_ALIAS.tried) {
+              ADP_ALIAS.use = true;
+              ADP_ALIAS.tried = true;
+              for (const k of [...RETYPED]) if (k.startsWith(`${job.id}:`)) RETYPED.delete(k);
+              console.log("    ADP holds an account under the email on file; taking this up again under the same mailbox's plus-address");
+              return { status: "queued", help_reason: null, note: "ADP holds an account under the email on file; retried under the same mailbox's plus-address." };
+            }
             return {
               status: "needs_help",
               help_reason: "login",
@@ -11454,8 +11479,8 @@ async function applyToJobOnce(context, job, profile, answers) {
         if (filled === 0 && /ultipro\.com$|ukg\.(com|net)$/i.test(hostOf(page.url()) ?? "")) {
           const wall = await page
             .evaluate(() => {
-              const said = Array.from(document.querySelectorAll("a, button")).map((b) => (b.innerText || "").replace(/\s+/g, " ").trim().toLowerCase());
-              return said.includes("sign in") && !said.some((t) => /^apply( now)?$/.test(t));
+              const text = (document.body?.innerText ?? "").toLowerCase();
+              return /\bsign in\b/.test(text) && !/\bapply now\b|\bapply for this (job|position)\b/.test(text);
             })
             .catch(() => false);
           if (wall) {
@@ -11475,7 +11500,7 @@ async function applyToJobOnce(context, job, profile, answers) {
                   }))
                   .catch(() => null);
               try {
-                await page.locator('a:has-text("Sign In"), button:has-text("Sign In")').first().click({ timeout: 5000 });
+                await page.getByText(/^\s*sign in\s*$/i).first().click({ timeout: 5000 });
                 await page.waitForTimeout(3500);
                 console.log(`    UKG sign-in page: ${JSON.stringify(await shapeNow())}`);
                 const reg = page.locator('a, button').filter({ hasText: /regist|create (an )?account|new user|sign up/i }).first();
