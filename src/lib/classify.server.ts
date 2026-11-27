@@ -543,6 +543,27 @@ export function spreadReceipts(jobs: SentRef[], receipts: ReceiptRef[]): Array<{
       holder.set(before.id, r.message_id);
       placed.set(r.message_id, before.id);
     }
+    // Last, a burst: several applications sent minutes apart, and their
+    // receipts arriving together afterwards, so that the last application
+    // sent is "the most recent before" every one of them. Where there are
+    // exactly as many receipts as applications they could answer, each is
+    // one application's, and they are handed out latest to latest. More
+    // receipts than applications means the employer writes more than once
+    // about each; fewer means one is still unanswered and nothing says
+    // which. Either way nothing can be told apart, and nothing is moved.
+    {
+      const timed = theirs.filter((r) => group.some((x) => fits(x, r)));
+      const answerable = group.filter((x) => timed.some((r) => fits(x, r)));
+      if (timed.length === answerable.length) {
+        for (const r of [...theirs].reverse()) {
+          if (placed.has(r.message_id)) continue;
+          const open = group.filter((x) => !holder.has(x.id) && fits(x, r)).sort((x, y) => at(y.applied_at) - at(x.applied_at))[0];
+          if (!open) continue;
+          holder.set(open.id, r.message_id);
+          placed.set(r.message_id, open.id);
+        }
+      }
+    }
     for (const r of theirs) {
       const to = placed.get(r.message_id);
       if (to && to !== r.job_id) moves.push({ message_id: r.message_id, job_id: to });

@@ -74,6 +74,21 @@ describe("receipts at an employer applied to more than once", () => {
       { message_id: "m1", job_id: "c", received_at: t(21), text: "Thank you for applying to Operations Analyst I" },
     ])).toEqual([{ message_id: "m1", job_id: "a" }]);
   });
+  it("hands a burst of receipts out one each when there are exactly as many receipts as applications", () => {
+    // Three sent at 0, 10 and 20; their three receipts all arrive after the last.
+    expect(spreadReceipts(jobs, [
+      { message_id: "m1", job_id: "c", received_at: t(21) },
+      { message_id: "m2", job_id: "c", received_at: t(22) },
+      { message_id: "m3", job_id: "c", received_at: t(23) },
+    ]).map((m) => m.job_id).sort()).toEqual(["a", "b"]);
+  });
+  it("moves nothing in a burst where the counts differ", () => {
+    expect(spreadReceipts(jobs.slice(0, 2).concat(jobs.slice(3)), [
+      { message_id: "m1", job_id: "c", received_at: t(21) },
+      { message_id: "m2", job_id: "c", received_at: t(22) },
+      { message_id: "m3", job_id: "c", received_at: t(23) },
+    ]).length).toBe(0);
+  });
   it("is settled: run again on its own result, it moves nothing", () => {
     const r = [
       { message_id: "m1", job_id: "c", received_at: t(1) },
