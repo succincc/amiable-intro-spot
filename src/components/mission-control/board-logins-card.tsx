@@ -120,9 +120,9 @@ export function BoardLoginsCard({ defaultEmail }: { defaultEmail: string }) {
     <div className="space-y-2 border border-border p-2 text-xs">
       <div className="text-muted-foreground">job board logins (LinkedIn, Indeed, ZipRecruiter)</div>
       <p className="text-muted-foreground">
-        Sign in here so the cloud runner can discover and auto-apply on LinkedIn, Indeed, and ZipRecruiter.
-        Connecting a board also switches it on in your search sources. For Google/Apple SSO or 2FA accounts,
-        you can also sync your active Chrome session in one click from the ApplyPilot extension.
+        Enter your LinkedIn, Indeed, or ZipRecruiter login here — no browser or extension needed.
+        Once saved, just press RUN APPLY on the Dashboard and the cloud runner signs in, finds jobs,
+        and applies automatically.
       </p>
       <div className="divide-y divide-border border border-border">
         {BOARDS.map((b) => {

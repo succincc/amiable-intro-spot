@@ -155,7 +155,7 @@ function Dashboard() {
           </div>
         ) : null}
         <p className="text-xs text-muted-foreground">
-          discovery finds jobs. scoring rates them and tailors your resume for the good ones. start applying runs a real browser in the cloud (every hour too) — or use the chrome extension.
+          everything runs in the cloud — no browser or extension needed. press RUN APPLY to apply automatically across your connected job boards and employer portals (also runs hourly on autopilot).
         </p>
       </Section>
 

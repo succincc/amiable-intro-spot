@@ -14,11 +14,47 @@ async function mine(context: { supabase: unknown; userId: string }): Promise<any
   return forUser(context.supabase, context.userId);
 }
 
+async function dispatchBoardDiscovery(supabase: any, platforms?: string[]) {
+  const token = process.env["GITHUB_TOKEN"];
+  const repo = process.env["GITHUB_REPO"];
+  if (!token || !repo) return false;
+  const { data: cfg } = await supabase.from("search_config").select("sources").eq("id", 1).maybeSingle();
+  const sources: string[] = Array.isArray(cfg?.sources) ? cfg.sources : [];
+  const enabled = (platforms ?? ["linkedin", "indeed", "ziprecruiter"]).filter((b) => sources.includes(b));
+  if (!enabled.length) return false;
+  const res = await fetch(`https://api.github.com/repos/${repo}/dispatches`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28",
+      "Content-Type": "application/json",
+      "User-Agent": "ApplyPilot",
+    },
+    body: JSON.stringify({
+      event_type: "discover-boards",
+      client_payload: { apply: "true", platforms: enabled.join(",") },
+    }),
+  }).catch(() => null);
+  return res?.status === 204;
+}
+
 export const runDiscovery = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
     const { runDiscover } = await import("@/lib/discover.server");
-    return runDiscover(await mine(context));
+    const scoped = await mine(context);
+    const [result, boardsStarted] = await Promise.all([
+      runDiscover(scoped),
+      dispatchBoardDiscovery(context.supabase),
+    ]);
+    if (boardsStarted && result && typeof result === "object" && "message" in result) {
+      return {
+        ...result,
+        message: `${String(result.message)} LinkedIn/Indeed/ZipRecruiter cloud discovery also started.`,
+      };
+    }
+    return result;
   });
 
 /** RUN SCORING — rates new jobs and tailors resumes for queued ones. */
@@ -396,8 +432,16 @@ export const runApplier = createServerFn({ method: "POST" })
       .from("jobs")
       .select("id", { count: "exact", head: true })
       .eq("status", "queued");
-    if (!count)
+    if (!count) {
+      const boardsStarted = await dispatchBoardDiscovery(context.supabase);
+      if (boardsStarted) {
+        return {
+          ok: true as const,
+          message: "Queue is empty — started cloud discovery on your connected job boards. Press RUN APPLY again once jobs are scored.",
+        };
+      }
       return { ok: false as const, message: "Queue is empty. Run discovery, then scoring." };
+    }
     const res = await fetch(`https://api.github.com/repos/${repo}/dispatches`, {
       method: "POST",
       headers: {
@@ -416,6 +460,7 @@ export const runApplier = createServerFn({ method: "POST" })
       }),
     });
     if (res.status === 204) {
+      void dispatchBoardDiscovery(context.supabase);
       await context.supabase.from("runs").insert({
         kind: "apply",
         status: "running",

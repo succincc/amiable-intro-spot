@@ -6,6 +6,8 @@ name: major-boards
 # the same cached Playwright + Chromium setup as apply.yml.
 
 on:
+  repository_dispatch:
+    types: [discover-boards]
   workflow_dispatch:
     inputs:
       apply:
@@ -58,6 +60,15 @@ jobs:
           SUPABASE_ANON_KEY: sb_publishable_QK4kidijM8nk46uK6L22Qw_XA0RQu5U
           APPLYPILOT_EMAIL: ${{ secrets.APPLYPILOT_EMAIL }}
           APPLYPILOT_PASSWORD: ${{ secrets.APPLYPILOT_PASSWORD }}
-          APPLY: ${{ github.event.inputs.apply || 'true' }}
-          PLATFORMS: ${{ github.event.inputs.platforms || '' }}
+          APPLY: ${{ github.event.inputs.apply || github.event.client_payload.apply || 'true' }}
+          PLATFORMS: ${{ github.event.inputs.platforms || github.event.client_payload.platforms || '' }}
         run: node forusers.mjs major-boards.mjs
+
+      - name: Measure distances for new postings
+        if: always()
+        env:
+          SUPABASE_URL: https://inqhfkshqndkxyztzita.supabase.co
+          SUPABASE_ANON_KEY: sb_publishable_QK4kidijM8nk46uK6L22Qw_XA0RQu5U
+          APPLYPILOT_EMAIL: ${{ secrets.APPLYPILOT_EMAIL }}
+          APPLYPILOT_PASSWORD: ${{ secrets.APPLYPILOT_PASSWORD }}
+        run: node forusers.mjs measure.mjs || true
