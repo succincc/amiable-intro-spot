@@ -7993,6 +7993,9 @@ async function revealForm(page) {
   for (let attempt = 0; attempt < 4; attempt++) {
     let clicked = false;
     const onPage = [];
+    // A banner that arrives late sits over the button about to be pressed;
+    // it is looked for before every press, not once at the door.
+    await dismissBanners(page).catch(() => {});
 
     for (const frame of framesOf(page)) {
       const controls = await frame.$$("a, button, input[type=submit], [role=button]").catch(() => []);
@@ -8039,7 +8042,9 @@ async function revealForm(page) {
       const before = page.url();
       const [tab] = await Promise.all([
         page.context().waitForEvent("page", { timeout: 5000 }).catch(() => null),
-        pick.control.click({ timeout: 5000 }).catch(() => {}),
+        // Where something lies over the button and the press cannot land,
+        // the button is pressed by the page itself.
+        pick.control.click({ timeout: 5000 }).catch(() => pick.control.evaluate((n) => n.click()).catch(() => {})),
       ]);
       if (tab) {
         await tab.waitForLoadState("domcontentloaded", { timeout: 20000 }).catch(() => {});
