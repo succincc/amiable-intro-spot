@@ -234,7 +234,7 @@ let PDFTOTEXT;
 function pdfText(path) {
   if (PDFTOTEXT === false) return null;
   try {
-    const out = execFileSync("pdftotext", ["-layout", "-enc", "UTF-8", path, "-"], { encoding: "utf8", timeout: 20_000, maxBuffer: 8_000_000 });
+    const out = execFileSync("pdftotext", ["-layout", "-enc", "UTF-8", path, "-"], { encoding: "utf8", timeout: 20_000, maxBuffer: 8_000_000, stdio: ["ignore", "pipe", "ignore"] });
     PDFTOTEXT = true;
     return out;
   } catch (e) {

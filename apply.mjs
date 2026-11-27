@@ -6901,6 +6901,8 @@ let WORK;
 const STOPS = [];
 // For each job of this run: how its resume matched the posting, and what it could not show.
 const ATS_REPORT = new Map();
+// The last look at each resume of this run, counted, for the line at the end.
+const LAST_LOOK = { resumes: 0, tidied: 0, ownInstead: 0, contactAdded: 0, pdfRead: 0, pdfBad: 0, required: [] };
 
 // Hosts whose inbox has already been checked for a verification link.
 const CHECKED_INBOX = new Set();
@@ -8367,7 +8369,8 @@ async function attachResumeOnly(context, page, form, profile, job) {
   ].filter(Boolean).join("\n");
   try {
     const tidy = tidyWriting(finalText);
-    if (tidy.changes) finalText = tidy.text;
+    LAST_LOOK.resumes++;
+    if (tidy.changes) { finalText = tidy.text; LAST_LOOK.tidied++; }
     const claims = unsupportedClaims(finalText, ownMaterial);
     if (claims.length) {
       const own = standardResume(profile?.resume_text, profile) || String(profile?.resume_text ?? "");
@@ -8376,6 +8379,7 @@ async function attachResumeOnly(context, page, form, profile, job) {
       if (plain.trim() && !unsupportedClaims(plain, ownMaterial).length) {
         console.log(`    the resume written for this posting carried ${claims.length} thing(s) not in the candidate's own material (${claims.slice(0, 3).join(", ")}); their own resume goes instead`);
         finalText = plain;
+        LAST_LOOK.ownInstead++;
       }
     }
   } catch (e) {
@@ -8398,6 +8402,7 @@ async function attachResumeOnly(context, page, form, profile, job) {
       const at = Math.max(0, lines.findIndex((l) => l.trim())) + 1;
       lines.splice(at, 0, missing.join(" | "));
       finalText = lines.join("\n");
+      LAST_LOOK.contactAdded++;
       console.log(`    the resume's text had no ${[!hasMail && "email", !hasPhone && tail.length === 10 && "phone number"].filter(Boolean).join(" or ")} on it; put under the name from the profile`);
     }
   } catch { /* as it was */ }
@@ -8411,6 +8416,8 @@ async function attachResumeOnly(context, page, form, profile, job) {
       const had = ATS_REPORT.get(job.id) ?? { match: aligned.after, gaps: [] };
       ATS_REPORT.set(job.id, { ...had, match: check.requirements.required.percent ?? had.match, gaps: [...new Set([...check.requirements.required.missing, ...(had.gaps ?? [])])].slice(0, 12) });
     }
+    if (check.pdf.checked) { LAST_LOOK.pdfRead++; if (!check.pdf.ok) LAST_LOOK.pdfBad++; }
+    if (check.requirements?.required?.total) LAST_LOOK.required.push(check.requirements.required.percent ?? 0);
     if (check.pdf.checked && !check.pdf.ok) console.log(`    the PDF does not read back cleanly: ${check.pdf.problems.join("; ")}`);
   } catch { /* a report, not a gate */ }
 
@@ -13947,6 +13954,10 @@ const main = async () => {
     }).catch(() => {});
     if (recap.length) console.log("recap:\n" + recap.map((r) => "  " + r).join("\n"));
     if (Object.keys(ORIGINS).length) console.log(`why each one did not go: ${JSON.stringify(ORIGINS)}`);
+    if (LAST_LOOK.resumes) {
+      const r = LAST_LOOK.required;
+      console.log(`last look at ${LAST_LOOK.resumes} resume(s): ${LAST_LOOK.tidied} tidied, ${LAST_LOOK.ownInstead} sent as the person's own because the written one claimed something of its own, ${LAST_LOOK.contactAdded} given an email or phone number; PDFs read back ${LAST_LOOK.pdfRead - LAST_LOOK.pdfBad} of ${LAST_LOOK.pdfRead}${LAST_LOOK.pdfRead ? "" : " (no reader on this machine)"}; required qualifications covered, by this system's own estimate: ${r.length ? `${Math.round(r.reduce((a, b) => a + b, 0) / r.length)}% on average, lowest ${Math.min(...r)}%` : "not measured"}`);
+    }
     if (STOPS.length) console.log(`what stopped them, one line each:\n${STOPS.map((x) => "  - " + x).join("\n")}`);
 
     // Where things stand, at the end where it is read: what is still waiting
