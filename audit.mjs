@@ -53,9 +53,18 @@ async function main() {
   // Sent against the person's own bar for sending without being asked.
   const [cfg] = (await db("search_config?select=auto_apply_score,review_score&limit=1").catch(() => [])) ?? [];
   if (cfg?.auto_apply_score != null) {
-    const under = sent.filter((j) => j.score != null && j.score < cfg.auto_apply_score);
-    const day = under.filter((j) => Date.now() - new Date(j.applied_at ?? 0).getTime() < 24 * 3_600_000).length;
-    console.log(`the bar for sending unasked is ${cfg.auto_apply_score} (to review: ${cfg.review_score}); sent under it: ${under.length} of ${sent.length}, ${day} of them in the last day`);
+    // Between the two bars is the band held for a yes. The owner's
+    // standing order (26 Nov) sends that band unasked, so those are as
+    // ordered. Under the lower bar nothing should ever go.
+    const band = sent.filter((j) => j.score != null && j.score < cfg.auto_apply_score && j.score >= (cfg.review_score ?? 0));
+    const below = sent.filter((j) => j.score != null && cfg.review_score != null && j.score < cfg.review_score);
+    console.log(`the bar for sending unasked is ${cfg.auto_apply_score}, for holding to review ${cfg.review_score}; sent from the held band: ${band.length} of ${sent.length}${process.env.AP_ACT_AS ? "" : " (the owner's standing order sends it)"}; sent from under both: ${below.length}`);
+    if (below.length) { console.log(`WRONG: ${below.length} job(s) sent that were rated under the bar for even a look`); process.exitCode = 1; }
+    if (band.length && process.env.AP_ACT_AS) {
+      const fresh = band.filter((j) => Date.now() - new Date(j.applied_at ?? 0).getTime() < 24 * 3_600_000).length;
+      // Their own press of "queue" sends one too, so this is said, not failed.
+      if (fresh) console.log(`  ${fresh} of those in the last day: by this person's own yes, or something to look into`);
+    }
   }
   if (failures.length) {
     for (const f of failures) console.log(`WRONG: ${f}`);

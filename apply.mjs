@@ -13394,7 +13394,9 @@ const main = async () => {
   // The owner's standing order: postings scored into the middle band are
   // sent, not held for a yes. Done once a round, by the first lane, on a
   // round that sends for real.
-  if (process.env.SEND_REVIEW !== "false" && !DRY_RUN && LEADS_THE_ROUND) {
+  // It is the owner's order about the owner's own search. Anyone else's
+  // middle band stays held for their yes: their bar is theirs.
+  if (process.env.SEND_REVIEW !== "false" && !DRY_RUN && LEADS_THE_ROUND && !process.env.AP_ACT_AS) {
     const moved =
       (await db("jobs?status=eq.review", {
         method: "PATCH",
