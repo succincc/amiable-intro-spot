@@ -9416,9 +9416,27 @@ async function applyToJobOnce(context, job, profile, answers) {
           // The same where it holds only a country's dialling code: "+1".
           // And on ADP, where a number put into the box whole is shown and
           // not taken: its component listens for keys. Typed again, once.
-          const adpPhone = type === "tel" && /(^|\.)adp\.com$/i.test(hostOf(page.url()) ?? "") && !RETYPED.has(job.id);
+          const onAdp = /(^|\.)adp\.com$/i.test(hostOf(page.url()) ?? "");
+          const boxKey = `${job.id}:${(await el.getAttribute("id").catch(() => "")) || (await el.getAttribute("name").catch(() => "")) || label.slice(0, 30)}`;
+          // Its name and email boxes are the same: with the phone typed, the
+          // screen's complaint moved on to "Email is required" over an email
+          // that was plainly there. Each is typed once, key by key.
+          if (onAdp && (type === "text" || type === "email" || !type) && !RETYPED.has(boxKey)) {
+            const value = fieldValue(label, profile) ?? (existing && existing.trim() ? existing : null);
+            if (value) {
+              RETYPED.add(boxKey);
+              await el.click({ timeout: 3000 }).catch(() => {});
+              await page.keyboard.press("Control+A").catch(() => {});
+              await page.keyboard.press("Backspace").catch(() => {});
+              await el.type(String(value), { delay: 25 }).catch(() => {});
+              await el.press("Tab").catch(() => {});
+              filled++;
+              continue;
+            }
+          }
+          const adpPhone = type === "tel" && onAdp && !RETYPED.has(boxKey);
           if (adpPhone) {
-            RETYPED.add(job.id);
+            RETYPED.add(boxKey);
             await el.click({ timeout: 3000 }).catch(() => {});
             await page.keyboard.press("Control+A").catch(() => {});
             await page.keyboard.press("Backspace").catch(() => {});
