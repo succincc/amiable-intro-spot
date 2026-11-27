@@ -316,7 +316,7 @@ const WAY_IN = {
   taleo: /careersection\/[^/?#]+/i,
   brassring: /partnerid=\d+[^#]*siteid=\d+|siteid=\d+[^#]*partnerid=\d+/i,
   dayforce: /dayforcehcm\.com\/(?:[a-z]{2}-[A-Z]{2}\/[^/?#]+\/[^/?#]+|CandidatePortal\/[a-z]{2}-[A-Z]{2}\/[^/?#]+)/i,
-  ukg: /JobBoard\/[0-9a-f-]{36}/i,
+  ukg: /(?:recruiting\d*\.ultipro\.com\/[A-Za-z0-9]+\/)?JobBoard\/[0-9a-f-]{36}/i,
   cornerstone: /careersite\/\d+/i,
   jobvite: /jobs\.jobvite\.com\/[^/?#]+/i,
 };
