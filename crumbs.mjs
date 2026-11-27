@@ -114,6 +114,23 @@ console.log(`employers by system: ${JSON.stringify(by)}`);
       console.log(`resume against posting, last ${rows.length}: average match ${avg}%; asked for and not shown: ${top.join(", ") || "nothing"}`);
     }
   } catch { /* the two columns are not on this panel yet */ }
+  // What the mailbox reader has called each employer's mail, and, for the
+  // ones it called an interview, how their subject lines begin — a count of
+  // interviews is only as good as that reading.
+  try {
+    const mail = (await db("emails?direction=eq.in&select=category,subject,job_id&order=received_at.desc&limit=1500")) ?? [];
+    const by = {};
+    for (const m of mail) by[m.category ?? "none"] = (by[m.category ?? "none"] ?? 0) + 1;
+    console.log(`mail read, by what it was called: ${JSON.stringify(by)}`);
+    const shape = (t) => String(t ?? "").toLowerCase().replace(/\d+/g, "N").replace(/[^a-z n]+/g, " ").split(/\s+/).filter(Boolean).slice(0, 5).join(" ");
+    const seen = {};
+    for (const m of mail.filter((x) => x.category === "interview")) seen[shape(m.subject)] = (seen[shape(m.subject)] ?? 0) + 1;
+    console.log(`called an interview, by how the subject begins: ${JSON.stringify(Object.entries(seen).sort((x, y) => y[1] - x[1]).slice(0, 14))}`);
+    const jobsSaid = new Set(mail.filter((x) => x.category === "interview" && x.job_id).map((x) => x.job_id));
+    console.log(`jobs with mail called an interview: ${jobsSaid.size}`);
+  } catch (e) {
+    console.log(`mail read: could not be counted (${String(e?.message ?? e).slice(0, 60)})`);
+  }
   // What was sent, against what came back, by what was known at sending.
   try {
     const { outcomes, outcomeLines } = await import("./outcomes.mjs");
