@@ -223,7 +223,9 @@ export async function findVerificationCode(
     .split(".")
     .filter((p) => p.length > 3 && !/^(com|org|net|wd\d+)$/.test(p))[0];
 
-  const query = `newer_than:1h (${brand ?? portalHost} OR verification OR code)`;
+  // in:anywhere — ADP says of its own code "check Spam, Social, Promotions",
+  // and a plain search leaves Spam out.
+  const query = `in:anywhere newer_than:1h (${brand ?? portalHost} OR verification OR code)`;
   // Six newest, not fifteen. Each one is a full read, the applier asks every
   // ten seconds while it waits, and four applications wait at once: Google
   // answered "quota exceeded" and a code that had arrived could not be read.
@@ -303,7 +305,7 @@ export async function findVerificationLink(
   // mail can arrive from a different Workday host than the one registered on.
   const tenant = host.split(".")[0] ?? "";
 
-  const messages = await fetchMessages(supabase, `newer_than:1h`, 8);
+  const messages = await fetchMessages(supabase, `in:anywhere newer_than:1h`, 8);
   const cutoff = Date.now() - withinMinutes * 60_000;
 
   for (const message of messages) {

@@ -7234,6 +7234,8 @@ const RADIO_PICKS = new Map();
 const ADP_LOOKED = { done: false };
 // The postings on which ADP's sign-in has been gone through in this run.
 const ADP_SIGNED = new Set();
+// One ADP sign-in at a time across the run's workers.
+const ADP_BUSY = { on: false };
 // ADP and an email it already holds an account for: see adpAlias.
 const ADP_ALIAS = { use: false, tried: new Set() };
 /** name@gmail.com as name+jobs@gmail.com: the same mailbox, another address. */
@@ -7437,6 +7439,31 @@ async function ukgAccount(page, form, profile, job) {
   // nobody can ever sign in to.
   await saveAccount(key, email, password, "pending_verification", job.id, "being registered on this UKG board");
   if (!(await press(/^\s*(continue|sign up|create account|register)\s*$/i))) await pass.press("Enter").catch(() => {});
+  // What follows its sign-up is the board's own registration: a first name,
+  // a last name and a box to agree to its terms. Left alone, the board drops
+  // the half-made account and goes back to its front page.
+  for (let i = 0; i < 10; i++) {
+    await page.waitForTimeout(1000);
+    if (!page.frames().some((f) => /\/AuthCode\/Register/i.test(f.url()))) continue;
+    await page.waitForTimeout(1200);
+    console.log(`    its registration page: ${JSON.stringify(await shapeNow())}`);
+    const first = await inAny('input[name*=first i], input[id*=first i]');
+    const last = await inAny('input[name*=last i], input[id*=last i]');
+    const names = String(profile.full_name ?? "").trim().split(/\s+/);
+    if (first) await first.fill(profile.first_name || names[0] || "", { timeout: 4000 }).catch(() => {});
+    if (last) await last.fill(profile.last_name || names.slice(1).join(" ") || "", { timeout: 4000 }).catch(() => {});
+    for (const f of page.frames()) {
+      for (const c of await f.$$('input[type=checkbox]').catch(() => [])) {
+        if (!(await c.isVisible().catch(() => false))) continue;
+        if (!(await c.isChecked().catch(() => false))) await c.check({ force: true, timeout: 3000 }).catch(() => c.click({ force: true }).catch(() => {}));
+      }
+    }
+    await page.waitForTimeout(500);
+    const sent = await press(/^\s*(register|continue|submit|create( my)? account|save|next|sign up)\s*$/i);
+    console.log(`    its registration: name ${first && last ? "typed" : "boxes not found"}, agreement ticked, ${sent ? "sent" : "no button to send it"}`);
+    await page.waitForTimeout(5000);
+    break;
+  }
   {
     const trail = [];
     for (let i = 0; i < 6; i++) {
@@ -11751,7 +11778,11 @@ async function applyToJobOnce(context, job, profile, answers) {
                   })
                   .catch(() => null);
               console.log(`    ADP, to someone with an account, offers: ${JSON.stringify(await lay(page))}`);
+              let adpHeld = false;
               try {
+                for (let i = 0; ADP_BUSY.on && i < 240; i++) await page.waitForTimeout(1500);
+                ADP_BUSY.on = true;
+                adpHeld = true;
                 const way = page.locator("a, button, sdf-button, sdf-link").filter({ hasText: /^\s*(sign in|log in|already have an account\??( sign in)?)\s*$/i }).first();
                 if (await way.isVisible().catch(() => false)) {
                   await way.click({ timeout: 5000 }).catch(() => {});
@@ -11765,8 +11796,8 @@ async function applyToJobOnce(context, job, profile, answers) {
                     await box.click({ timeout: 4000 }).catch(() => {});
                     await page.keyboard.press("Control+A").catch(() => {});
                     await page.keyboard.type(profile.email, { delay: 35 });
-                    await page.waitForTimeout(500);
-                    const askedAt = Date.now();
+                    await page.waitForTimeout(1600);
+                    let askedAt = Date.now();
                     const held = await box.evaluate((b) => String(b.value ?? "").length).catch(() => -1);
                     // Enter, in the box itself: the screen's Continue is the
                     // guest form's too, and pressing it folded the sign-in away.
@@ -11800,18 +11831,19 @@ async function applyToJobOnce(context, job, profile, answers) {
                     }
                     // The email folded the sign-in back to the guest form. The
                     // account may be held under the mobile number instead.
-                    const digits = String(profile?.phone ?? "").replace(/\D/g, "").replace(/^1(?=\d{10}$)/, "");
-                    if ((next?.boxes ?? []).some((x) => /first name/i.test(x)) && digits.length === 10) {
+                    const digits = String(profile.email);
+                    if ((next?.boxes ?? []).some((x) => /first name/i.test(x))) {
                       await way.click({ timeout: 5000 }).catch(() => {});
                       await page.waitForTimeout(3000);
                       if (await box.isVisible().catch(() => false)) {
                         await box.click({ timeout: 4000 }).catch(() => {});
                         await page.keyboard.press("Control+A").catch(() => {});
-                        await page.keyboard.type(digits, { delay: 45 });
-                        await page.waitForTimeout(400);
+                        await page.keyboard.type(digits, { delay: 70 });
+                        await page.waitForTimeout(2500);
+                        askedAt = Date.now();
                         await page.keyboard.press("Enter").catch(() => {});
-                        await page.waitForTimeout(700);
-                        console.log(`    with the mobile number, at once ADP shows: ${JSON.stringify(await glimpse())}`);
+                        await page.waitForTimeout(1500);
+                        console.log(`    on a second, slower go ADP shows: ${JSON.stringify(await glimpse())}`);
                         await page.waitForTimeout(5000);
                         next = await lay(page);
                         console.log(`    and a little later: ${JSON.stringify(await glimpse())}`);
@@ -11824,7 +11856,7 @@ async function applyToJobOnce(context, job, profile, answers) {
                     if (!inside) {
                       // A code already sent, and a box waiting for it.
                       const wantsPassword = await page.locator("input[type=password]").filter({ visible: true }).first().isVisible().catch(() => false);
-                      const codeBox = page.locator('input[type=text], input[type=tel], input[type=number], input:not([type])').filter({ visible: true }).first();
+                      const codeBox = page.locator('input[type=text], input[type=tel], input[type=number], input:not([type])').filter({ visible: true }).last();
                       const backAtGuest = (next?.boxes ?? []).some((x) => /first name/i.test(x));
                       if (backAtGuest) console.log("    ADP's sign-in fell back to its guest form");
                       if (!backAtGuest && !wantsPassword && /code/i.test(text) && (await codeBox.isVisible().catch(() => false))) {
@@ -11837,7 +11869,9 @@ async function applyToJobOnce(context, job, profile, answers) {
                           if (await ok.isVisible().catch(() => false)) await ok.click({ timeout: 5000 }).catch(() => {});
                           else await page.keyboard.press("Enter").catch(() => {});
                           await page.waitForTimeout(6000);
-                          inside = true;
+                          const now = await lay(page);
+                          inside = !(now?.boxes ?? []).some((x) => /verification c/i.test(x));
+                          if (!inside) console.log(`    ADP did not take the code: ${JSON.stringify(await glimpse())}`);
                         } else {
                           console.log("    ADP's sign-in code did not arrive in the mailbox");
                         }
@@ -11857,6 +11891,8 @@ async function applyToJobOnce(context, job, profile, answers) {
                 }
               } catch (e) {
                 console.log(`    ADP's sign-in could not be looked at: ${String(e?.message ?? e).slice(0, 80)}`);
+              } finally {
+                if (adpHeld) ADP_BUSY.on = false;
               }
             }
             // Tried, on two postings: ADP answered the plus-address exactly as
