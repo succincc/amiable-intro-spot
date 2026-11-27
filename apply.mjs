@@ -7377,7 +7377,7 @@ async function ukgAccount(page, form, profile, job) {
     const why = (await said()).match(/(wrong|incorrect|invalid)[^.]{0,60}/)?.[0] ?? "the sign-in did not go through";
     console.log(`    this board's saved account did not sign in: ${why}`);
     // An account made and never confirmed: its activation mail, if one came.
-    const act = await mailLink("activate", 1);
+    const act = await mailLink("activate", 2);
     if (act) {
       const tab = await page.context().newPage();
       await tab.goto(act, { waitUntil: "domcontentloaded", timeout: 45_000 }).catch(() => {});
@@ -7529,7 +7529,7 @@ async function ukgAccount(page, form, profile, job) {
   }
   if (shape.accept) await press(/^\s*(accept|authorize|allow|continue)\s*$/i);
   if (shape.verify || !stillAsks) {
-    const link = await mailLink("activate", shape.verify ? 4 : 1);
+    const link = await mailLink("activate", 4);
     if (!link && !shape.verify) {
       // nothing asked for and nothing mailed: on to the proof below
     } else if (link) {
