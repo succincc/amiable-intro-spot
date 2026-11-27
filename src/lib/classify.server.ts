@@ -387,6 +387,12 @@ function nameTokens(company?: string | null): string[] {
     .filter((w) => w.length >= 4);
 }
 
+/** Two names for one employer, by the words that identify it. */
+export function sameEmployer(a?: string | null, b?: string | null): boolean {
+  const x = nameTokens(a).join(" ");
+  return Boolean(x) && x === nameTokens(b).join(" ");
+}
+
 export type JobRef = { id: string; company?: string | null; title?: string | null };
 
 /**
@@ -467,6 +473,82 @@ export function matchJob(
   // higher bar: the company AND the exact job title, not one mention.
   const threshold = WEBMAIL.test(domain) ? 8 : 4;
   return best.score >= threshold ? best.id : null;
+}
+
+// ---------------------------------------------------------------------------
+// Which of several applications at one employer a receipt is for
+// ---------------------------------------------------------------------------
+//
+// A receipt names the employer far more often than the job. matchJob gives
+// it to the most recent application there, which is right for one job and
+// wrong for five sent the same afternoon: all five receipts land on the
+// last, and four applications look as though nobody acknowledged them. An
+// audit of 155 real applications found 55 with no receipt on record.
+//
+// The rule: at one employer, a receipt belongs to the application most
+// recently sent before it arrived, within three quarters of an hour. A receipt that names one job's title outright
+// goes to that job whatever the clock says. A receipt that fits where it
+// already is stays there. Nothing is moved on a guess: a receipt that fits
+// no application's window is left alone.
+export type ReceiptRef = { message_id: string; job_id: string | null; received_at?: string | null; text?: string | null };
+export type SentRef = { id: string; company?: string | null; title?: string | null; applied_at?: string | null };
+
+const RECEIPT_WINDOW_MS = 45 * 60_000;
+const CLOCK_SLACK_MS = 2 * 60_000;
+
+export function spreadReceipts(jobs: SentRef[], receipts: ReceiptRef[]): Array<{ message_id: string; job_id: string }> {
+  const groups = new Map<string, SentRef[]>();
+  for (const j of jobs) {
+    const key = nameTokens(j.company).join(" ");
+    if (!key) continue;
+    groups.set(key, [...(groups.get(key) ?? []), j]);
+  }
+  const moves: Array<{ message_id: string; job_id: string }> = [];
+  const at = (t?: string | null) => (t ? new Date(t).getTime() : NaN);
+  const fits = (j: SentRef, r: ReceiptRef) => {
+    const d = at(r.received_at) - at(j.applied_at);
+    return d >= -CLOCK_SLACK_MS && d <= RECEIPT_WINDOW_MS;
+  };
+
+  for (const group of groups.values()) {
+    if (group.length < 2) continue;
+    const ids = new Set(group.map((j) => j.id));
+    const theirs = receipts
+      .filter((r) => r.job_id && ids.has(r.job_id) && !Number.isNaN(at(r.received_at)))
+      .sort((a, b) => at(a.received_at) - at(b.received_at));
+    if (!theirs.length) continue;
+
+    const holder = new Map<string, string>(); // job -> the receipt it keeps
+    const placed = new Map<string, string>(); // receipt -> job
+    const named = (r: ReceiptRef) => {
+      const text = String(r.text ?? "").toLowerCase();
+      const hits = group.filter((j) => { const t = String(j.title ?? "").toLowerCase().trim(); return t.length >= 10 && text.includes(t); });
+      // One job named, or several with the very same title: the title alone
+      // then says nothing about which.
+      return hits.length === 1 ? (hits[0] ?? null) : null;
+    };
+    // First what is certain: a receipt that names its job.
+    for (const r of theirs) {
+      const j = named(r);
+      if (j && !holder.has(j.id)) { holder.set(j.id, r.message_id); placed.set(r.message_id, j.id); }
+    }
+    // Then by the clock: the application most recently sent before the
+    // receipt arrived. If that one already has its receipt, this is a
+    // second mail about it and stays where it is — it is never handed to an
+    // older application just because that one has none.
+    for (const r of theirs) {
+      if (placed.has(r.message_id)) continue;
+      const before = group.filter((x) => fits(x, r)).sort((x, y) => at(y.applied_at) - at(x.applied_at))[0];
+      if (!before || holder.has(before.id)) continue;
+      holder.set(before.id, r.message_id);
+      placed.set(r.message_id, before.id);
+    }
+    for (const r of theirs) {
+      const to = placed.get(r.message_id);
+      if (to && to !== r.job_id) moves.push({ message_id: r.message_id, job_id: to });
+    }
+  }
+  return moves;
 }
 
 // ---------------------------------------------------------------------------

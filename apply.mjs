@@ -38,7 +38,7 @@ import { useOwnKey } from "./ownkey.mjs";
 import { isCoverLetter, writeCoverLetter } from "./coverletter.mjs";
 import { jobKey } from "./samejob.mjs";
 import { GONE_RE } from "./gone.mjs";
-import { tidyWriting, unsupportedClaims, documentCheck } from "./quality.mjs";
+import { tidyWriting, unsupportedClaims, documentCheck, requirementReport } from "./quality.mjs";
 import { BOARD_HOSTS, applyStealth, detectBoardPlatform } from "./major-boards-selectors.mjs";
 import { applyBoardJob, restoreBoardSession } from "./major-boards-engine.mjs";
 
@@ -8387,9 +8387,24 @@ async function attachResumeOnly(context, page, form, profile, job) {
       const again = alignToPosting(own, job.description ?? "", job.company ?? "");
       const plain = tidyWriting(again.text || own).text;
       if (plain.trim() && !unsupportedClaims(plain, ownMaterial).length) {
-        console.log(`    the resume written for this posting carried ${claims.length} thing(s) not in the candidate's own material (${claims.slice(0, 3).join(", ")}); their own resume goes instead`);
+        console.log(`    the resume written for this posting carried ${claims.length} thing(s) not in the candidate's own material; their own resume goes instead`);
         finalText = plain;
         LAST_LOOK.ownInstead++;
+      }
+    }
+    // Measured on 120 real postings, the resume written for a posting named
+    // fewer of its required qualifications than the person's own did on 15.
+    // Writing one must never lose ground: where the person's own, arranged
+    // for the posting, names more, that goes instead.
+    if ((job.description ?? "").length > 300) {
+      const own = standardResume(profile?.resume_text, profile) || String(profile?.resume_text ?? "");
+      const plain = tidyWriting(alignToPosting(own, job.description ?? "", job.company ?? "").text || own).text;
+      const a = requirementReport(finalText, job.description, job.company ?? "").required;
+      const b = requirementReport(plain, job.description, job.company ?? "").required;
+      if (plain.trim() && plain !== finalText && a.total && b.covered > a.covered && !unsupportedClaims(plain, ownMaterial).length) {
+        console.log(`    the written resume named ${a.covered} of ${a.total} required qualifications and the candidate's own names ${b.covered}; their own goes instead`);
+        finalText = plain;
+        LAST_LOOK.ownCovers = (LAST_LOOK.ownCovers ?? 0) + 1;
       }
     }
   } catch (e) {
@@ -13994,7 +14009,7 @@ const main = async () => {
     if (Object.keys(ORIGINS).length) console.log(`why each one did not go: ${JSON.stringify(ORIGINS)}`);
     if (LAST_LOOK.resumes) {
       const r = LAST_LOOK.required;
-      console.log(`last look at ${LAST_LOOK.resumes} resume(s): ${LAST_LOOK.tidied} tidied, ${LAST_LOOK.ownInstead} sent as the person's own because the written one claimed something of its own, ${LAST_LOOK.contactAdded} given an email or phone number; PDFs read back ${LAST_LOOK.pdfRead - LAST_LOOK.pdfBad} of ${LAST_LOOK.pdfRead}${LAST_LOOK.pdfRead ? "" : " (no reader on this machine)"}; required qualifications covered, by this system's own estimate: ${r.length ? `${Math.round(r.reduce((a, b) => a + b, 0) / r.length)}% on average, lowest ${Math.min(...r)}%` : "not measured"}`);
+      console.log(`last look at ${LAST_LOOK.resumes} resume(s): ${LAST_LOOK.tidied} tidied, ${LAST_LOOK.ownCovers ?? 0} sent as the person's own because it named more of what was required, ${LAST_LOOK.ownInstead} sent as the person's own because the written one claimed something of its own, ${LAST_LOOK.contactAdded} given an email or phone number; PDFs read back ${LAST_LOOK.pdfRead - LAST_LOOK.pdfBad} of ${LAST_LOOK.pdfRead}${LAST_LOOK.pdfRead ? "" : " (no reader on this machine)"}; required qualifications covered, by this system's own estimate: ${r.length ? `${Math.round(r.reduce((a, b) => a + b, 0) / r.length)}% on average, lowest ${Math.min(...r)}%` : "not measured"}`);
     }
     if (sameJobSkipped) used("same job under another address set aside", sameJobSkipped);
     if (ATS_REPORT.size) used("requirements report kept", ATS_REPORT.size);

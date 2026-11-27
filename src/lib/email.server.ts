@@ -17,6 +17,8 @@
 import {
   classifyEmail,
   emailKind,
+  spreadReceipts,
+  sameEmployer,
   matchJob,
   isReplyable,
   replyPolicy,
@@ -56,7 +58,7 @@ export async function ingestMessages(supabase: any, messages: InboundMessage[]) 
     // applied to twice resolves to the recent one.
     const { data: jobs } = await supabase
       .from("jobs")
-      .select("id, company, title, status")
+      .select("id, company, title, status, applied_at")
       .in("status", ["applied", "interview", "offer", "rejected", "needs_help"])
       .order("applied_at", { ascending: false, nullsFirst: false })
       .limit(1000);
@@ -78,9 +80,9 @@ export async function ingestMessages(supabase: any, messages: InboundMessage[]) 
     // message again after every sync. Prior state is now preserved.
     const ids = messages.map((m) => m?.message_id).filter(Boolean);
     const { data: existingRows } = ids.length
-      ? await supabase.from("emails").select("message_id, reply_draft, reply_state, reply_error").in("message_id", ids)
+      ? await supabase.from("emails").select("message_id, reply_draft, reply_state, reply_error, job_id").in("message_id", ids)
       : { data: [] };
-    const prior = new Map<string, { reply_draft: string | null; reply_state: string | null; reply_error: string | null }>(
+    const prior = new Map<string, { reply_draft: string | null; reply_state: string | null; reply_error: string | null; job_id?: string | null }>(
       (existingRows ?? []).map((r: any) => [r.message_id, r]),
     );
 
@@ -123,7 +125,19 @@ export async function ingestMessages(supabase: any, messages: InboundMessage[]) 
         continue;
       }
 
-      const jobId = selfSent ? null : matchJob(m, jobs ?? []);
+      let jobId = selfSent ? null : matchJob(m, jobs ?? []);
+      // A message already filed under one application at an employer stays
+      // there when read again. The same few days are re-read on every sync,
+      // and matchJob knows only the employer: without this, a receipt set
+      // right by spreadReceipts below would be put back wrong each time.
+      {
+        const was = prior.get(m.message_id)?.job_id ?? null;
+        if (jobId && was && was !== jobId) {
+          const a = (jobs ?? []).find((j: any) => j.id === was);
+          const b = (jobs ?? []).find((j: any) => j.id === jobId);
+          if (a && b && sameEmployer(a.company, b.company)) jobId = was;
+        }
+      }
 
       // PRIVACY, and signal. The bridge reads the whole inbox, because asking
       // someone to hand-label their mail defeats the point of automating any
@@ -212,6 +226,26 @@ export async function ingestMessages(supabase: any, messages: InboundMessage[]) 
         stats.stored++;
         if (wantsDraft) toDraft.push({ m, category: verdict.category, job, policy });
       }
+    }
+
+    // Receipts at an employer applied to more than once, each put with the
+    // application it answers (spreadReceipts). Moving one runs the trigger
+    // that marks its job confirmed. Quick, and never allowed to stop a sync.
+    try {
+      const { data: receipts } = await (supabase.from("emails") as any)
+        .select("message_id, job_id, received_at, subject, snippet")
+        .eq("direction", "in").eq("category", "confirmation").not("job_id", "is", null)
+        .order("received_at", { ascending: false }).limit(2000);
+      const moves = spreadReceipts(
+        (jobs ?? []) as any[],
+        (receipts ?? []).map((r: any) => ({ message_id: r.message_id, job_id: r.job_id, received_at: r.received_at, text: `${r.subject ?? ""} ${r.snippet ?? ""}` })),
+      );
+      for (const mv of moves.slice(0, 200)) {
+        await supabase.from("emails").update({ job_id: mv.job_id }).eq("message_id", mv.message_id);
+      }
+      (stats as any).receipts_moved = moves.length;
+    } catch {
+      /* the next sync tries again */
     }
 
     // Specific free times to offer, where the calendar can be read. Asked

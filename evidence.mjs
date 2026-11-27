@@ -54,6 +54,9 @@ export function evidence(sent, mail, tried = [], now = Date.now()) {
   // 1. Each application, by the strongest evidence for it.
   const strength = (j) => (receipt(j) ? "a receipt in the mailbox" : anyWord(j) ? "no receipt, but the employer wrote about it" : "the applier's word only");
   say(`  evidence for each: ${JSON.stringify(count(sent, strength))}`);
+  const unverified = tried.filter((j) => j.help_reason === "unconfirmed").length;
+  const firm = sent.filter((j) => receipt(j) || anyWord(j)).length;
+  say(`  confidence: confirmed by the employer ${firm}; probable (the portal showed its confirmation, nothing since) ${sent.length - firm}; unverified (sent, no confirmation seen — held, never sent again) ${unverified}`);
   const bare = sent.filter((j) => !receipt(j) && !anyWord(j));
   const age = (j) => { const h = (now - new Date(j.applied_at ?? now).getTime()) / 3_600_000; return h < 24 ? "under a day old" : h < 72 ? "one to three days" : "over three days"; };
   if (bare.length) say(`  those on the applier's word only, by age: ${JSON.stringify(count(bare, age))}; by system: ${JSON.stringify(count(bare, sys))}`);
