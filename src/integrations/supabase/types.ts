@@ -509,6 +509,8 @@ export type Database = {
           apply_mode: string | null
           apply_url: string | null
           ats: string | null
+          ats_gaps: string[] | null
+          ats_match: number | null
           attempts: number | null
           call_at: string | null
           call_note: string | null
@@ -550,6 +552,8 @@ export type Database = {
           apply_mode?: string | null
           apply_url?: string | null
           ats?: string | null
+          ats_gaps?: string[] | null
+          ats_match?: number | null
           attempts?: number | null
           call_at?: string | null
           call_note?: string | null
@@ -591,6 +595,8 @@ export type Database = {
           apply_mode?: string | null
           apply_url?: string | null
           ats?: string | null
+          ats_gaps?: string[] | null
+          ats_match?: number | null
           attempts?: number | null
           call_at?: string | null
           call_note?: string | null
