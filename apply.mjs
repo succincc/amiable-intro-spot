@@ -335,7 +335,7 @@ const readGroupQuestion = (n) => {
     const options = Array.from(box.querySelectorAll("label"))
       .map((l) => (l.innerText || "").replace(/\s+/g, " ").trim())
       .filter(Boolean)
-      .slice(0, 10);
+      .slice(0, 30);
 
     let ask = (box.querySelector("legend")?.innerText ?? "").replace(/\s+/g, " ").trim();
     if (!ask) {
@@ -7018,7 +7018,7 @@ const RADIO_PICKS = new Map();
  */
 function evidenceOption(question, options, resume) {
   const q = String(question ?? "").toLowerCase();
-  if (!/\b(which|what|where|do you (have|hold)|have you|select|in what)\b/.test(q)) return null;
+  if (!/\b(which|what|where|do you (have|hold)|have you|select|in what|all that apply)\b/.test(q)) return null;
   if (options.length < 2 || options.length > 40) return null;
   const text = String(resume ?? "").toLowerCase();
   if (!text.trim()) return null;
@@ -9062,6 +9062,26 @@ async function applyToJobOnce(context, job, profile, answers) {
                     if (await checkBox(el, label)) filled++;
                   }
                   continue;
+                }
+                // Nothing on file answers it, and it is a list to tick from:
+                // "Which of these systems have you worked with? (check all
+                // that apply)". Read off the group once, as a row of pick-one
+                // buttons is: the option the resume's own words back, or the
+                // list's own "none". Never for a question about the person.
+                if (grp?.ask && Array.isArray(grp.options) && grp.options.length >= 2 && !NEVER_INFER.test(grp.ask)) {
+                  const key = `tick:${grp.ask}`;
+                  if (!RADIO_PICKS.has(key)) {
+                    const resume = job?.tailored_resume || profile?.resume_text;
+                    RADIO_PICKS.set(key, evidenceOption(grp.ask, grp.options.map(String), resume));
+                  }
+                  const picked = RADIO_PICKS.get(key);
+                  if (picked) {
+                    if (norm(opt) === norm(picked) && !(await el.isChecked().catch(() => false))) {
+                      console.log(`    tick-from-list "${grp.ask.slice(0, 34)}" -> "${String(picked).slice(0, 24)}"`);
+                      if (await checkBox(el, label)) filled++;
+                    }
+                    continue;
+                  }
                 }
               }
             }
