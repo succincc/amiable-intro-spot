@@ -7415,7 +7415,14 @@ async function ukgAccount(page, form, profile, job) {
         }
       }
     }
-    return { ok: false, reason: `the saved account was refused (${why}), and its reset did not get it in` };
+    // Refused, and no reset mail: the board may hold no such account at
+    // all. Its sign-up is gone through again, with the same saved password,
+    // and what the board answers is read.
+    console.log("    refused, and its reset brought no mail; going through its sign-up again");
+    const again = await stillWalled();
+    if (!again) return { ok: true, key };
+    await again.getByText(/^\s*sign in\s*$/i).first().click({ timeout: 6000 }).catch(() => {});
+    await page.waitForTimeout(3500);
   }
 
   // No account yet: its sign-up, an email and a password.
@@ -11790,6 +11797,25 @@ async function applyToJobOnce(context, job, profile, answers) {
                       await page.waitForTimeout(6000);
                       next = await lay(page);
                       console.log(`    and then ADP shows: ${JSON.stringify(await glimpse())}`);
+                    }
+                    // The email folded the sign-in back to the guest form. The
+                    // account may be held under the mobile number instead.
+                    const digits = String(profile?.phone ?? "").replace(/\D/g, "").replace(/^1(?=\d{10}$)/, "");
+                    if ((next?.boxes ?? []).some((x) => /first name/i.test(x)) && digits.length === 10) {
+                      await way.click({ timeout: 5000 }).catch(() => {});
+                      await page.waitForTimeout(3000);
+                      if (await box.isVisible().catch(() => false)) {
+                        await box.click({ timeout: 4000 }).catch(() => {});
+                        await page.keyboard.press("Control+A").catch(() => {});
+                        await page.keyboard.type(digits, { delay: 45 });
+                        await page.waitForTimeout(400);
+                        await page.keyboard.press("Enter").catch(() => {});
+                        await page.waitForTimeout(700);
+                        console.log(`    with the mobile number, at once ADP shows: ${JSON.stringify(await glimpse())}`);
+                        await page.waitForTimeout(5000);
+                        next = await lay(page);
+                        console.log(`    and a little later: ${JSON.stringify(await glimpse())}`);
+                      }
                     }
                     console.log(`    after the email, ADP's sign-in asks: ${JSON.stringify(next)}`);
                     const text = ((await page.evaluate(() => (document.body?.innerText ?? "").slice(0, 6000)).catch(() => "")) || "").replace(/\S+@\S+/g, "[address]").replace(/\d/g, "#").replace(/\s+/g, " ");
