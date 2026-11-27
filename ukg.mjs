@@ -100,7 +100,7 @@ if (process.env.UKG_IMPORT_ONLY !== "1") {
   // Applications that stopped before any form was reached are put back: the
   // applier is still being taught this portal.
   if (APPLY) {
-    await db("jobs?ats=eq.ukg&status=eq.needs_help&help_reason=in.(error,no_form)", {
+    await db("jobs?ats=eq.ukg&status=eq.needs_help&help_reason=in.(error,no_form,login)", {
       method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ status: "queued", help_reason: null, attempts: 0 }),
     }).catch(() => {});
   }
