@@ -11685,7 +11685,10 @@ async function refreshAnswers(profile) {
   console.log(`Answers page: ${rows.length} question(s) were waiting; ${answered} answered from the profile and the rules, ${removed} removed (never askable, or written afresh on each application), ${rows.length - answered - removed} left for the owner${brought ? `; ${brought} saved answer(s) brought in line with the profile` : ""}.`);
   console.log(`Answers page: how they were answered ${JSON.stringify(tallyHow)}; the model was asked ${modelAsked} time(s), failed ${modelFailed}; what is left ${JSON.stringify(leftKinds)}`);
   for (const line of leftSaid) console.log(`    still waiting: ${line}`);
-  if (answered || brought) await requeueForAnswers();
+  // A run made only to go through the answers follows a change — to the
+  // profile, or to how forms are answered — and either is a reason to offer
+  // the stalled applications again, whether or not this page gained an answer.
+  if (answered || brought || process.env.ANSWERS_ONLY === "true") await requeueForAnswers();
 }
 
 /**
