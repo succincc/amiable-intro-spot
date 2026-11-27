@@ -246,6 +246,20 @@
       "when": 1795746519845,
       "tag": "0034_workspaces_expand",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1795747632333,
+      "tag": "0035_user_keys",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1795747658005,
+      "tag": "0036_workspaces_contract",
+      "breakpoints": true
     }
   ]
 }
