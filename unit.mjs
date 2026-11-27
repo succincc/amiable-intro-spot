@@ -23,6 +23,8 @@ const sf = await import("./successfactors.mjs");
 const quiet = await import("./quiet.mjs");
 const near = await import("./near.mjs");
 const school = await import("./school.mjs");
+const zip = await import("./zipmcp.mjs");
+const fp = await import("./fromprofile.mjs");
 process.env.PHONES_IMPORT_ONLY = "1";
 const phones = await import("./phones.mjs");
 process.env.USAJOBS_IMPORT_ONLY = "1";
@@ -375,6 +377,36 @@ quiet.hideJob({ company: "ZQ" });
     school.schoolOption([{ text: "Example State University - Online Campus" }, { text: "Example State University" }, { text: "Other State University" }], "Example State University")?.text,
     school.schoolOption([{ text: "Other State University" }, { text: "Sample College" }], "Example State University"),
   ], ["Example State University", null]);
+  check("zip: a reply as plain JSON and as an event stream", [
+    zip.readReply('{"jsonrpc":"2.0","id":1,"result":{"ok":1}}', "application/json")?.result,
+    zip.readReply('event: message\ndata: {"jsonrpc":"2.0","id":2,"result":{"ok":2}}\n\n', "text/event-stream")?.result,
+    zip.readReply("not json", "application/json"),
+  ], [{ ok: 1 }, { ok: 2 }, null]);
+  check("zip: the search in the tool's own names, and nothing it has no place for", [
+    zip.argsFor({ properties: { search: { type: "string" }, location: { type: "string" }, radius_miles: { type: "integer" }, days_ago: { type: "integer", enum: [1, 5, 10, 30] }, offset: { type: "integer" } } }, { title: "Manager", where: "Springfield, NJ", radius: 40, days: 30, offset: 5 }),
+    zip.argsFor({ properties: { query: { type: "string" }, days: { type: "integer", enum: [1, 7] } } }, { title: "Manager", where: "Springfield, NJ", radius: 40, days: 30, offset: 0 }),
+  ], [{ search: "Manager", location: "Springfield, NJ", radius_miles: 40, days_ago: 30, offset: 5 }, { query: "Manager" }]);
+  check("zip: postings found wherever the answer keeps them", [
+    zip.jobsIn({ structuredContent: { jobs: [{ title: "Manager", hiring_company: { name: "Example Goods" }, posted_time: "2026-11-20" }] } }).map((j) => [j.title, j.company, j.posted]),
+    zip.jobsIn({ content: [{ type: "text", text: '{"results":[{"job_title":"Clerk","company_name":"Sample Co"}]}' }] }).map((j) => [j.title, j.company]),
+    zip.jobsIn({ content: [{ type: "text", text: "Here are some jobs." }] }),
+  ], [[["Manager", "Example Goods", "2026-11-20"]], [["Clerk", "Sample Co"]], []]);
+  {
+    const me = { citizenship: "United States only", github_url: "https://github.com/example", linkedin_url: "", portfolio_url: null };
+    check("profile: citizenship, however it is asked", [
+      fp.fromProfile("Please indicate which, if any, where you are a citizen. Cuba Syria North Korea Iran Sudan None of the above", me),
+      fp.fromProfile("Are you a U.S. citizen?", me),
+      fp.fromProfile("Do you hold dual citizenship?", me),
+      fp.fromProfile("Country of citizenship", me),
+      fp.fromProfile("Are you a US citizen?", { citizenship: "Another country" }),
+      fp.fromProfile("Which, if any, of these countries are you a citizen of?", { citizenship: "United States and another country" }),
+      fp.fromProfile("Are you a US citizen?", {}),
+    ], ["None of the above", "Yes", "No", "United States", "No", null, null]);
+    check("profile: a link is the profile's, and only when it is one", [
+      fp.fromProfile("GitHub URL", me), fp.fromProfile("Link to your Git Hub profile", me), fp.fromProfile("LinkedIn Profile", me), fp.fromProfile("Portfolio or personal website", me),
+      fp.fromProfile("How did you hear about us? LinkedIn", { linkedin_url: "https://linkedin.com/in/x" }),
+    ], ["https://github.com/example", "https://github.com/example", null, null, null]);
+  }
   check("quiet: nothing to strike out, nothing changed", quiet.scrub("plain line", [], null), "plain line");
 }
 

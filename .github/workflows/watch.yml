@@ -43,8 +43,11 @@ on:
         required: false
         default: ""
   # Kept so the panel can still wake it; nothing relies on it.
+  # "backfill" is the first start: START was pressed in the panel, so every
+  # reader is started at once, whenever it last ran, and the whole of the
+  # last thirty days is gathered in one go instead of over a day of turns.
   repository_dispatch:
-    types: [tick]
+    types: [tick, backfill]
   # The way back in if the chain breaks: hourly, off the hour, for whenever
   # GitHub does start it.
   # Every hour, with the rounds. The repository is public, so a runner's
@@ -72,6 +75,7 @@ jobs:
           REPO: ${{ github.repository }}
           RUN_ID: ${{ github.run_id }}
           LINK: ${{ github.event.inputs.link }}
+          FORCE: ${{ github.event.action == 'backfill' }}
           APP_URL: https://applynow.lol
         run: |
           set -uo pipefail
@@ -177,7 +181,7 @@ jobs:
               fi
             # Ten minutes' grace, so a job due on the hour is not left a
             # whole further round for being fifty-five minutes old.
-            elif [ "$age_m" -ge $(( every * 60 - 10 )) ]; then
+            elif [ "$age_m" -ge $(( every * 60 - 10 )) ] || { [ "${FORCE}" = "true" ] && echo "$wf" | grep -Eq '^(sweep|oracle|feeds|successfactors|jobposting|icims|boards|usajobs|resolve|ziprecruiter)\.yml$'; }; then
               if start "$wf" "$give"; then
                 action="due; started"
                 started=$((started + 1))

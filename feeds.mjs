@@ -407,6 +407,59 @@ async function fromJooble(titles, excludes, where, tally) {
   return out;
 }
 
+/**
+ * ZipRecruiter, through the search it publishes for assistants: by title and
+ * place, a few titles a run. Only the employers' names are kept.
+ */
+async function fromZipRecruiter(titles, excludes, where, tally) {
+  const zip = await import("./zipmcp.mjs");
+  let mcp;
+  try {
+    mcp = await zip.open();
+  } catch (e) {
+    tally.errors.push(`ziprecruiter: ${String(e?.message ?? e).slice(0, 50)}`);
+    return [];
+  }
+  if (!mcp.tool) {
+    tally.errors.push("ziprecruiter: no search tool offered");
+    return [];
+  }
+  // What the tool takes, by name and kind; never what is put in it.
+  const props = mcp.tool.inputSchema?.properties ?? {};
+  console.log(`  ziprecruiter: tool "${mcp.tool.name}" takes ${JSON.stringify(Object.fromEntries(Object.entries(props).map(([k, v]) => [k, Array.isArray(v?.enum) ? v.enum : v?.type ?? "?"])))}`);
+  const out = [];
+  const turn = Math.floor(Date.now() / (12 * 3_600_000));
+  const startAt = titles.length ? (turn * 6) % titles.length : 0;
+  let shown = false;
+  for (const title of [...titles.slice(startAt), ...titles.slice(0, startAt)].slice(0, 6)) {
+    for (const offset of [0, 5]) {
+      let result;
+      try {
+        result = await mcp.call(zip.argsFor(mcp.tool.inputSchema, { title, where, radius: 40, days: 30, offset }));
+      } catch (e) {
+        tally.errors.push(`ziprecruiter "${title.slice(0, 16)}": ${String(e?.message ?? e).slice(0, 40)}`);
+        break;
+      }
+      const rows = zip.jobsIn(result);
+      if (!shown) {
+        shown = true;
+        const kinds = (result?.content ?? []).map((c) => `${c?.type}${typeof c?.text === "string" ? ` of ${c.text.length}` : ""}`);
+        console.log(`  ziprecruiter: an answer holds ${JSON.stringify(kinds)}${result?.structuredContent ? ` and a structure with ${JSON.stringify(Object.keys(result.structuredContent).slice(0, 8))}` : ""}; a posting has ${JSON.stringify(rows[0]?.keys?.slice(0, 16) ?? [])}`);
+      }
+      tally.read += rows.length;
+      for (const r of rows) {
+        if (r.posted && !fresh14(r.posted)) continue;
+        if (!wanted(r.title, titles, excludes)) continue;
+        out.push({ name: r.company, source: "ziprecruiter" });
+      }
+      if (rows.length < 5) break;
+      await pause(1200);
+    }
+    await pause(900);
+  }
+  return out;
+}
+
 if (process.env.FEEDS_IMPORT_ONLY !== "1") {
   if (!SUPABASE_URL || !ANON_KEY || !AP_EMAIL || !AP_PASSWORD) {
     console.error("Missing SUPABASE_URL, SUPABASE_ANON_KEY, APPLYPILOT_EMAIL or APPLYPILOT_PASSWORD.");
@@ -435,6 +488,7 @@ if (process.env.FEEDS_IMPORT_ONLY !== "1") {
     ["workingnomads", () => fromWorkingNomads(titles, excludes, tally)],
     ["adzuna", () => fromAdzuna(titles, excludes, where, tally)],
     ["jooble", () => fromJooble(titles, excludes, where, tally)],
+    ["ziprecruiter", () => fromZipRecruiter(titles, excludes, where, tally)],
   ]) {
     const got = await run().catch((e) => {
       tally.errors.push(`${label}: ${String(e?.message ?? e).slice(0, 40)}`);

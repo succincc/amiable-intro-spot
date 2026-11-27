@@ -30,6 +30,7 @@ import { tailorResume, rolesText, standardResume, arrangedResume, structureResum
 import { guardLogs, hideJob, STATES } from "./quiet.mjs";
 import { FRESH_DAYS } from "./fresh.mjs";
 import { schoolNameOnly, schoolOption } from "./school.mjs";
+import { fromProfile } from "./fromprofile.mjs";
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const ANON_KEY = process.env.SUPABASE_ANON_KEY;
@@ -11166,9 +11167,35 @@ async function saveGeneratedAnswer(question, answer, fieldType) {
  * list of options, the answer has to be one of them or it is left alone.
  */
 async function refreshAnswers(profile) {
-  const rows = await db("answers?confirmed=eq.false&select=id,question,options&limit=500").catch(() => null);
-  if (!rows?.length) return;
   const flat = (t) => String(t ?? "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  // Answers already saved that the profile now says otherwise: a link that
+  // was changed, a citizenship that was set. The profile is where those
+  // live, and a saved answer is looked at before the profile on a form, so
+  // a stale one would go on being typed.
+  let brought = 0;
+  {
+    const kept = await db("answers?confirmed=eq.true&or=(question.ilike.*citizen*,question.ilike.*linkedin*,question.ilike.*github*,question.ilike.*portfolio*,question.ilike.*website*)&select=id,question,answer,options&limit=300").catch(() => null);
+    for (const row of kept ?? []) {
+      let want = fromProfile(row.question, profile);
+      if (!want) continue;
+      const options = Array.isArray(row.options) ? row.options.map(String).filter(Boolean) : [];
+      if (options.length) {
+        const hit = options.find((o) => flat(o) === flat(want)) ?? (/^none\b/i.test(want) ? options.find((o) => /^none\b/i.test(o.trim())) : options.find((o) => flat(o).startsWith(`${flat(want)} `)));
+        if (!hit) continue;
+        want = hit;
+      }
+      if (flat(row.answer) === flat(want)) continue;
+      await db(`answers?id=eq.${row.id}`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ answer: want }) }).then(() => brought++).catch(() => {});
+    }
+  }
+  const rows = await db("answers?confirmed=eq.false&select=id,question,options&limit=500").catch(() => null);
+  if (!rows?.length) {
+    if (brought) {
+      console.log(`Answers page: ${brought} saved answer(s) brought in line with the profile.`);
+      await requeueForAnswers();
+    }
+    return;
+  }
   const NEVER = /social security|\bssn\b|date of birth|birth ?date|birthday|\bdob\b|^pass(code|word)\b|^(prefix|suffix|title|salutation)\b/i;
   let answered = 0;
   let removed = 0;
@@ -11183,7 +11210,7 @@ async function refreshAnswers(profile) {
       // The form's own words, without the plumbing some portals put in a
       // label ("no selection 155:_input").
       const plain = q.replace(/\bno selection\b/gi, " ").replace(/\b\d+:_?[a-z]*input\b/gi, " ").replace(/\s+/g, " ").trim();
-      let want = answerQuestion(plain, profile) ?? livesInListedState(plain, profile);
+      let want = fromProfile(plain, profile) ?? answerQuestion(plain, profile) ?? livesInListedState(plain, profile);
       if (want === null || want === undefined || String(want).trim() === "") continue;
       want = String(want).trim();
       const options = Array.isArray(row.options) ? row.options.map(String).filter(Boolean) : [];
@@ -11206,7 +11233,26 @@ async function refreshAnswers(profile) {
       /* one row must not stop the rest */
     }
   }
-  console.log(`Answers page: ${rows.length} question(s) were waiting; ${answered} answered from the profile and the rules, ${removed} removed as never askable, ${rows.length - answered - removed} left for the owner.`);
+  console.log(`Answers page: ${rows.length} question(s) were waiting; ${answered} answered from the profile and the rules, ${removed} removed as never askable, ${rows.length - answered - removed} left for the owner${brought ? `; ${brought} saved answer(s) brought in line with the profile` : ""}.`);
+  if (answered || brought) await requeueForAnswers();
+}
+
+/**
+ * An answer that arrived is an application that can now be finished. The
+ * ones that stopped with something required left empty are offered again,
+ * once: this runs only when an answer has actually been filled in.
+ */
+async function requeueForAnswers() {
+  const rows = await db("jobs?status=eq.needs_help&help_reason=eq.incomplete&select=id&order=score.desc.nullslast&limit=200").catch(() => null);
+  if (!rows?.length) return;
+  let done = 0;
+  for (let i = 0; i < rows.length; i += 50) {
+    const ids = rows.slice(i, i + 50).map((r) => r.id);
+    const ok = await db(`jobs?id=in.(${ids.join(",")})`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ status: "queued", attempts: 0, help_reason: null, updated_at: new Date().toISOString() }) }).then(() => true).catch(() => false);
+    if (!ok) break;
+    done += ids.length;
+  }
+  if (done) console.log(`Requeued ${done} application(s) that had stopped on an unanswered question.`);
 }
 
 async function recordUnknowns(all) {
@@ -11400,7 +11446,13 @@ const main = async () => {
   p.last_name = names.length > 1 ? names[names.length - 1] : "";
 
   // Once a round, in the lane that always runs.
-  if (LEADS_THE_ROUND) await refreshAnswers(p).catch(() => {});
+  if (LEADS_THE_ROUND || process.env.ANSWERS_ONLY === "true") await refreshAnswers(p).catch(() => {});
+  // Started because the profile was saved: the questions are gone through
+  // with it and nothing else is done.
+  if (process.env.ANSWERS_ONLY === "true") {
+    console.log("Answers gone through after a change to the profile; no applications on this run.");
+    process.exit(0);
+  }
   // The owner's standing order: postings scored into the middle band are
   // sent, not held for a yes. Done once a round, by the first lane, on a
   // round that sends for real.

@@ -48,10 +48,12 @@ export function CallingExtra({ initial }: { initial: Record<string, unknown> }) 
         optional, and not part of the free service. an assistant phones a place you applied to, says it is an AI assistant calling about your application, asks for the hiring manager and makes your case in your own recorded voice. you connect your own accounts and those services bill you directly: a voice service (about $5 to $22 a month) and a phone number (about $1 to $2 a month, plus a few cents a minute). rehearse it free on the practice page first.
       </p>
       <ol className="list-decimal space-y-1 pl-4 text-muted-foreground">
-        <li>at elevenlabs.io, open an account, record your voice under Voices (instant clone), and copy that voice's id. under Developers, make an API key.</li>
-        <li>at twilio.com, open an account, add a few dollars of credit and buy one local number. copy the Account SID and Auth Token from the console's front page.</li>
-        <li>paste all five below and save. the panel sets up the assistant and the number in your voice account by itself on the first call.</li>
-        <li>switch calls on underneath. calls go out on weekdays, 10 to 12 and 2 to 4, one per place, a dozen a day at most; each conversation is filed beside its application and an agreed time is emailed to you with a calendar entry.</li>
+        <li><b>voice.</b> open an account at elevenlabs.io and choose a paid plan (the smallest one includes cloning your voice). go to Voices, add a voice, choose Instant Voice Clone, and record or upload about a minute of yourself talking normally. open the new voice and copy its Voice ID into "your cloned voice's id".</li>
+        <li><b>voice key.</b> still at elevenlabs.io, open Developers (or your profile), then API Keys, and create a key. paste it into "voice service key".</li>
+        <li><b>phone.</b> open an account at twilio.com and upgrade it by adding credit ($20 is the usual minimum); a trial account can only ring your own phone. under Phone Numbers, buy one local number with Voice.</li>
+        <li><b>phone keys.</b> on the Twilio console's first page, copy Account SID into "phone account id" and Auth Token into "phone account token". put the number you bought into "your number there", like +17325550100.</li>
+        <li><b>save, then switch calls on.</b> nothing else to set up: the panel creates the assistant and attaches the number in your voice account on the first call. calls go out on weekdays, 10 to 12 and 2 to 4, one per place, a dozen a day at most. each conversation is filed beside its application and an agreed time is emailed to you with a calendar entry.</li>
+        <li><b>to stop,</b> switch calls off, or press disconnect to remove your keys. both services bill you directly and can be cancelled there at any time.</li>
       </ol>
       <div className={connected ? "text-success" : "text-muted-foreground"}>{connected ? `● connected, calling from ${q.data?.ok ? q.data.number : ""}` : "○ not connected"}</div>
       <div className="grid gap-2 sm:grid-cols-2">

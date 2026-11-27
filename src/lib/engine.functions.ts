@@ -487,3 +487,64 @@ export const runSweep = createServerFn({ method: "POST" })
       message: `GitHub ${res.status}. ${hint} ${(await res.text()).slice(0, 200)}`.trim(),
     };
   });
+
+/**
+ * The profile was saved: have every waiting question gone through with it.
+ * Starts the small job on GitHub that answers what the profile now answers
+ * and offers the stopped applications again. Quiet when it cannot: the same
+ * is done at the start of every round anyway.
+ */
+export const syncAnswers = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .handler(async () => {
+    const token = process.env["GITHUB_TOKEN"];
+    const repo = process.env["GITHUB_REPO"];
+    if (!token || !repo) return { ok: false as const };
+    try {
+      const res = await fetch(`https://api.github.com/repos/${repo}/dispatches`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28",
+          "Content-Type": "application/json",
+          "User-Agent": "ApplyPilot",
+        },
+        body: JSON.stringify({ event_type: "answers" }),
+        signal: AbortSignal.timeout(15_000),
+      });
+      return { ok: res.status === 204 };
+    } catch {
+      return { ok: false as const };
+    }
+  });
+
+/**
+ * The first start. Every reader is started at once, so the last thirty days
+ * of postings are gathered in one go; the hourly rounds after it only meet
+ * what is new, because a posting already held is never taken twice.
+ */
+export const startBackfill = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .handler(async () => {
+    const token = process.env["GITHUB_TOKEN"];
+    const repo = process.env["GITHUB_REPO"];
+    if (!token || !repo) return { ok: false as const };
+    try {
+      const res = await fetch(`https://api.github.com/repos/${repo}/dispatches`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28",
+          "Content-Type": "application/json",
+          "User-Agent": "ApplyPilot",
+        },
+        body: JSON.stringify({ event_type: "backfill" }),
+        signal: AbortSignal.timeout(15_000),
+      });
+      return { ok: res.status === 204 };
+    } catch {
+      return { ok: false as const };
+    }
+  });

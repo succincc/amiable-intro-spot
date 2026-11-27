@@ -1,9 +1,11 @@
 import { useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useServerFn } from "@tanstack/react-start";
 
 import { Btn, Cursor, ErrorLine, Section } from "@/components/mission-control/async-state";
 import { supabase } from "@/integrations/supabase/client";
+import { startBackfill } from "@/lib/engine.functions";
 import { STARTED, isStarted, readyToStart, setupSteps } from "@/lib/start";
 
 /**
@@ -14,6 +16,7 @@ import { STARTED, isStarted, readyToStart, setupSteps } from "@/lib/start";
  */
 export function StartCard() {
   const qc = useQueryClient();
+  const backfill = useServerFn(startBackfill);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const q = useQuery({
@@ -89,7 +92,7 @@ export function StartCard() {
                 </Link>
               ))}
             </div>
-            <Btn variant="primary" className="w-full py-3 text-base" disabled={busy || !ready} onClick={() => void set({ ...STARTED })}>
+            <Btn variant="primary" className="w-full py-3 text-base" disabled={busy || !ready} onClick={() => void set({ ...STARTED }).then(() => backfill().catch(() => undefined))}>
               {busy ? <>starting<span className="ap-cursor">_</span></> : "START"}
             </Btn>
             <p className="text-xs text-muted-foreground">

@@ -32,9 +32,10 @@ import { createFileRoute } from "@tanstack/react-router";
  *   GET or POST /api/public/cron/tick
  *   -> { "ok": true, "mail": "done" | "not due" | "failed", "watch": … }
  */
-// Hourly, not every few minutes. Each read wakes the database, which is
-// billed for the hours it is awake; a reply inside the hour is soon enough.
-const MAIL_EVERY_MIN = 50;
+// Every half hour, at the owner's asking: an invitation is answered inside
+// thirty minutes. Each read wakes the database, which is billed for the
+// hours it is awake, so this is as often as it goes.
+const MAIL_EVERY_MIN = 25;
 const WATCH_EVERY_MIN = 25;
 
 /** Take the turn, if it has come round. True for exactly one caller. */

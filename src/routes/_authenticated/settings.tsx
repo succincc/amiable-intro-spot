@@ -10,7 +10,7 @@ import {
   agentOnline, parseDailyCap, percentToScore, relTime, scoreToPercent, useAgent, useStats,
   type Company, type Profile, type SearchConfig,
 } from "@/hooks/use-mission-control";
-import { addCompanyByUrl } from "@/lib/engine.functions";
+import { addCompanyByUrl, syncAnswers } from "@/lib/engine.functions";
 import { LargeEmployerImport } from "@/components/mission-control/large-employer-import";
 import { GmailSettings } from "@/components/mission-control/gmail-settings";
 import { InterviewCalendar } from "@/components/mission-control/interview-calendar";
@@ -146,6 +146,7 @@ const SELECTS: Array<[keyof Profile, string, string[]]> = [
 ];
 
 function ProfileBlock({ initial }: { initial: Profile }) {
+  const sync = useServerFn(syncAnswers);
   const [p, setP] = useState<Profile>(initial);
   const set = (k: keyof Profile, v: string | number | null) => setP((x) => ({ ...x, [k]: v }));
   return (
@@ -169,6 +170,8 @@ function ProfileBlock({ initial }: { initial: Profile }) {
           resume_file_path: _fp, resume_file_name: _fn, resume_word_count: _wc, resume_error: _re, ...rest } = p;
         const { error } = await supabase.from("profile").update(rest).eq("id", 1);
         if (error) throw error;
+        // Every waiting question is gone through again with what was just saved.
+        void sync().catch(() => undefined);
       }} />
     </Block>
   );

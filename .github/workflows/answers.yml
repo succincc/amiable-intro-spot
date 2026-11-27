@@ -1,0 +1,42 @@
+name: answers
+
+# Started when the profile is saved in the panel. Every waiting question is
+# put to the profile again and answered where it now can be, saved answers
+# the profile has overtaken (a link, a citizenship) are brought in line, and
+# applications that had stopped on an unanswered question are offered again.
+# No application is sent from here.
+
+on:
+  repository_dispatch:
+    types: [answers]
+  workflow_dispatch:
+
+concurrency:
+  group: applypilot-answers
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  answers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: The applier's one dependency, without its browser
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+        run: npm install --no-save --no-audit --no-fund playwright@1.49.0
+      - name: Go through the questions
+        env:
+          SUPABASE_URL: https://inqhfkshqndkxyztzita.supabase.co
+          SUPABASE_ANON_KEY: sb_publishable_QK4kidijM8nk46uK6L22Qw_XA0RQu5U
+          APPLYPILOT_EMAIL: ${{ secrets.APPLYPILOT_EMAIL }}
+          APPLYPILOT_PASSWORD: ${{ secrets.APPLYPILOT_PASSWORD }}
+          ANSWERS_ONLY: "true"
+          DRY_RUN: "true"
+        run: node apply.mjs
