@@ -157,6 +157,8 @@ jobs:
           # cached directory and so are needed even on a hit; the browser
           # download itself is skipped when it is already there.
           npx playwright install --with-deps chromium
+          # pdftotext: the resume PDF is read back as a parser would read it.
+          command -v pdftotext >/dev/null || sudo apt-get install -y -q poppler-utils >/dev/null 2>&1 || true
           # apply.mjs runs from the repo root and imports "playwright", so the
           # resolver needs to find it there.
           ln -sfn "$PW_DIR/node_modules" "$GITHUB_WORKSPACE/node_modules"

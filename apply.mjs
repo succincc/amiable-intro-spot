@@ -38,6 +38,7 @@ import { useOwnKey } from "./ownkey.mjs";
 import { isCoverLetter, writeCoverLetter } from "./coverletter.mjs";
 import { jobKey } from "./samejob.mjs";
 import { GONE_RE } from "./gone.mjs";
+import { tidyWriting, unsupportedClaims, documentCheck } from "./quality.mjs";
 import { BOARD_HOSTS, applyStealth, detectBoardPlatform } from "./major-boards-selectors.mjs";
 import { applyBoardJob, restoreBoardSession } from "./major-boards-engine.mjs";
 
@@ -8111,7 +8112,8 @@ async function coverLetterFor(job, profile) {
     resume: (profile.tailor_resumes === false ? null : job.tailored_resume) || profile.resume_text,
     apiKey: process.env.GEMINI_API_KEY,
   }).catch(() => null);
-  const text = made?.text ?? null;
+  // The same last look a resume gets: stock phrasing taken out, nothing put in.
+  const text = made?.text ? tidyWriting(made.text).text : null;
   if (text) console.log(`    wrote a cover letter of ${text.split(/\s+/).length} words${made.by === "model" ? "" : " without the model"}`);
   LETTERS.set(job.id, text);
   return text;
@@ -8343,8 +8345,63 @@ async function attachResumeOnly(context, page, form, profile, job) {
     );
   }
 
-  const pdf = await buildResumePdf(context, aligned.text || resumeText, profile, job.id);
+  // The last look before it is sent: the writing tidied by taking out
+  // only, and every figure and credential in it held against the
+  // candidate's own material. A document that claims something of its own
+  // is not sent; the candidate's resume as they wrote it goes instead.
+  let finalText = aligned.text || resumeText;
+  const ownMaterial = [
+    profile?.resume_text, ROLES,
+    profile?.full_name, profile?.email, profile?.phone, profile?.address, profile?.city, profile?.state, profile?.postal_code, profile?.linkedin_url, profile?.website,
+  ].filter(Boolean).join("\n");
+  try {
+    const tidy = tidyWriting(finalText);
+    if (tidy.changes) finalText = tidy.text;
+    const claims = unsupportedClaims(finalText, ownMaterial);
+    if (claims.length) {
+      const own = standardResume(profile?.resume_text, profile) || String(profile?.resume_text ?? "");
+      const again = alignToPosting(own, job.description ?? "", job.company ?? "");
+      const plain = tidyWriting(again.text || own).text;
+      if (plain.trim() && !unsupportedClaims(plain, ownMaterial).length) {
+        console.log(`    the resume written for this posting carried ${claims.length} thing(s) not in the candidate's own material (${claims.slice(0, 3).join(", ")}); their own resume goes instead`);
+        finalText = plain;
+      }
+    }
+  } catch (e) {
+    console.log(`    the last look at the resume could not be taken: ${String(e?.message ?? e).slice(0, 80)}`);
+    finalText = aligned.text || resumeText;
+  }
+
+  // A resume a recruiter cannot answer is no use however it reads. Where
+  // the text carries neither the email nor the phone number on file — a
+  // resume pasted without its header, or one whose header was an image —
+  // the two are put under the name, from the profile.
+  try {
+    const flat = finalText.toLowerCase();
+    const hasMail = profile?.email && flat.includes(String(profile.email).toLowerCase());
+    const tail = String(profile?.phone ?? "").replace(/\D/g, "").slice(-10);
+    const hasPhone = tail.length === 10 && finalText.replace(/\D/g, "").includes(tail);
+    const missing = [!hasMail && profile?.email, !hasPhone && tail.length === 10 && profile?.phone].filter(Boolean);
+    if (missing.length) {
+      const lines = finalText.split("\n");
+      const at = Math.max(0, lines.findIndex((l) => l.trim())) + 1;
+      lines.splice(at, 0, missing.join(" | "));
+      finalText = lines.join("\n");
+      console.log(`    the resume's text had no ${[!hasMail && "email", !hasPhone && tail.length === 10 && "phone number"].filter(Boolean).join(" or ")} on it; put under the name from the profile`);
+    }
+  } catch { /* as it was */ }
+
+  const pdf = await buildResumePdf(context, finalText, profile, job.id);
   if (!pdf) return { wanted: true, note: "resume PDF could not be built" };
+  try {
+    const check = documentCheck({ text: finalText, source: ownMaterial, posting: job.description ?? "", company: job.company ?? "", pdfPath: pdf, profile });
+    console.log(`    ${check.line}`);
+    if (check.requirements?.required?.total) {
+      const had = ATS_REPORT.get(job.id) ?? { match: aligned.after, gaps: [] };
+      ATS_REPORT.set(job.id, { ...had, match: check.requirements.required.percent ?? had.match, gaps: [...new Set([...check.requirements.required.missing, ...(had.gaps ?? [])])].slice(0, 12) });
+    }
+    if (check.pdf.checked && !check.pdf.ok) console.log(`    the PDF does not read back cleanly: ${check.pdf.problems.join("; ")}`);
+  } catch { /* a report, not a gate */ }
 
   const outcome = await fileInputs[0]
     .setInputFiles(pdf)

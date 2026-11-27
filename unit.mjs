@@ -523,5 +523,28 @@ quiet.hideJob({ company: "ZQ" });
   ], [true, true, true, true, true, false, false, false]);
 }
 
+{
+  // The last look at a document: what the posting requires apart from what
+  // it would like, the writing, the claims, and nothing ever added.
+  const q = await import("./quality.mjs");
+  const posting = "About us\nWe are great.\n\nRequirements:\n- 5+ years of customer success experience\n- Salesforce and SQL\n\nNice to have:\n- Tableau\n\nBenefits\n- Health insurance";
+  const resume = "Jane Doe\n\nEXPERIENCE\nAcme - Customer Success Manager (Jan 2020 - Present)\n• Leveraged Salesforce to successfully manage 120 accounts and grew revenue 35%\n• Managed renewals in order to cut churn across enterprise accounts\n• Managed renewals in order to cut churn across enterprise accounts\n• A results-driven, dynamic leader who built dynamic pricing models in SQL";
+  const seg = q.segmentPosting(posting);
+  const rep = q.requirementReport(resume, posting);
+  const tidy = q.tidyWriting(resume);
+  check("quality: a posting is read by its own headings, the writing tidied by taking out only, and a claim that is not the candidate's is named", [
+    seg.marked, /Salesforce/.test(seg.required), /Tableau/.test(seg.preferred), /Health/.test(seg.required),
+    rep.split, rep.preferred.missing.includes("tableau"),
+    /Used Salesforce to manage 120 accounts and grew revenue 35%/.test(tidy.text),
+    /A leader who built dynamic pricing models in SQL/.test(tidy.text),
+    (tidy.text.match(/Managed renewals/g) ?? []).length,
+    // every figure that was there is still there, and none is new
+    q.unsupportedClaims(tidy.text, resume).length,
+    q.unsupportedClaims(resume + "\n• Grew revenue 48% and holds a PMP", resume),
+    q.writingFindings(resume).map((f) => f.kind).includes("said twice"),
+    /not the employer's score/.test(q.documentCheck({ text: tidy.text, source: resume, posting }).line),
+  ], [true, true, true, false, true, true, true, true, 1, 0, ["48%", "PMP"], true, true]);
+}
+
 console.log(failed ? `unit: ${failed} failed, ${passed} passed.` : `unit: all ${passed} passed.`);
 process.exit(failed ? 1 : 0);
