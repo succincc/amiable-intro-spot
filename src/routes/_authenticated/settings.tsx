@@ -9,6 +9,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 
 import { Btn, Cursor, Empty, ErrorLine, inputCls } from "@/components/mission-control/async-state";
+import { BoardLoginsCard } from "@/components/mission-control/board-logins-card";
 import { supabase } from "@/integrations/supabase/client";
 import {
   agentOnline, parseDailyCap, percentToScore, relTime, scoreToPercent, useAgent, useStats,
@@ -103,6 +104,9 @@ function Settings() {
     <div className="space-y-3">
       {gmailBanner ? <div role="status" className={`break-words border p-3 text-sm ${gmailBanner.ok ? "border-success text-success" : "border-warning text-warning"}`}>{gmailBanner.text}</div> : null}
       <AgentBlock />
+      <Block title="job board logins" open>
+        <BoardLoginsCard defaultEmail={q.data.profile.email ?? ""} />
+      </Block>
       <ApplyingBlock initial={q.data.profile} />
       <ProfileBlock initial={q.data.profile} />
       <ResumeBlock initial={q.data.profile} />

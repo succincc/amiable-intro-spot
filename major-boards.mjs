@@ -24,6 +24,7 @@ import {
 import {
   captureBoardSession,
   checkVerificationWall,
+  ensureBoardAuth,
   restoreBoardSession,
 } from "./major-boards-engine.mjs";
 
@@ -261,6 +262,25 @@ async function main() {
       });
       await applyStealth(ctx);
       const loaded = await restoreBoardSession(ctx, acct?.session_state, platform);
+      if (acct?.email && acct?.password && loaded === 0) {
+        const authPage = await ctx.newPage();
+        try {
+          await authPage.goto(BOARD_SELECTORS[platform].homepageUrl, { waitUntil: "domcontentloaded", timeout: 35_000 }).catch(() => {});
+          const authRes = await ensureBoardAuth(authPage, platform, acct, {
+            onSessionUpdated: async (fresh) => {
+              if (!APPLY) return;
+              await db(`site_accounts?host=eq.${encodeURIComponent(acct.host)}`, {
+                method: "PATCH",
+                headers: { Prefer: "return=minimal" },
+                body: JSON.stringify({ session_state: fresh, session_updated_at: new Date().toISOString(), status: "active" }),
+              }).catch(() => {});
+            },
+          });
+          console.log(`${platform}: login via saved credentials -> ${authRes.ok ? "authenticated" : authRes.help_reason}`);
+        } finally {
+          await authPage.close().catch(() => {});
+        }
+      }
       console.log(`${platform}: searching ${titles.length} title(s), session cookies=${loaded}`);
 
       try {

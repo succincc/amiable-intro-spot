@@ -12276,7 +12276,7 @@ const main = async () => {
                   want === "none"
                     ? "ats=is.null"
                     : want === "other"
-                      ? "ats=not.in.(workday,greenhouse,oracle,successfactors,ashby,lever)&ats=not.is.null"
+                      ? "ats=not.in.(workday,greenhouse,oracle,successfactors,ashby,lever,linkedin,indeed,ziprecruiter)&ats=not.is.null"
                       : `ats=eq.${encodeURIComponent(want)}`
                 }` +
                   (RADIUS > 0 ? `&and=(or(remote.is.true,distance_miles.lte.${RADIUS}))` : "") +

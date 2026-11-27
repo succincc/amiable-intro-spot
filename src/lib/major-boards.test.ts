@@ -113,4 +113,10 @@ describe("major job boards (LinkedIn, Indeed, ZipRecruiter)", () => {
     expect(filtered).toHaveLength(1);
     expect(filtered[0]?.url).toBe("https://www.linkedin.com/jobs/view/1111111/");
   });
+
+  it("excludes linkedin, indeed, and ziprecruiter from apply.mjs 'other' lane so parallel lanes do not collide", async () => {
+    const { readFileSync } = await import("node:fs");
+    const src = readFileSync("apply.mjs", "utf8");
+    expect(src).toContain("not.in.(workday,greenhouse,oracle,successfactors,ashby,lever,linkedin,indeed,ziprecruiter)");
+  });
 });

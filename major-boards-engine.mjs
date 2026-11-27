@@ -432,12 +432,12 @@ export async function applyBoardJob(page, platform, job, opts = {}) {
   // Native board flow requires authentication on LinkedIn (and usually Indeed/ZipRecruiter)
   if (platform === "linkedin") {
     await dismissLinkedInLoginPopup(page);
-    if (!(await isLoggedIn(page, platform))) {
-      const auth = await ensureBoardAuth(page, platform, opts.account, opts);
-      if (!auth.ok) return { status: "needs_help", help_reason: auth.help_reason, note: auth.note };
-      await page.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: 45_000 });
-      await humanDelay(1200, 2000);
-    }
+  }
+  if (!(await isLoggedIn(page, platform)) && (platform === "linkedin" || (opts.account?.email && opts.account?.password))) {
+    const auth = await ensureBoardAuth(page, platform, opts.account, opts);
+    if (!auth.ok) return { status: "needs_help", help_reason: auth.help_reason, note: auth.note };
+    await page.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: 45_000 });
+    await humanDelay(1200, 2000);
   }
 
   const activeBtn = page.locator(sel.applyButton).first();
