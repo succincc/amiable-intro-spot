@@ -7833,7 +7833,27 @@ async function dismissBanners(page) {
     /^(accept( all)?( cookies)?|allow all( cookies)?|i accept|agree|i agree|ok|got it|continue|consent (&|and) continue|accept (&|and) (continue|close))$/i;
   for (const frame of framesOf(page)) {
     // ADP draws its buttons as its own element, <sdf-button>; its consent
-    // banner sat over the Apply button through four presses.
+    // banner sat over the Apply button through four presses. Looked for on
+    // their own and first: on a careers page they come after more links
+    // than the search below reads through.
+    const pressedOwn = await frame
+      .evaluate((src) => {
+        const words = new RegExp(src, "i");
+        for (const n of document.querySelectorAll("sdf-button")) {
+          const t = (n.innerText || n.getAttribute("aria-label") || n.shadowRoot?.textContent || n.textContent || "").replace(/\s+/g, " ").trim();
+          if (!words.test(t)) continue;
+          const r = n.getBoundingClientRect();
+          if (!(r.width > 0 && r.height > 0)) continue;
+          (n.shadowRoot?.querySelector("button") ?? n).click();
+          return t.slice(0, 24);
+        }
+        return null;
+      }, WORDS.source)
+      .catch(() => null);
+    if (pressedOwn) {
+      console.log(`    dismissed a banner: "${pressedOwn}"`);
+      await page.waitForTimeout(800);
+    }
     for (const el of (await frame.$$("button, a, [role=button], sdf-button").catch(() => [])).slice(0, 80)) {
       try {
         // A button drawn as its own element keeps its words where innerText
