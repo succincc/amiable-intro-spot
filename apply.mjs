@@ -7143,7 +7143,7 @@ const RETYPED = new Set();
  */
 function evidenceOption(question, options, resume) {
   const q = String(question ?? "").toLowerCase();
-  if (!/\b(which|what|where|do you (have|hold)|have you|select|in what|all that apply)\b/.test(q)) return null;
+  if (!/\b(which|what|where|do you (have|hold)|have you|select|in what|all that apply|any of (these|the following))\b/.test(q)) return null;
   if (options.length < 2 || options.length > 40) return null;
   const text = String(resume ?? "").toLowerCase();
   if (!text.trim()) return null;
@@ -9540,7 +9540,9 @@ async function applyToJobOnce(context, job, profile, answers) {
             (await (async () => {
               if ((await el.getAttribute("role").catch(() => null)) !== "combobox") return null;
               if (NEVER_INFER.test(label) || selfIdTopic(label)) return null;
-              if (!/\b(which|what|where)\b[^?]{3,}\?|\ball that apply\b|\bwhich of the following\b/i.test(label)) return null;
+              // "Do you hold any of these credentials?" is the same kind of
+              // question, and so is any list that takes more than one answer.
+              if (!/\b(which|what|where)\b[^?]{3,}\?|\ball that apply\b|\bwhich of the following\b|\bany of (these|the following)\b|question_\d+\[\]/i.test(label)) return null;
               await el.click({ force: true, timeout: 3000 }).catch(() => {});
               const seen = await popupOptions(form, el).catch(() => []);
               await page.keyboard.press("Escape").catch(() => {});
