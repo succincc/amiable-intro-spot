@@ -352,6 +352,13 @@ const readGroupQuestion = (n) => {
  * as capitals, so the text is wanted as the form wrote it.
  */
 function livesInListedState(label, p) {
+  // "Do you reside in the US?" A state on file that is one of the fifty (or
+  // the District) says yes; anything else on file leaves it to the owner.
+  if (/\b(do you|are you)\b[^?]{0,30}\b(live|reside|residing|located|based)\b[^?]{0,20}\b(in|within) the (u\.?s\.?a?\.?|united states)( of america)?\s*\*?\s*(\?|$)/i.test(String(label).trim().split(/\?/)[0] + "?")) {
+    const st = String(p?.state ?? "").trim();
+    const known = STATE_NAMES[st.toUpperCase()] || Object.values(STATE_NAMES).some((n) => n.toLowerCase() === st.toLowerCase());
+    return known ? "Yes" : null;
+  }
   if (!/\b(live|reside|residing|resident|located)\b[^?]{0,40}\bfollowing (states|locations)\b/i.test(String(label))) return null;
   const tail = String(label).split(/following (?:states|locations)/i)[1] ?? "";
   const mine = String(p?.state ?? "").trim();
@@ -1593,6 +1600,17 @@ async function icimsDoor(page, profile) {
     }
     const says = ((await frame.evaluate(() => (document.querySelector('[class*="error" i], [role=alert]')?.innerText ?? "").replace(/\s+/g, " ").trim().slice(0, 80)).catch(() => "")) || "").length;
     console.log(`    icims: the email step is still up after Next (${says ? `it shows a message of ${says} letters` : "it says nothing"})`);
+  }
+  // Twice refused on a screen that carries a human check with nothing to
+  // press: the portal judged the visit on its own and turned it down. That
+  // is the portal's decision and is reported as one — not as a form this
+  // program failed to find, which is how it read before.
+  for (const f of page.frames()) {
+    const silent = await f.$('textarea[name="h-captcha-response"], textarea[id^="h-captcha-response"], textarea[name="g-recaptcha-response"], input[name="cf-turnstile-response"]').catch(() => null);
+    if (silent) {
+      console.log("    icims: the email step carries a human check that runs unseen and it did not pass this visit; this application waits for the owner");
+      return { stop: { status: "needs_help", help_reason: "captcha", note: "The portal's first step ran its own human check on the visit and did not let the email through. Open it to finish — the resume for this posting is ready." } };
+    }
   }
   return { passed: false };
 }
@@ -6055,6 +6073,29 @@ function defaultYesNo(label, p) {
       }
     }
   }
+  // "Do you have 2 or more years managing a book of B2B customers?" and
+  // "…5 or more years in account management, strategic accounts or customer
+  // success?" The same question again with the word "experience" left out.
+  // Kept beside the two rules above, which are left as they were.
+  {
+    const WORDS = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 };
+    const plain = l.replace(/\s*\(\d+\)/g, "");
+    const m = plain.match(/\b(?:do you have|have you (?:had|spent)|with)\s+(?:a minimum of |at least |more than )?(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\+?\s*(?:or more\s+)?years?\s+(?:of\s+)?(?:in|as|[a-z]+ing)\s+([^?.]{3,160})/);
+    if (m) {
+      const need = Number(m[1]) || WORDS[m[1]] || 0;
+      const STOP = /^(related|relevant|professional|progressive|prior|previous|direct|experience|work|working|with|years?|that|this|such|similar|environment|setting|role|position|industry|field|within|other|from|have|your|their|about|and\/or|owned|carrying|number|book)$/;
+      const subject = m[2].split(/[^a-z0-9]+/).filter((w) => w.length > 3 && !STOP.test(w));
+      const shows = (w) =>
+        /^supervis|^manag|^leader/.test(w)
+          ? /\b(supervis\w*|manag\w*|owner|led|lead|director)\b/.test(resume)
+          : resume.includes(w.replace(/(ing|s)$/, ""));
+      const years = Number(p?.years_experience ?? 0);
+      if (subject.length) {
+        const hits = subject.filter(shows).length;
+        return hits * 2 >= subject.length && (!years || years >= need) ? "Yes" : "No";
+      }
+    }
+  }
   // Auditor independence: "employed with a public accounting firm that has
   // dealings with TD Bank", of the applicant or their family.
   if (/public accounting firm|external auditor|audit firm/.test(l)) {
@@ -6392,13 +6433,30 @@ function bestOption(offered, want, label) {
     break;
   }
 
+  // An answer on file that is itself "I would rather not say" is the list's
+  // own way of not saying, whatever the question and however the list words
+  // it. One portal asked "Are you a person of color?" and offered "I CHOOSE
+  // NOT TO DISCLOSE"; the answer on file was "Decline to self-identify", no
+  // word of the question named a subject this code knew, and the box was
+  // left empty on a finished form.
+  {
+    const DECLINES = /prefer not|decline|don'?t wish|do not wish|choose not|not to answer|rather not|not (to )?disclose|not to say|not (want|wish) to/i;
+    if (DECLINES.test(String(want))) {
+      const i = offered.findIndex((o) => DECLINES.test(o.text));
+      if (i >= 0) {
+        console.log(`      declined "${String(label).slice(0, 30)}" in the list's own words`);
+        return offered[i];
+      }
+    }
+  }
+
   // A self-identification that matches nothing is declined, not guessed —
   // the rule the Workday picker has had all along and this path never got.
   // Declining is an answer the candidate is entitled to give; choosing among
   // options they never chose is not.
   if (/\b(race|racial|ethnic\w*|hispanic|latin\w*|gender|sex|veteran|disabilit\w*)\b/i.test(String(label))) {
     const i = offered.findIndex((o) =>
-      /prefer not|decline|don'?t wish|do not wish|choose not|not to answer|rather not|not disclose/i.test(o.text),
+      /prefer not|decline|don'?t wish|do not wish|choose not|not to answer|rather not|not (to )?disclose/i.test(o.text),
     );
     if (i >= 0) {
       console.log(`      declined "${String(label).slice(0, 30)}" — nothing offered matches what is on file`);
