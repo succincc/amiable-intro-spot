@@ -1,4 +1,5 @@
 import { AiKey } from "@/components/mission-control/ai-key";
+import { TownField } from "@/components/mission-control/town-field";
 import { CallingExtra } from "@/components/mission-control/calling-extra";
 import { useEffect, useState, type ReactNode } from "react";
 import { createFileRoute } from "@tanstack/react-router";
@@ -157,7 +158,26 @@ function ProfileBlock({ initial }: { initial: Profile }) {
     <Block title="profile">
       <div className="grid gap-3 sm:grid-cols-2">
         {TEXT_FIELDS.map(([k, label]) => (
-          <Field key={k} label={label}><input className={inputCls} value={(p[k] as string) ?? ""} onChange={(e) => set(k, e.target.value)} /></Field>
+          <Field key={k} label={label}>
+            {k === "city" ? (
+              // The town is chosen from a list as it is typed, and brings its
+              // state, country and postal code with it.
+              <TownField
+                className={inputCls}
+                value={p.city ?? ""}
+                onType={(v) => set("city", v)}
+                onChoose={(place) => setP((x) => ({
+                  ...x,
+                  city: place.city,
+                  country: place.country,
+                  ...(place.state ? { state: place.state } : {}),
+                  ...(place.postal_code ? { postal_code: place.postal_code } : {}),
+                }))}
+              />
+            ) : (
+              <input className={inputCls} value={(p[k] as string) ?? ""} onChange={(e) => set(k, e.target.value)} />
+            )}
+          </Field>
         ))}
         <Field label="salary expectation"><input type="number" className={inputCls} value={p.salary_expectation ?? ""} onChange={(e) => set("salary_expectation", e.target.value ? Number(e.target.value) : null)} /></Field>
         {SELECTS.map(([k, label, opts]) => (

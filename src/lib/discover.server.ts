@@ -411,11 +411,17 @@ export async function runDiscover(supabase: any, opts: { since?: string | undefi
             `Edit them in Settings; this only happens while the list is empty.`,
         );
       } else {
-        problems.push(
-          "No job titles set and no resume to read them from, so every posting " +
-            "from every source is scored. That is allowed, but it is a lot of jobs " +
-            "to rate — add a few titles, or a resume, if scoring runs out of quota.",
-        );
+        // Nothing to look for, and nothing to apply with. Taking in every
+        // posting from every employer was allowed here once; for a workspace
+        // that has only just been made it is tens of thousands of rows, more
+        // than one request can hold, and it took the whole request down with
+        // it. A new workspace waits for a resume or a list of titles.
+        const message = "Nothing to look for yet: add a resume or job titles in Settings, and the next round starts finding postings.";
+        await supabase
+          .from("runs")
+          .update({ status: "done", message, ended_at: new Date().toISOString() })
+          .eq("id", run!.id);
+        return { ok: true as const, ...stats, by_source: {}, message, employers: 0, unreached: 0, stale: 0 };
       }
     }
     const enabled: string[] = cfg.sources ?? [];
