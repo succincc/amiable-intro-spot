@@ -6877,6 +6877,8 @@ function highestDegree(resume) {
 
 // The most recent job, read from the resume once per run and reused.
 let WORK;
+// What stopped each application of this run, in a line.
+const STOPS = [];
 
 // Hosts whose inbox has already been checked for a verification link.
 const CHECKED_INBOX = new Set();
@@ -13746,6 +13748,11 @@ const main = async () => {
         const origin = originOf(outcome);
         ORIGINS[origin] = (ORIGINS[origin] ?? 0) + 1;
       }
+      // One short line for each that stopped, printed last of all, so what
+      // stopped a run can be read without reading the run.
+      if (outcome.status !== "applied" && outcome.help_reason !== "dry_run") {
+        STOPS.push(`${outcome.help_reason ?? outcome.status}: ${String(outcome.note ?? "").split("\n")[0].replace(/^.*?Stopped before clicking:\s*/, "").slice(0, 150)}`);
+      }
       recap.push(
         `${outcome.status}${outcome.help_reason ? "/" + outcome.help_reason : ""} | ` +
           `${String(job.company ?? "?").slice(0, 22)} | ${String(outcome.note ?? "").split("\n")[0].slice(0, 170)}` +
@@ -13809,6 +13816,7 @@ const main = async () => {
     }).catch(() => {});
     if (recap.length) console.log("recap:\n" + recap.map((r) => "  " + r).join("\n"));
     if (Object.keys(ORIGINS).length) console.log(`why each one did not go: ${JSON.stringify(ORIGINS)}`);
+    if (STOPS.length) console.log(`what stopped them, one line each:\n${STOPS.map((x) => "  - " + x).join("\n")}`);
 
     // Where things stand, at the end where it is read: what is still waiting
     // within reach and fresh, by portal and by employer, and what has gone
