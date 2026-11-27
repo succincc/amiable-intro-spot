@@ -102,6 +102,9 @@ export type FetchedMessage = {
   message_id: string;
   thread_id: string;
   from_addr: string;
+  // The sender as the mail names it — "FirstEnergy Careers" — which is the
+  // only place some portals say whose code this is.
+  from_name?: string;
   to_addr: string;
   subject: string;
   body: string;
@@ -141,6 +144,7 @@ export async function fetchMessages(
           message_id: id,
           thread_id: msg.threadId,
           from_addr: parseAddress(header(payload, "From")),
+          from_name: String(header(payload, "From") ?? "").replace(/<[^>]*>/g, " ").replace(/["']/g, "").trim().slice(0, 120),
           to_addr: parseAddress(header(payload, "To")),
           subject: header(payload, "Subject"),
           body: extractText(payload).slice(0, 20000),
@@ -244,7 +248,10 @@ export async function findVerificationCode(
     if (at < cutoff) continue;
     const text = `${message.subject}\n${message.body}`;
     const code = extractCode(text);
-    if (code) found.push({ code, text, at });
+    // Oracle's "Confirm your identity" names the employer nowhere but in
+    // the sender's name; two of them a minute apart could not be told
+    // apart, and neither application got its code.
+    if (code) found.push({ code, text: `${message.from_name ?? ""}\n${text}`, at });
   }
   if (!found.length) return null;
 
