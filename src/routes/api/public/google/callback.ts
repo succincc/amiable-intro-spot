@@ -94,6 +94,23 @@ export const Route = createFileRoute("/api/public/google/callback")({
           }
         }
 
+        // The first reading, now, rather than at the next half hour: so the
+        // panel shows a mailbox that is being read as soon as it is connected.
+        // Given a few seconds and no more; the regular reading catches up.
+        try {
+          await Promise.race([
+            (async () => {
+              const { fetchMessages } = await import("@/lib/gmail.server");
+              const { ingestMessages } = await import("@/lib/email.server");
+              const messages = await fetchMessages(supabaseAdmin, "in:inbox newer_than:2d", 15);
+              await ingestMessages(supabaseAdmin, messages);
+            })(),
+            new Promise((done) => setTimeout(done, 12_000)),
+          ]);
+        } catch {
+          /* connected either way */
+        }
+
         return back(email ? `Connected ${email}` : "Connected", true);
       },
     },

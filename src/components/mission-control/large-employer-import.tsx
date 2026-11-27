@@ -8,7 +8,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { verifyCandidates } from "@/lib/engine.functions";
 import { importAllCandidates } from "@/lib/candidate-import";
 
-export function LargeEmployerImport() {
+export function LargeEmployerImport({ canManage = true }: { canManage?: boolean }) {
   const qc = useQueryClient();
   const verify = useServerFn(verifyCandidates);
   const running = useRef(false);
@@ -58,6 +58,24 @@ export function LargeEmployerImport() {
       void qc.invalidateQueries({ queryKey: ["failed-candidates"] });
       void qc.invalidateQueries({ queryKey: ["companies"] });
     }
+  }
+
+  // The list of employers is one list for everybody, built and kept up by
+  // the system. Anyone but the owner sees how far along it is, and nothing
+  // to press: there is nothing they need to do.
+  if (!canManage) {
+    return (
+      <div className="space-y-1 border-b border-border pb-3 text-xs">
+        <p className="text-muted-foreground">employers are found and checked for everyone automatically: the S&P 500, MidCap 400 and SmallCap 600, employers on the hiring systems this applies through, and more each day. every board that is found is added to your list below by itself.</p>
+        {stats.data ? (
+          <div className="flex flex-wrap gap-x-4 gap-y-1">
+            <span className="text-success">ready to read: {stats.data.resolved ?? 0}</span>
+            <span>still being checked: {stats.data.pending ?? 0}</span>
+            <span className="text-muted-foreground">could not be reached: {stats.data.failed ?? 0}</span>
+          </div>
+        ) : null}
+      </div>
+    );
   }
 
   return (

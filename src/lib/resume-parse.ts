@@ -19,6 +19,10 @@ export function looksScanned(text: string) {
 }
 
 export async function extractResumeText(file: File): Promise<string> {
+  return cleanResumeText(await readResumeFile(file));
+}
+
+async function readResumeFile(file: File): Promise<string> {
   const name = file.name.toLowerCase();
   if (name.endsWith(".txt") || file.type === "text/plain") return (await file.text()).trim();
   if (name.endsWith(".docx")) {
@@ -42,4 +46,63 @@ export async function extractResumeText(file: File): Promise<string> {
     return pages.join("\n").replace(/[ \t]+\n/g, "\n").trim();
   }
   throw new Error("Upload a .pdf, .docx or .txt file.");
+}
+
+/**
+ * A resume's text as a person would have typed it.
+ *
+ * What comes out of a PDF is the page's drawing order: a bullet on a line of
+ * its own with its sentence on the next, columns joined by a run of spaces,
+ * characters no keyboard has. One of those — a null character — is refused
+ * outright by the database ("unsupported Unicode escape sequence"), which is
+ * how an upload came to fail with nothing saved. So:
+ *
+ *   - characters that are not text are taken out;
+ *   - a bullet is put back on the line it belongs to, and a bullet with
+ *     nothing after it is dropped;
+ *   - a wide gap between two things on a line becomes " | ", which is what
+ *     it meant: a title and a place, an employer and its dates;
+ *   - runs of blank lines are one blank line.
+ */
+export function cleanResumeText(raw: string | null | undefined): string {
+  const BULLET = "[•●▪◦■□➢➤►▸∙⋅·\\uf0b7\\uf0a7\\u2023\\u25e6]";
+  const lines = String(raw ?? "")
+    // Not text: nulls and the other control characters, and halves of a pair with no partner.
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\ufffe\uffff]/g, "")
+    .replace(/[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g, "")
+    .replace(/\r\n?/g, "\n")
+    .replace(/[\u00a0\u2000-\u200a\u202f\u3000]/g, " ")
+    .replace(/[\u200b-\u200d\ufeff]/g, "")
+    .split("\n")
+    .map((l) => l.replace(/\t/g, "   ").replace(/\s+$/g, ""));
+  const out: string[] = [];
+  const alone = new RegExp(`^\\s*${BULLET}\\s*$`);
+  const starts = new RegExp(`^\\s*${BULLET}\\s*`);
+  let strays = false;
+  for (let i = 0; i < lines.length; i++) {
+    let line = lines[i]!;
+    if (alone.test(line)) {
+      // A run of bullets with nothing beside them is the page's bullet marks
+      // read out on their own; the line after the run is not one of theirs.
+      const run = strays || (i + 1 < lines.length && alone.test(lines[i + 1]!));
+      strays = true;
+      if (run) continue;
+      // The sentence is on the next line that has one; a bullet followed by
+      // another bullet, or by nothing, was only ever a mark on the page.
+      let j = i + 1;
+      while (j < lines.length && !lines[j]!.trim()) j++;
+      if (j < lines.length && !starts.test(lines[j]!) && lines[j]!.trim().length > 2 && j - i <= 2) {
+        line = `• ${lines[j]!.trim()}`;
+        i = j;
+      } else continue;
+      strays = false;
+    } else if (starts.test(line)) {
+      strays = false;
+      line = `• ${line.replace(starts, "").trim()}`;
+    }
+    else strays = false;
+    line = line.replace(/^\s+/, "").replace(/ {3,}/g, " | ").replace(/ {2}/g, " ");
+    out.push(line);
+  }
+  return out.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }

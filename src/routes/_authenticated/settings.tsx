@@ -1,7 +1,9 @@
 import { AiKey } from "@/components/mission-control/ai-key";
 import { TownField } from "@/components/mission-control/town-field";
+import { addEligibleTitles, afterResume } from "@/lib/setup.functions";
+import { cleanResumeText } from "@/lib/resume-parse";
 import { CallingExtra } from "@/components/mission-control/calling-extra";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
@@ -105,7 +107,8 @@ function Settings() {
       <ProfileBlock initial={q.data.profile} />
       <ResumeBlock initial={q.data.profile} />
       <ExperienceBlock />
-      <SearchBlock initial={q.data.search} profile={q.data.profile} />
+      {/* Remade when the list of titles changes underneath it: read off a resume, or added to. */}
+      <SearchBlock key={`titles-${(q.data.search?.titles ?? []).length}`} initial={q.data.search} profile={q.data.profile} />
       <CompaniesBlock />
       <EmailBlock initial={q.data.profile} open={gmailBanner !== null} />
       <Block title="writing key (free, 3 minutes)">
@@ -192,6 +195,8 @@ function ProfileBlock({ initial }: { initial: Profile }) {
         // Fields owned by other sections are left out so a stale copy here never overwrites them.
         const { id: _id, updated_at: _u, resume_text: _r, home_city: _hc, home_lat: _hl, home_lon: _ho, home_state: _hs, auto_reply: _ar, autopilot: _ap, follow_up: _fu, daily_summary: _ds, availability: _av, availability_slots: _as, interview_holds: _ih, notify_moments: _nm, health_state: _hst, health_notified_at: _hn, calls_enabled: _ce, calls_min_score: _cm, calls_targets_only: _ct,
           resume_file_path: _fp, resume_file_name: _fn, resume_word_count: _wc, resume_error: _re, ...rest } = p;
+        // Set by its own switch in the resume block; newer than the generated types.
+        delete (rest as Record<string, unknown>)["tailor_resumes"];
         const { error } = await supabase.from("profile").update(rest).eq("id", 1);
         if (error) throw error;
         // Every waiting question is gone through again with what was just saved.
@@ -207,6 +212,27 @@ function ResumeBlock({ initial }: { initial: Profile }) {
     initial.resume_file_name ? { k: "ok", t: `on file: ${initial.resume_file_name}` } : null,
   );
   const words = text.trim() ? text.trim().split(/\s+/).length : 0;
+  const qc = useQueryClient();
+  const read = useServerFn(afterResume);
+  const picker = useRef<HTMLInputElement>(null);
+  const [learned, setLearned] = useState<string | null>(null);
+  const [ownOnly, setOwnOnly] = useState((initial as unknown as { tailor_resumes?: boolean }).tailor_resumes === false);
+
+  // Once a resume is saved, what it says is read off it: the titles to
+  // search for and the jobs held, where those are still empty.
+  async function learn() {
+    try {
+      const r = await read();
+      if (r.titles || r.roles) {
+        setLearned(`read from your resume: ${[r.titles ? `${r.titles} job titles to search for` : "", r.roles ? `${r.roles} past jobs for your experience` : ""].filter(Boolean).join(" and ")}. check them below.`);
+        void qc.invalidateQueries({ queryKey: ["settings"] });
+        void qc.invalidateQueries({ queryKey: ["experience"] });
+        void qc.invalidateQueries({ queryKey: ["start"] });
+      }
+    } catch {
+      /* reading it is a convenience; the resume is saved either way */
+    }
+  }
 
   async function upload(f: File) {
     setFile({ k: "busy", t: `reading ${f.name}…` });
@@ -229,6 +255,7 @@ function ResumeBlock({ initial }: { initial: Profile }) {
       if (error) throw error;
       setText(extracted);
       setFile({ k: "ok", t: `saved ${f.name} · ${wc} words` });
+      void learn();
     } catch (e) {
       setFile({ k: "err", t: (e as Error).message });
     }
@@ -236,12 +263,24 @@ function ResumeBlock({ initial }: { initial: Profile }) {
 
   return (
     <Block title="resume">
-      <label className="block space-y-1 text-xs">
-        <span className="text-muted-foreground">upload your resume (.pdf, .docx or .txt)</span>
-        <input type="file" accept=".pdf,.docx,.txt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain"
-          className="block text-xs" onChange={(e) => { const f = e.target.files?.[0]; if (f) void upload(f); e.target.value = ""; }} />
-      </label>
+      <div className="flex flex-wrap items-center gap-3 text-xs">
+        <Btn variant="primary" className="px-4 py-2" onClick={() => picker.current?.click()}>UPLOAD RESUME</Btn>
+        <span className="text-muted-foreground">.pdf, .docx or .txt — or paste it into the box below</span>
+        <input ref={picker} type="file" hidden accept=".pdf,.docx,.txt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain"
+          onChange={(e) => { const f = e.target.files?.[0]; if (f) void upload(f); e.target.value = ""; }} />
+      </div>
       {file ? <div className={`text-xs ${file.k === "ok" ? "text-success" : file.k === "err" ? "text-destructive" : "text-muted-foreground"}`}>{file.t}</div> : null}
+      {learned ? <div className="text-xs text-success">{learned}</div> : null}
+      <label className="flex items-start gap-2 text-xs">
+        <input type="checkbox" className="mt-0.5" checked={ownOnly} onChange={async (e) => {
+          const v = e.target.checked;
+          setOwnOnly(v);
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const { error } = await (supabase.from("profile") as any).update({ tailor_resumes: !v }).eq("id", 1);
+          if (error) setOwnOnly(!v);
+        }} />
+        <span>send my own resume exactly as uploaded<span className="block text-muted-foreground">off (the default): a resume is written for each posting from yours, in the employer's own wording for what you have done. on: nothing is rewritten and your uploaded file is what every employer gets.</span></span>
+      </label>
       <textarea
         rows={20}
         className={`${inputCls} font-mono`}
@@ -258,8 +297,12 @@ function ResumeBlock({ initial }: { initial: Profile }) {
       <div className="text-xs text-muted-foreground">{words} words · this exact text is what gets rewritten for each job. paste your full resume.</div>
       {!text.trim() ? <div className="text-xs text-warning">no resume — scoring and tailoring will not run.</div> : null}
       <SaveLine onSave={async () => {
-        const { error } = await supabase.from("profile").update({ resume_text: text, resume_word_count: words }).eq("id", 1);
+        // Pasted text is tidied the same way an uploaded file's is.
+        const tidy = cleanResumeText(text);
+        const { error } = await supabase.from("profile").update({ resume_text: tidy, resume_word_count: tidy.split(/\s+/).filter(Boolean).length }).eq("id", 1);
         if (error) throw error;
+        setText(tidy);
+        void learn();
       }} />
     </Block>
   );
@@ -380,6 +423,8 @@ function Tags({ value, onChange, placeholder }: { value: string[]; onChange: (v:
 const SOURCES = ["greenhouse", "lever", "ashby", "workday", "smartrecruiters", "remotive", "remoteok", "workable", "usajobs"];
 
 function SearchBlock({ initial, profile }: { initial: SearchConfig; profile: Profile }) {
+  const eligible = useServerFn(addEligibleTitles);
+  const [eligibleNote, setEligible] = useState<string | null>(null);
   const qc = useQueryClient();
   const [s, setS] = useState<SearchConfig>(initial);
   const [homeCity, setHomeCity] = useState(profile.home_city ?? "");
@@ -395,6 +440,16 @@ function SearchBlock({ initial, profile }: { initial: SearchConfig; profile: Pro
     <Block title="search">
       <Field label="job titles to search" note="leave empty to let scoring judge everything — it costs more AI quota.">
         <Tags value={titles} onChange={(v) => set("titles", v)} placeholder="e.g. customer success, account manager" />
+        <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
+          <Btn onClick={async () => {
+            setEligible("reading your resume…");
+            const r = await eligible().catch(() => ({ ok: false as const, message: "Could not read the resume just now." }));
+            if (!r.ok) return setEligible(r.message);
+            set("titles", r.titles);
+            setEligible(r.added ? `added ${r.added} roles your resume shows you could be hired for. remove any you do not want.` : "every role your resume shows is already on the list.");
+          }}>+ ADD ELIGIBLE ROLES</Btn>
+          <span className="text-muted-foreground">{eligibleNote ?? "reads your resume and adds every role you could be hired for"}</span>
+        </div>
       </Field>
       <Field label="home city"><input className={inputCls} placeholder="e.g. Princeton, NJ" value={homeCity} onChange={(e) => setHomeCity(e.target.value)} /></Field>
       <Field label={`search radius: ${radius === 0 ? "no limit" : `${radius} mi`}`} note={`${stats.data?.within_25mi ?? 0} jobs within 25 mi · ${stats.data?.within_40mi ?? 0} within 40 mi · 0 means no distance limit`}>
@@ -493,7 +548,7 @@ function CompaniesBlock() {
 
   return (
     <Block title={`companies (${q.data?.length ?? 0})`}>
-      <LargeEmployerImport />
+      <LargeEmployerImport canManage={(Route.useRouteContext() as { access?: string }).access === "owner"} />
       {err ? <ErrorLine error={err} /> : null}
       {q.isLoading ? <Cursor /> : q.error ? <ErrorLine error={q.error} /> : (
         <div className="divide-y divide-border border border-border text-xs">

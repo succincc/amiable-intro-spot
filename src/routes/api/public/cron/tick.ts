@@ -107,6 +107,9 @@ async function tick() {
     const scope = await import("@/lib/scope.server");
     forUser = scope.forUser;
     people = await scope.everyone(everybody);
+    // Whatever the shared list of employers has gained is copied into each
+    // person's own list of boards to read. Cheap, and quiet when nothing is new.
+    if (people.length > 1) await everybody.rpc("catalogue_sync").then(() => undefined, () => undefined);
   } catch (e) {
     return { ok: false, error: `could not tell whose turn it is: ${String((e as Error)?.message ?? e).slice(0, 80)}` };
   }

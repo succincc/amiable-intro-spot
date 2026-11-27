@@ -33,15 +33,25 @@ export function perPerson(onConflict: string | undefined): string | undefined {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any;
 
+/**
+ * The list of employers being looked into is one list for everybody, kept
+ * under the owner. Server code written for one person reads and adds to it
+ * as if it were its own; it is always the shared one that is meant.
+ */
+const SHARED_LIST = new Set(["company_candidates"]);
+let sharedUnder: string | null = null;
+
 /** The client, limited to one person. Anything not about a person's own rows is the client's own. */
-export function forUser(admin: Any, uid: string): Any {
-  if (!isUserId(uid)) throw new Error("no person to work for");
-  const stamp = (v: Any) => (Array.isArray(v) ? v.map((r) => ({ ...r, user_id: uid })) : { ...v, user_id: uid });
+export function forUser(admin: Any, person: string): Any {
+  if (!isUserId(person)) throw new Error("no person to work for");
+  const stampFor = (uid: string) => (v: Any) => (Array.isArray(v) ? v.map((r) => ({ ...r, user_id: uid })) : { ...v, user_id: uid });
   return new Proxy(admin, {
     get(target, prop, receiver) {
       if (prop === "from") {
         return (table: string) => {
           const q = target.from(table);
+          // eslint-disable-next-line @typescript-eslint/no-shadow
+          const uid = SHARED_LIST.has(table) && sharedUnder ? sharedUnder : person;
           if (!OWN_TABLES.has(table)) {
             // A view answers with everybody's rows to this key, and has no
             // column to limit it by. Nothing on the server should read one.
@@ -50,14 +60,14 @@ export function forUser(admin: Any, uid: string): Any {
           }
           return {
             select: (...a: Any[]) => q.select(...a).eq("user_id", uid),
-            insert: (v: Any, o?: Any) => q.insert(stamp(v), o),
-            upsert: (v: Any, o?: Any) => q.upsert(stamp(v), o ? { ...o, onConflict: perPerson(o.onConflict) } : o),
+            insert: (v: Any, o?: Any) => q.insert(stampFor(uid)(v), o),
+            upsert: (v: Any, o?: Any) => q.upsert(stampFor(uid)(v), o ? { ...o, onConflict: perPerson(o.onConflict) } : o),
             update: (v: Any, o?: Any) => q.update(v, o).eq("user_id", uid),
             delete: (o?: Any) => q.delete(o).eq("user_id", uid),
           };
         };
       }
-      if (prop === "forUserId") return uid;
+      if (prop === "forUserId") return person;
       const v = Reflect.get(target, prop, receiver);
       return typeof v === "function" ? v.bind(target) : v;
     },
@@ -67,7 +77,9 @@ export function forUser(admin: Any, uid: string): Any {
 /** The owner's id: who everything belonged to before there was anyone else. */
 export async function ownerId(admin: Any): Promise<string | null> {
   const { data } = await admin.from("app_owner").select("user_id").limit(1).maybeSingle();
-  return isUserId(data?.user_id) ? data.user_id : null;
+  const id = isUserId(data?.user_id) ? data.user_id : null;
+  if (id) sharedUnder = id;
+  return id;
 }
 
 /**

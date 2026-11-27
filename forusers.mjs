@@ -22,6 +22,9 @@ const SUPABASE_URL = process.env.SUPABASE_URL;
 const ANON_KEY = process.env.SUPABASE_ANON_KEY;
 const [script, ...args] = process.argv.slice(2);
 
+/** Jobs that build the shared list of employers: run for the owner only. */
+export const ONE_LIST = new Set(["resolve.mjs", "indexes.mjs", "crawl.mjs", "nearby.mjs", "feeds.mjs"]);
+
 /** Who to run for, after the owner: approved people whose workspace exists. */
 export async function others(fetchImpl = fetch) {
   if (!SUPABASE_URL || !ANON_KEY || !process.env.APPLYPILOT_EMAIL || !process.env.APPLYPILOT_PASSWORD) return [];
@@ -65,7 +68,9 @@ if (process.env.FORUSERS_IMPORT_ONLY !== "1") {
 
   // The owner's round first, as it has always run.
   const first = run(null);
-  const rest = await others();
+  // Finding employers and working out which hiring system each is on fills
+  // one list that everybody reads. It is done once, not once per person.
+  const rest = ONE_LIST.has(script) ? [] : await others();
   let failed = 0;
   for (let i = 0; i < rest.length; i++) {
     console.log(`\n==== person ${i + 2} of ${rest.length + 1} ====`);

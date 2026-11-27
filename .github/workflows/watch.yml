@@ -119,7 +119,7 @@ jobs:
           boards.yml|6|apply=true
           usajobs.yml|12|apply=true
           phones.yml|6|apply=true
-          resolve.yml|24|apply=true,max=400
+          resolve.yml|6|apply=true,max=500
           indexes.yml|720|apply=true
           crawl.yml|24|apply=true
           nearby.yml|168|apply=true

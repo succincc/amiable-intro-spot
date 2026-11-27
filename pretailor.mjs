@@ -133,6 +133,10 @@ if (process.env.PRETAILOR_IMPORT_ONLY !== "1") {
   if (own) console.log("writing on this person's own key.");
 
   const [profile] = (await db("profile?id=eq.1&select=*")) ?? [];
+  if (profile?.tailor_resumes === false) {
+    console.log("this person sends their own resume as it is; nothing is written.");
+    process.exit(0);
+  }
   // Nothing printed from here can carry the owner's own details.
   try {
     guardLogs(profile, structureResume(profile?.resume_text, profile ?? {}));

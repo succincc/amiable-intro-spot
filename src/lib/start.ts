@@ -12,6 +12,8 @@ export function setupSteps(s: {
   profile: Record<string, unknown> | null | undefined;
   titles: unknown;
   mailLastRun: string | null | undefined;
+  /** When the mailbox was connected, where it has been. */
+  mailConnectedAt?: string | null | undefined;
   waiting: number;
   /** Postings scored in the middle band, held for the owner's yes. */
   reviewing?: number;
@@ -20,11 +22,14 @@ export function setupSteps(s: {
   const p = s.profile ?? {};
   const has = (k: string) => String(p[k] ?? "").trim().length > 0;
   const mailAge = s.mailLastRun ? s.now.getTime() - new Date(s.mailLastRun).getTime() : Infinity;
+  const justConnected = Boolean(s.mailConnectedAt) && s.now.getTime() - new Date(String(s.mailConnectedAt)).getTime() < 90 * 60_000;
   const windows = Array.isArray(p["availability_slots"])
     ? (p["availability_slots"] as Array<{ day?: string }>).filter((w) => String(w?.day ?? "") >= s.now.toISOString().slice(0, 10)).length
     : 0;
   return [
-    { key: "gmail", label: "gmail connected and being read", done: mailAge < 3 * 3_600_000, required: true, hint: "emailed codes, receipts and replies are read from it", to: "/settings" },
+    // A mailbox connected in the last hour and a half has not had its first
+    // reading yet; that is a mailbox connected, not one still to connect.
+    { key: "gmail", label: justConnected && mailAge === Infinity ? "gmail connected; its first reading is on the way" : "gmail connected and being read", done: mailAge < 3 * 3_600_000 || justConnected, required: true, hint: s.mailConnectedAt ? "connected, but not read in the last three hours; it is read every half hour once rounds are running" : "emailed codes, receipts and replies are read from it", to: "/settings" },
     { key: "resume", label: "resume on file", done: String(p["resume_text"] ?? "").trim().length > 200, required: true, hint: "every application is written from it", to: "/settings" },
     { key: "contact", label: "name, email and phone", done: has("full_name") && has("email") && has("phone"), required: true, hint: "the first three boxes on every form", to: "/settings" },
     { key: "titles", label: "what to look for", done: Array.isArray(s.titles) && s.titles.length > 0, required: true, hint: "at least one job title to search", to: "/settings" },

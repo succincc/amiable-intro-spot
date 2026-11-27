@@ -18,6 +18,9 @@
 // person "First Name".
 // ============================================================================
 
+import fs from "node:fs";
+import os from "node:os";
+import nodePath from "node:path";
 import crypto from "node:crypto";
 import { execSync } from "node:child_process";
 import { AsyncLocalStorage } from "node:async_hooks";
@@ -7356,9 +7359,31 @@ async function attachResume(context, page, form, profile, job) {
   // headings and no bullet marks; printed as it stands it is a column of
   // loose lines. When there is no resume written for this job it is put
   // into the standard layout first.
-  const resumeText = job.tailored_resume || standardResume(profile.resume_text, profile);
+  // Someone who has asked for their own resume to be sent as it is gets
+  // exactly that: the file they uploaded, untouched. Where it cannot be
+  // fetched, their own text in the standard layout — still nothing rewritten.
+  const ownOnly = profile.tailor_resumes === false;
+  if (ownOnly) {
+    const own = await ownResumeFile(profile).catch(() => null);
+    if (own) {
+      const put = await fileInputs[0].setInputFiles(own).then(() => true).catch((e) => String(e?.message ?? e).slice(0, 80));
+      if (put === true) {
+        await page.waitForTimeout(3000);
+        return { wanted: true, note: "resume attached" };
+      }
+    }
+  }
+  const resumeText = (ownOnly ? null : job.tailored_resume) || standardResume(profile.resume_text, profile);
   if (!resumeText) {
     return { wanted: true, note: "form wants a file but the profile has no resume text" };
+  }
+  if (ownOnly) {
+    const plain = await buildResumePdf(context, resumeText, profile, job.id);
+    if (!plain) return { wanted: true, note: "resume PDF could not be built" };
+    const put = await fileInputs[0].setInputFiles(plain).then(() => true).catch((e) => String(e?.message ?? e).slice(0, 80));
+    if (put !== true) return { wanted: true, note: `attaching the resume failed: ${put}` };
+    await page.waitForTimeout(3000);
+    return { wanted: true, note: "resume attached" };
   }
 
   // Say what this resume looks like to a keyword screener, and close the
@@ -7830,7 +7855,33 @@ async function allRoles() {
  * and the queue is in the hundreds, so the general resume went in instead.
  */
 const TAILORED = { already: 0, written: 0, arranged: 0, general: 0 };
+
+/**
+ * The person's own uploaded resume, fetched from their folder of the private
+ * store and kept for the run. Null when there is none, or it is not a kind
+ * of file a form takes.
+ */
+let OWN_FILE;
+async function ownResumeFile(profile) {
+  if (OWN_FILE !== undefined) return OWN_FILE;
+  OWN_FILE = null;
+  const path = String(profile.resume_file_path ?? "");
+  const name = String(profile.resume_file_name ?? "").replace(/[^\w.-]+/g, "_");
+  if (!path || !/\.(pdf|docx?)$/i.test(name)) return null;
+  const res = await fetch(`${SUPABASE_URL}/storage/v1/object/artifacts/${path.split("/").map(encodeURIComponent).join("/")}`, {
+    headers: { apikey: ANON_KEY, ...ACT_AS, Authorization: `Bearer ${ACCESS}` },
+  });
+  if (!res.ok) return null;
+  const dir = fs.mkdtempSync(nodePath.join(os.tmpdir(), "own-resume-"));
+  const file = nodePath.join(dir, name);
+  fs.writeFileSync(file, Buffer.from(await res.arrayBuffer()));
+  OWN_FILE = file;
+  return file;
+}
+
 async function ensureTailored(job, profile) {
+  // Their own resume, as it is: nothing is written for the posting.
+  if (profile.tailor_resumes === false) { TAILORED.general++; return true; }
   if (job.tailored_resume) { TAILORED.already++; return true; }
   const made = await tailorResume({
     job,

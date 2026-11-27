@@ -822,6 +822,18 @@ if (process.env.RESOLVE_IMPORT_ONLY !== "1") {
       if (named && !named.other) {
         seen = { feeds: [named], others: new Map(), hosts: new Map(), pages: 0, final: c.careers_url, blocked: null };
       }
+      // The quick way first: the hiring systems the applier already works
+      // on are asked for this employer by name. That is a handful of plain
+      // requests against a browser visit of a minute or more, and for a
+      // large employer it is usually enough. Only what it does not settle is
+      // looked at with the browser.
+      if (!seen) {
+        const quick = await bestFeed(await askFeedsByName(c.name, c.careers_url).catch(() => []), c.name).catch(() => null);
+        if (quick) {
+          tally.quick = (tally.quick ?? 0) + 1;
+          seen = { feeds: [quick.feed], others: new Map(), hosts: new Map(), pages: 0, final: c.careers_url, blocked: null };
+        }
+      }
       try {
         seen ??= await Promise.race([
           look(browser, c.name, c.careers_url),
