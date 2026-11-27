@@ -5194,6 +5194,12 @@ const NEXT_SELECTORS = [
   'button:has-text("Save and continue")',
   'button:has-text("Continue")',
   'button:has-text("Next")',
+  // ADP draws its buttons as components of its own: the way on from its
+  // first screen is one of these, and was not seen as a button at all.
+  'sdf-button:has-text("Continue")',
+  'sdf-button:has-text("Next")',
+  '[role=button]:has-text("Continue")',
+  '[role=button]:has-text("Next")',
 ];
 
 // "Continue with LinkedIn" is not the next page of the form, and clicking it
