@@ -41,10 +41,18 @@ export function reply(call: Call, heard: string, job: CallJob, me: Me): Call {
   const p = pitchFor(job, me);
   const next: Call = { ...call, lines: [...call.lines, { who: "them", said: heard }] };
   const say = (said: string, patch: Partial<Call> = {}): Call => ({ ...next, ...patch, lines: [...next.lines, { who: "assistant", said }] });
+  // The case is the owner's own, in the first person, carried as a message:
+  // said to be from them, and said to be passed on.
+  const own = p.pitch
+    .replace(/^Hi, this is [^.]+\. /, "")
+    .replace(/^I applied for [^.]*? and wanted to put a voice to the application\. /, "")
+    .replace(/^The short version of why I fit: /, "")
+    .replace(/\bI can start soon and I'd welcome\b/, "I can start soon and I'd really welcome")
+    .trim();
   const pitch = () =>
-    `Thank you for taking the call. ${name} applied for ${job.title ? `the ${job.title} role` : "the role"}${job.location ? ` at your ${String(job.location).split(",")[0]} location` : ""}. ` +
-    p.pitch.replace(/^Hi, this is [^.]+\. /, "").replace(/\bI can start soon and I'd welcome\b/, `${name} can start soon and would welcome`).replace(/\bI applied\b/g, `${name} applied`).replace(/\bwhy I fit\b/, `why ${name} fits`) +
-    ` Would there be a good time for ${name} to come in and talk?`;
+    `Thank you for taking the call. ${name} applied for ${job.title ? `the ${job.title} role` : "the role"}${job.location ? ` at your ${String(job.location).split(",")[0]} location` : ""} ` +
+    `and asked me to pass this on in ${name}'s own words: "${own.replace(/^./, (c) => c.toUpperCase())}" ` +
+    `Would there be a good time for ${name} to come in and talk?`;
 
   if (call.stage === "done") return next;
 

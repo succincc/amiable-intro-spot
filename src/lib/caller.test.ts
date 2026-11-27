@@ -22,7 +22,11 @@ describe("the calling assistant", () => {
     c = reply(c, "Hi, this is the manager.", job, me);
     expect(c.stage).toBe("manager");
     expect(c.lines.at(-1)?.said).toContain("Helped customers on a busy sales floor");
-    expect(c.lines.at(-1)?.said).not.toMatch(/\bI applied\b|\bwhy I fit\b/);
+    // The owner's words are quoted and attributed; outside the quote the
+    // assistant never speaks as the applicant.
+    const said = c.lines.at(-1)?.said ?? "";
+    expect(said).toMatch(/asked me to pass this on in Sam's own words: "/);
+    expect(said.replace(/"[^"]*"/, "")).not.toMatch(/\bI (applied|helped|can start)\b/);
   });
   it("answers facts from the profile and leaves the person's own questions to the person", () => {
     let c = reply(reply(start(job, me), "Speaking.", job, me), "When can he start?", job, me);
