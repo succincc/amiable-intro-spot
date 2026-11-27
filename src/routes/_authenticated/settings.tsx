@@ -1,3 +1,4 @@
+import { CallingExtra } from "@/components/mission-control/calling-extra";
 import { useEffect, useState, type ReactNode } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -105,6 +106,9 @@ function Settings() {
       <SearchBlock initial={q.data.search} profile={q.data.profile} />
       <CompaniesBlock />
       <EmailBlock initial={q.data.profile} open={gmailBanner !== null} />
+      <Block title="calling (optional extra)">
+        <CallingExtra initial={q.data.profile as unknown as Record<string, unknown>} />
+      </Block>
     </div>
   );
 }
@@ -161,7 +165,7 @@ function ProfileBlock({ initial }: { initial: Profile }) {
       </div>
       <SaveLine onSave={async () => {
         // Fields owned by other sections are left out so a stale copy here never overwrites them.
-        const { id: _id, updated_at: _u, resume_text: _r, home_city: _hc, home_lat: _hl, home_lon: _ho, home_state: _hs, auto_reply: _ar, autopilot: _ap, follow_up: _fu, daily_summary: _ds, availability: _av, availability_slots: _as, interview_holds: _ih, notify_moments: _nm, health_state: _hst, health_notified_at: _hn,
+        const { id: _id, updated_at: _u, resume_text: _r, home_city: _hc, home_lat: _hl, home_lon: _ho, home_state: _hs, auto_reply: _ar, autopilot: _ap, follow_up: _fu, daily_summary: _ds, availability: _av, availability_slots: _as, interview_holds: _ih, notify_moments: _nm, health_state: _hst, health_notified_at: _hn, calls_enabled: _ce, calls_min_score: _cm, calls_targets_only: _ct,
           resume_file_path: _fp, resume_file_name: _fn, resume_word_count: _wc, resume_error: _re, ...rest } = p;
         const { error } = await supabase.from("profile").update(rest).eq("id", 1);
         if (error) throw error;

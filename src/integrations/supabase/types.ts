@@ -636,6 +636,9 @@ export type Database = {
           linkedin_url: string | null
           needs_sponsorship: string | null
           notify_moments: boolean
+          calls_enabled: boolean
+          calls_min_score: number
+          calls_targets_only: boolean
           over_18: string | null
           phone: string | null
           portfolio_url: string | null
@@ -690,6 +693,9 @@ export type Database = {
           linkedin_url?: string | null
           needs_sponsorship?: string | null
           notify_moments?: boolean
+          calls_enabled?: boolean
+          calls_min_score?: number
+          calls_targets_only?: boolean
           over_18?: string | null
           phone?: string | null
           portfolio_url?: string | null
@@ -744,6 +750,9 @@ export type Database = {
           linkedin_url?: string | null
           needs_sponsorship?: string | null
           notify_moments?: boolean
+          calls_enabled?: boolean
+          calls_min_score?: number
+          calls_targets_only?: boolean
           over_18?: string | null
           phone?: string | null
           portfolio_url?: string | null
