@@ -140,6 +140,19 @@ export const Route = createFileRoute("/api/public/email/outreach")({
             return Response.json({ ok: false, error: "a resume file is required" }, { status: 400 });
           }
 
+          // An address that has already come back undelivered is not written
+          // to again: the employer's site still prints it, but nobody is
+          // there, and every bounce counts against the owner's own mailbox.
+          const { fetchMessages } = await import("@/lib/gmail.server");
+          const bounced = await fetchMessages(
+            supabaseAdmin,
+            `in:anywhere newer_than:120d from:mailer-daemon "${to.replace(/"/g, "")}"`,
+            1,
+          ).catch(() => []);
+          if (bounced.length) {
+            return Response.json({ ok: false, state: "skipped", error: "mail to this address came back undelivered before" });
+          }
+
           const { sendWithAttachment } = await import("@/lib/gmail.server");
           const sent = await sendWithAttachment(supabaseAdmin, {
             to,
