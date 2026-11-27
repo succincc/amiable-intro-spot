@@ -539,6 +539,37 @@ export async function runDiscover(supabase: any, opts: { since?: string | undefi
         );
       });
 
+    // Postings are judged as they arrive, employer by employer, and only the
+    // ones that pass are held. A round used to hold every posting it read —
+    // nine thousand, each with its whole description — until all the reading
+    // was done, and a new person's rounds were ended by the host partway
+    // through the reading. What is turned away is counted and let go at once.
+    let foundSoFar = 0;
+    const judged = new Set<string>();
+    const take = (jobs: Job[]) => {
+      foundSoFar += jobs.length;
+      for (const j of jobs) {
+        if (!j.url || judged.has(j.url)) continue;
+        const verdict = keep(j, cfg);
+        if (!verdict.ok) {
+          judged.add(j.url);
+          stats.filtered++;
+          bump((verdict.why ?? "filtered").replace(/:.*$/, "").trim());
+          continue;
+        }
+        if (j.posted_at) {
+          const up = new Date(j.posted_at).getTime();
+          if (Number.isFinite(up) && up < Date.now() - FRESH_DAYS * 86_400_000) {
+            judged.add(j.url);
+            stats.filtered++;
+            bump(`posted more than ${FRESH_DAYS} days ago`);
+            continue;
+          }
+        }
+        all.push(j);
+      }
+    };
+
     const list = (companies ?? []).filter((c: any) => enabled.includes(c.ats));
     const BATCH = 8;
     // How many employers this run did not get to. Reported, so whoever called
@@ -557,12 +588,18 @@ export async function runDiscover(supabase: any, opts: { since?: string | undefi
         break;
       }
       const slice = list.slice(i, i + BATCH);
+      // Where this round has got to, written down before each step of it: a
+      // round the host ends leaves no error behind, only this.
+      await supabase
+        .from("runs")
+        .update({ message: `reading ${slice.map((c: any) => `${c.ats}#${c.id}`).join(" ")} (after ${i}, holding ${all.length})` })
+        .eq("id", run!.id);
       const results = await Promise.allSettled(slice.map(pull));
       for (let idx = 0; idx < results.length; idx++) {
         const r = results[idx];
         const c = slice[idx];
         if (r.status === "fulfilled") {
-          all.push(...r.value);
+          take(r.value);
           bySource[c.ats] = (bySource[c.ats] ?? 0) + r.value.length;
           await supabase
             .from("companies")
@@ -600,14 +637,15 @@ export async function runDiscover(supabase: any, opts: { since?: string | undefi
     gres.forEach((r, i) => {
       const name = globals[i][0];
       if (r.status === "fulfilled") {
-        all.push(...r.value);
+        take(r.value);
         bySource[name] = (bySource[name] ?? 0) + r.value.length;
       } else {
         stats.errors++;
         problems.push(`${name} — ${(r.reason as Error)?.message ?? r.reason}`);
       }
     });
-    stats.found = all.length;
+    stats.found = foundSoFar;
+    await supabase.from("runs").update({ message: `judging ${all.length} of ${foundSoFar}` }).eq("id", run!.id);
     const seen = new Set<string>();
     const rows: any[] = [];
     for (const j of all) {
@@ -678,6 +716,7 @@ export async function runDiscover(supabase: any, opts: { since?: string | undefi
     // last — only on postings that already survived every other filter — and
     // every result is cached forever.
     const radius = Number(cfg.radius_miles ?? 0);
+    await supabase.from("runs").update({ message: `measuring ${rows.length}` }).eq("id", run!.id);
     if (radius > 0) {
       const { data: profile } = await supabase
         .from("profile")
