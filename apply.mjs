@@ -11821,7 +11821,10 @@ async function applyToJobOnce(context, job, profile, answers) {
             const wasPutBack = /plus-address/.test(String(job.last_error ?? ""));
             // What ADP offers a person who does have an account: looked at
             // once a run, by shape, and nothing pressed beyond the way in.
-            if (!ADP_SIGNED.has(job.id)) {
+            // ADP's sign-in asks for a code it says it has mailed; none reached
+            // the mailbox in an afternoon of asking. ADP_SIGNIN=1 turns the
+            // attempt back on.
+            if (process.env.ADP_SIGNIN === "1" && !ADP_SIGNED.has(job.id)) {
               ADP_SIGNED.add(job.id);
               const lay = (pg) =>
                 pg
@@ -11993,7 +11996,12 @@ async function applyToJobOnce(context, job, profile, answers) {
             .catch((e) => ({ failed: String(e?.message ?? e).slice(0, 60) }));
           console.log(`    UKG posting, as a visitor sees it: ${JSON.stringify(seen)}`);
           const wall = seen?.signIn === true && seen?.apply === false;
-          if (wall && profile.create_accounts === true && !UKG_SIGNED.has(job.id)) {
+          // Tried on two boards, eight times: the sign-up and its registration page
+          // both go through without complaint, and the board then holds no such
+          // account — no confirmation mail, no reset mail, the sign-in refused.
+          // It is left to the owner's own browser until a board is seen to keep
+          // one; UKG_ACCOUNTS=1 turns the attempt back on.
+          if (wall && process.env.UKG_ACCOUNTS === "1" && profile.create_accounts === true && !UKG_SIGNED.has(job.id)) {
             UKG_SIGNED.add(job.id);
             const account = await ukgAccount(page, form, profile, job).catch((e) => ({ ok: false, reason: String(e?.message ?? e).slice(0, 120) }));
             console.log(`    UKG account: ${account.ok ? "in" : account.reason}`);
