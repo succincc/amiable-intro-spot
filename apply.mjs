@@ -9423,7 +9423,24 @@ async function applyToJobOnce(context, job, profile, answers) {
             ((await el.getAttribute("role").catch(() => null)) === "combobox" && selfIdTopic(label) && !/\b(pronoun)/i.test(label)
               ? "Prefer not to answer"
               : null) ??
-            ((await el.getAttribute("role").catch(() => null)) === "combobox" ? listProbe(label, profile) : null);
+            ((await el.getAttribute("role").catch(() => null)) === "combobox" ? listProbe(label, profile) : null) ??
+            // A list with a question over it and nothing on file: opened,
+            // read, and closed again, and answered as a row of buttons with
+            // the same question would be — the line the resume's own words
+            // back, or the list's own "none". "Which of the following
+            // repairs have you done hands-on?" stopped four of one
+            // employer's forms. Never for a question about the person.
+            (await (async () => {
+              if ((await el.getAttribute("role").catch(() => null)) !== "combobox") return null;
+              if (NEVER_INFER.test(label) || selfIdTopic(label)) return null;
+              if (!/\b(which|what|where)\b[^?]{3,}\?|\ball that apply\b|\bwhich of the following\b/i.test(label)) return null;
+              await el.click({ force: true, timeout: 3000 }).catch(() => {});
+              const seen = await popupOptions(form, el).catch(() => []);
+              await page.keyboard.press("Escape").catch(() => {});
+              const texts = seen.map((o) => o.text).filter(Boolean);
+              if (texts.length < 2 || texts.length > 40) return null;
+              return evidenceOption(label.replace(/\s+question_\d+.*$/, ""), texts, job?.tailored_resume || profile?.resume_text);
+            })());
           if (want) {
             // A Workday "search" field is a combobox, not a text box.
             //
