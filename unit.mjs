@@ -40,6 +40,10 @@ process.env.BOARDS_IMPORT_ONLY = "1";
 const boards = await import("./boards.mjs");
 process.env.MEASURE_IMPORT_ONLY = "1";
 const measure = await import("./measure.mjs");
+const mbSel = await import("./major-boards-selectors.mjs");
+const mbEng = await import("./major-boards-engine.mjs");
+process.env.MAJOR_BOARDS_IMPORT_ONLY = "1";
+const mbDisc = await import("./major-boards.mjs");
 
 let failed = 0;
 let passed = 0;
@@ -456,6 +460,15 @@ quiet.hideJob({ company: "ZQ" });
     check("cover: with no model, the composed letter", [made.by, made.text === letter], ["rules", true]);
   }
   check("quiet: nothing to strike out, nothing changed", quiet.scrub("plain line", [], null), "plain line");
+  check("major-boards: platform detection and canonical URLs", [
+    mbSel.detectBoardPlatform("https://www.linkedin.com/jobs/view/devops-0-downtime-4384228814/"),
+    mbSel.normalizeBoardUrl("linkedin", "https://www.linkedin.com/jobs/view/devops-0-downtime-4384228814/?ref=1"),
+    mbSel.normalizeBoardUrl("indeed", "https://www.indeed.com/rc/clk?jk=abcdef123456"),
+    mbSel.fuzzyMatchOption("bachelor", ["High School", "Bachelor's Degree"]),
+    mbSel.detectHumanVerification("linkedin", "https://www.linkedin.com/checkpoint/challenge/1", "", "", false).help_reason,
+    mbEng.normalizeSessionCookies([{ name: "li_at", value: "x", domain: ".linkedin.com", sameSite: "no_restriction" }], "linkedin").length,
+    mbDisc.filterBoardPostings([{ title: "Account Manager", company: "Acme", url: "https://www.linkedin.com/jobs/view/1111111/", remote: false }], { titles: ["Account Manager"] }).length,
+  ], ["linkedin", "https://www.linkedin.com/jobs/view/4384228814/", "https://www.indeed.com/viewjob?jk=abcdef123456", "Bachelor's Degree", "verification_required", 1, 1]);
 }
 
 console.log(failed ? `unit: ${failed} failed, ${passed} passed.` : `unit: all ${passed} passed.`);

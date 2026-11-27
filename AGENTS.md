@@ -18,3 +18,4 @@
 - Scoring uses Gemini only when `GEMINI_API_KEY` is set, otherwise a free local keyword scorer — the user requires zero cost.
 - Applying happens only in the Chrome extension (`extension/`, packaged to `public/applypilot-extension.zip`); it signs in with the panel's email/password because RLS allows `authenticated` only. Re-zip after editing it.
 - Cloud applying runs in GitHub Actions (`apply.mjs` + `.github/workflows/apply.yml`), triggered by `runApplier` via GITHUB_TOKEN/GITHUB_REPO; it signs in with the panel email/password from repo secrets because no service key exists on Lovable Cloud.
+- LinkedIn, Indeed, and ZipRecruiter integrations live in `major-boards-selectors.mjs`, `major-boards-engine.mjs`, and `major-boards.mjs` (wired into `apply.mjs`, `watch.yml`, `apply.yml`, Settings, and Chrome extension cookie sync) so they reuse existing per-user `site_accounts` RLS, zero-cost AI/answer pipelines, and direct employer ATS delegation.

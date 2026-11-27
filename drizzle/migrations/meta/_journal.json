@@ -295,6 +295,13 @@
       "when": 1795786367366,
       "tag": "0041_backup_key",
       "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1795786781193,
+      "tag": "0042_major_boards_sessions_and_mode",
+      "breakpoints": true
     }
   ]
 }

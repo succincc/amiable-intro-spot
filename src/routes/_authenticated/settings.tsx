@@ -420,7 +420,7 @@ function Tags({ value, onChange, placeholder }: { value: string[]; onChange: (v:
 
 // arbeitnow was removed: a German job board has nothing to offer a search
 // measured in miles from New Jersey.
-const SOURCES = ["greenhouse", "lever", "ashby", "workday", "smartrecruiters", "remotive", "remoteok", "workable", "usajobs"];
+const SOURCES = ["greenhouse", "lever", "ashby", "workday", "smartrecruiters", "remotive", "remoteok", "workable", "usajobs", "linkedin", "indeed", "ziprecruiter"];
 
 function SearchBlock({ initial, profile }: { initial: SearchConfig; profile: Profile }) {
   const eligible = useServerFn(addEligibleTitles);
@@ -627,6 +627,7 @@ function ApplyingBlock({ initial }: { initial: Profile }) {
   const [host, setHost] = useState("");
   const [acctEmail, setAcctEmail] = useState(initial.email ?? "");
   const [acctPassword, setAcctPassword] = useState("");
+  const [sessionJson, setSessionJson] = useState("");
   const [acctBusy, setAcctBusy] = useState(false);
   const [acctMsg, setAcctMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
@@ -636,19 +637,31 @@ function ApplyingBlock({ initial }: { initial: Profile }) {
     let cleanHost = host.trim().replace(/^https?:\/\//i, "").split("/")[0] ?? "";
     cleanHost = cleanHost.toLowerCase();
     if (!cleanHost || !acctEmail.trim() || !acctPassword) {
-      setAcctMsg({ ok: false, text: "Host, email and password are all needed." });
-      return;
+      if (!cleanHost || !sessionJson.trim()) {
+        setAcctMsg({ ok: false, text: "Host plus either email/password or session cookies JSON are needed." });
+        return;
+      }
+    }
+    let parsedSession: unknown = undefined;
+    if (sessionJson.trim()) {
+      try {
+        parsedSession = JSON.parse(sessionJson.trim());
+      } catch {
+        setAcctMsg({ ok: false, text: "Session cookies must be valid JSON (array of cookies or { cookies: [...] })." });
+        return;
+      }
     }
     setAcctBusy(true);
     setAcctMsg(null);
     const { error } = await supabase.from("site_accounts").upsert(
       {
         host: cleanHost,
-        email: acctEmail.trim(),
+        email: acctEmail.trim() || initial.email || "",
         password: acctPassword,
         status: "active",
-        note: "added by hand",
+        note: parsedSession ? "session saved in settings" : "added by hand",
         last_used_at: null,
+        ...(parsedSession ? { session_state: parsedSession as never, session_updated_at: new Date().toISOString() } : {}),
       },
       { onConflict: "user_id,host" },
     );
@@ -658,6 +671,7 @@ function ApplyingBlock({ initial }: { initial: Profile }) {
       return;
     }
     setAcctPassword("");
+    setSessionJson("");
     setHost("");
     setAcctMsg({ ok: true, text: `Saved for ${cleanHost}. The applier will sign in with it.` });
     void qc.invalidateQueries({ queryKey: ["site-accounts"] });
@@ -668,7 +682,7 @@ function ApplyingBlock({ initial }: { initial: Profile }) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("site_accounts")
-        .select("host,email,password,status,note,created_at")
+        .select("host,email,password,status,note,created_at,session_updated_at")
         .order("created_at", { ascending: false });
       if (error) throw error;
       return data ?? [];
@@ -733,6 +747,7 @@ function ApplyingBlock({ initial }: { initial: Profile }) {
                 >
                   {a.status}
                   {a.note ? ` — ${a.note}` : ""}
+                  {a.session_updated_at ? " · session synced" : ""}
                 </div>
               </div>
             ))}
@@ -774,6 +789,13 @@ function ApplyingBlock({ initial }: { initial: Profile }) {
           placeholder="password you set"
           value={acctPassword}
           onChange={(e) => setAcctPassword(e.target.value)}
+        />
+        <textarea
+          className={`${inputCls} min-h-[56px]`}
+          placeholder="optional: session cookies JSON for linkedin.com, indeed.com, or ziprecruiter.com (or click Sync Board Sessions in the Chrome extension)"
+          value={sessionJson}
+          onChange={(e) => setSessionJson(e.target.value)}
+          spellCheck={false}
         />
         <Btn variant="primary" disabled={acctBusy} onClick={() => void saveAccount()}>
           {acctBusy ? "saving…" : "SAVE ACCOUNT"}

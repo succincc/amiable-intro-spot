@@ -506,6 +506,7 @@ export type Database = {
       jobs: {
         Row: {
           applied_at: string | null
+          apply_mode: string | null
           apply_url: string | null
           ats: string | null
           attempts: number | null
@@ -546,6 +547,7 @@ export type Database = {
         }
         Insert: {
           applied_at?: string | null
+          apply_mode?: string | null
           apply_url?: string | null
           ats?: string | null
           attempts?: number | null
@@ -586,6 +588,7 @@ export type Database = {
         }
         Update: {
           applied_at?: string | null
+          apply_mode?: string | null
           apply_url?: string | null
           ats?: string | null
           attempts?: number | null
@@ -1011,6 +1014,8 @@ export type Database = {
           last_used_at: string | null
           note: string | null
           password: string
+          session_state: Json | null
+          session_updated_at: string | null
           status: string
           user_id: string
         }
@@ -1023,6 +1028,8 @@ export type Database = {
           last_used_at?: string | null
           note?: string | null
           password: string
+          session_state?: Json | null
+          session_updated_at?: string | null
           status?: string
           user_id?: string
         }
@@ -1035,6 +1042,8 @@ export type Database = {
           last_used_at?: string | null
           note?: string | null
           password?: string
+          session_state?: Json | null
+          session_updated_at?: string | null
           status?: string
           user_id?: string
         }

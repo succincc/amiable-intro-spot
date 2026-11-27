@@ -36,6 +36,8 @@ import { schoolNameOnly, schoolOption } from "./school.mjs";
 import { fromProfile } from "./fromprofile.mjs";
 import { useOwnKey } from "./ownkey.mjs";
 import { isCoverLetter, writeCoverLetter } from "./coverletter.mjs";
+import { BOARD_HOSTS, applyStealth, detectBoardPlatform } from "./major-boards-selectors.mjs";
+import { applyBoardJob, restoreBoardSession } from "./major-boards-engine.mjs";
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const ANON_KEY = process.env.SUPABASE_ANON_KEY;
@@ -8379,6 +8381,83 @@ async function applyToJobOnce(context, job, profile, answers) {
     if (!FOLLOW_UP) {
       await readPosting(page, job);
       await ensureTailored(job, profile);
+    }
+
+    // LinkedIn, Indeed, and ZipRecruiter: restore saved browser session, run
+    // native Easy Apply / Indeed Apply / 1-Click Apply with truthful profile
+    // answers, or follow external employer links straight into our ATS engine.
+    const boardPlatform =
+      detectBoardPlatform(page.url()) ||
+      (["linkedin", "indeed", "ziprecruiter"].includes(String(job.ats || "").toLowerCase())
+        ? String(job.ats).toLowerCase()
+        : null);
+    if (boardPlatform && !FOLLOW_UP) {
+      const boardHost = BOARD_HOSTS[boardPlatform];
+      const acctRows = (await db(`site_accounts?host=ilike.*${encodeURIComponent(boardHost)}*&select=*`).catch(() => [])) ?? [];
+      const boardAccount = acctRows.find((r) => r.status !== "failed") ?? acctRows[0] ?? null;
+      await applyStealth(context);
+      if (boardAccount?.session_state) {
+        await restoreBoardSession(context, boardAccount.session_state, boardPlatform);
+      }
+      const resumeText = String(job.tailored_resume || profile.resume_text || "").trim();
+      let resumePath = null;
+      try {
+        const own = ownResumeFile(profile);
+        if (own && profile.tailor_resumes === false) resumePath = own;
+        else if (resumeText) resumePath = await buildResumePdf(context, resumeText, profile, job.id);
+      } catch {
+        resumePath = null;
+      }
+      let coverLetterPath = null;
+      try {
+        const letter = await coverLetterFor(job, profile);
+        if (letter) coverLetterPath = await buildLetterPdf(context, letter, profile, job.id);
+      } catch {
+        coverLetterPath = null;
+      }
+      const resolveAnswer = async (label, fieldType, options) => {
+        const direct = answerQuestion(label, profile) ?? lookupSaved(label) ?? fieldValue(label, profile);
+        if (direct !== null && direct !== undefined && String(direct).trim() !== "") return String(direct).trim();
+        if (Array.isArray(options) && options.length) {
+          const picked = await chooseOption(label, options, profile, job).catch(() => null);
+          if (picked) return String(picked).trim();
+        }
+        const gen = await generateAnswer(label, profile, job, fieldType).catch(() => null);
+        return gen ? String(gen).trim() : null;
+      };
+      const boardRes = await applyBoardJob(page, boardPlatform, job, {
+        dryRun: DRY_RUN,
+        account: boardAccount,
+        resumePath,
+        coverLetterPath,
+        resolveAnswer,
+        waitForCode: (host, co) => waitForVerificationCode(host, co, 6, 10_000),
+        onSessionUpdated: async (fresh) => {
+          await db("site_accounts?on_conflict=user_id,host", {
+            method: "POST",
+            headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+            body: JSON.stringify({
+              host: boardAccount?.host || boardHost,
+              email: boardAccount?.email || profile.email || "",
+              password: boardAccount?.password || "",
+              status: "active",
+              session_state: fresh,
+              session_updated_at: new Date().toISOString(),
+            }),
+          }).catch(() => {});
+        },
+      });
+      if (boardRes.status === "delegate_external" && boardRes.page) {
+        console.log(`    ${boardPlatform}: redirected to direct employer ATS, continuing with ATS engine`);
+        page = boardRes.page;
+        await page.waitForLoadState("domcontentloaded", { timeout: 25_000 }).catch(() => {});
+        await readPosting(page, job);
+      } else {
+        if (Array.isArray(boardRes.unknown) && boardRes.unknown.length) {
+          await recordUnknowns(boardRes.unknown).catch(() => {});
+        }
+        return { ...boardRes, filled: boardRes.filled ?? filled };
+      }
     }
 
     // A SuccessFactors posting's Apply button opens a small menu first —

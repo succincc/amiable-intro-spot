@@ -97,5 +97,17 @@ $("stop").onclick = () => {
   });
 };
 
+$("sync").onclick = () => {
+  say("Syncing LinkedIn, Indeed, and ZipRecruiter sessions…", "warn");
+  chrome.runtime.sendMessage({ type: "SYNC_SESSIONS" }, (res) => {
+    if (!res?.ok) { say(`Sync failed: ${res?.error ?? "unknown"}`, "err"); return; }
+    if (!res.synced?.length) {
+      say("No active LinkedIn, Indeed, or ZipRecruiter cookies found. Sign in to them in Chrome first.", "warn");
+      return;
+    }
+    say(`Synced: ${res.synced.join(", ")}`, "ok");
+  });
+};
+
 refresh();
 setInterval(refresh, 5000);

@@ -394,6 +394,36 @@ chrome.runtime.onMessage.addListener((msg, _s, reply) => {
     })();
     return true;
   }
+  if (msg.type === "SYNC_SESSIONS") {
+    (async () => {
+      try {
+        const [p] = (await db("profile?id=eq.1&select=email")) ?? [];
+        const synced = [];
+        for (const host of ["linkedin.com", "indeed.com", "ziprecruiter.com"]) {
+          const cookies = await chrome.cookies.getAll({ domain: host }).catch(() => []);
+          if (!cookies.length) continue;
+          await db("site_accounts?on_conflict=user_id,host", {
+            method: "POST",
+            headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+            body: JSON.stringify({
+              host,
+              email: p?.email || "",
+              password: "",
+              status: "active",
+              note: `synced ${cookies.length} cookies from Chrome`,
+              session_state: { cookies, captured_at: new Date().toISOString() },
+              session_updated_at: new Date().toISOString(),
+            }),
+          });
+          synced.push(`${host} (${cookies.length})`);
+        }
+        reply({ ok: true, synced });
+      } catch (e) {
+        reply({ ok: false, error: String(e.message) });
+      }
+    })();
+    return true;
+  }
   return false;
 });
 
