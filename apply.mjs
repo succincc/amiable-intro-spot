@@ -37,6 +37,7 @@ import { fromProfile } from "./fromprofile.mjs";
 import { useOwnKey } from "./ownkey.mjs";
 import { isCoverLetter, writeCoverLetter } from "./coverletter.mjs";
 import { jobKey } from "./samejob.mjs";
+import { GONE_RE } from "./gone.mjs";
 import { BOARD_HOSTS, applyStealth, detectBoardPlatform } from "./major-boards-selectors.mjs";
 import { applyBoardJob, restoreBoardSession } from "./major-boards-engine.mjs";
 
@@ -6660,6 +6661,18 @@ async function until(check, timeoutMs = 2000, stepMs = 100) {
   }
 }
 
+/**
+ * Whether a page says, in its own words, that the posting is no longer open.
+ * Asked only where no application was found: a page with a form on it is
+ * taken at its form, whatever else it says.
+ */
+async function postingGone(page) {
+  const said = await page
+    .evaluate(() => (document.body?.innerText ?? "").slice(0, 6000))
+    .catch(() => "");
+  return GONE_RE.test(String(said));
+}
+
 const CONTEXT_OPTIONS = {
   userAgent:
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 " +
@@ -11027,6 +11040,10 @@ async function applyToJobOnce(context, job, profile, answers) {
           }))
           .catch(() => null);
         console.log(`    no form here: ${JSON.stringify(where)}`);
+        if (await postingGone(page)) {
+          console.log("    the page says the posting is no longer open");
+          return { status: "skipped", skip_reason: "the posting is no longer open, by its own page" };
+        }
         // And the page's shape, where its words say nothing: an application
         // drawn inside components of the portal's own, in another tab, or
         // behind a check, all read as "no fields" from the outside.
@@ -11141,6 +11158,10 @@ async function applyToJobOnce(context, job, profile, answers) {
         // employer's job search: a keyword box, a location box, nothing to
         // fill in and nothing to send. That is not a form that failed and
         // not something for a person to finish; the posting is gone.
+        if (filled === 0 && (await postingGone(page))) {
+          console.log("    the page says the posting is no longer open");
+          return { status: "skipped", skip_reason: "the posting is no longer open, by its own page" };
+        }
         // The same on a portal that, for a posting it no longer holds,
         // offers its talent community and nothing to apply to.
         if ((pressable ?? []).some((b) => /join our talent community/i.test(b)) && !(pressable ?? []).some((b) => /\bapply\b/i.test(b)) && !(made?.inputs ?? []).length) {

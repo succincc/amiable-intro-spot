@@ -509,5 +509,19 @@ quiet.hideJob({ company: "ZQ" });
   ], ["Store Manager", "Exampleton, NJ", "us", "https://jobs.smartrecruiters.com/ExampleGoods/744000012345678", false, "2026-11-20T10:00:00.000Z", null, true, "Runs the store.\n\nTwo years", ""]);
 }
 
+{
+  const { GONE_RE } = await import("./gone.mjs");
+  check("gone: a page that says the posting is closed, and pages that do not", [
+    GONE_RE.test("Sorry, this position is no longer available."),
+    GONE_RE.test("This job is no longer accepting applications"),
+    GONE_RE.test("The opportunity you are looking for has been filled"),
+    GONE_RE.test("This posting has expired"),
+    GONE_RE.test("We are no longer accepting applications for this role."),
+    GONE_RE.test("Apply now. This position is open until filled and is available immediately."),
+    GONE_RE.test("You will manage accounts that are not available elsewhere."),
+    GONE_RE.test("Store Manager. Full time. Apply With LinkedIn."),
+  ], [true, true, true, true, true, false, false, false]);
+}
+
 console.log(failed ? `unit: ${failed} failed, ${passed} passed.` : `unit: all ${passed} passed.`);
 process.exit(failed ? 1 : 0);
