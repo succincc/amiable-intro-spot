@@ -211,6 +211,20 @@
       "when": 1795729060381,
       "tag": "0029_moments_health_start",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1795740810400,
+      "tag": "0030_calls",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1795740829079,
+      "tag": "0031_calling_extra",
+      "breakpoints": true
     }
   ]
 }

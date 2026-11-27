@@ -116,6 +116,36 @@ export type Database = {
         }
         Relationships: []
       }
+      call_keys: {
+        Row: {
+          id: number
+          phone_number: string | null
+          phone_sid: string | null
+          phone_token: string | null
+          updated_at: string
+          voice_id: string | null
+          voice_key: string | null
+        }
+        Insert: {
+          id?: number
+          phone_number?: string | null
+          phone_sid?: string | null
+          phone_token?: string | null
+          updated_at?: string
+          voice_id?: string | null
+          voice_key?: string | null
+        }
+        Update: {
+          id?: number
+          phone_number?: string | null
+          phone_sid?: string | null
+          phone_token?: string | null
+          updated_at?: string
+          voice_id?: string | null
+          voice_key?: string | null
+        }
+        Relationships: []
+      }
       companies: {
         Row: {
           ats: string
@@ -446,6 +476,9 @@ export type Database = {
           apply_url: string | null
           ats: string | null
           attempts: number | null
+          call_at: string | null
+          call_note: string | null
+          call_state: string | null
           company: string | null
           confirm_state: string | null
           confirmed_at: string | null
@@ -458,6 +491,7 @@ export type Database = {
           lat: number | null
           location: string | null
           lon: number | null
+          phone: string | null
           posted_at: string | null
           remote: boolean | null
           salary_max: number | null
@@ -480,6 +514,9 @@ export type Database = {
           apply_url?: string | null
           ats?: string | null
           attempts?: number | null
+          call_at?: string | null
+          call_note?: string | null
+          call_state?: string | null
           company?: string | null
           confirm_state?: string | null
           confirmed_at?: string | null
@@ -492,6 +529,7 @@ export type Database = {
           lat?: number | null
           location?: string | null
           lon?: number | null
+          phone?: string | null
           posted_at?: string | null
           remote?: boolean | null
           salary_max?: number | null
@@ -514,6 +552,9 @@ export type Database = {
           apply_url?: string | null
           ats?: string | null
           attempts?: number | null
+          call_at?: string | null
+          call_note?: string | null
+          call_state?: string | null
           company?: string | null
           confirm_state?: string | null
           confirmed_at?: string | null
@@ -526,6 +567,7 @@ export type Database = {
           lat?: number | null
           location?: string | null
           lon?: number | null
+          phone?: string | null
           posted_at?: string | null
           remote?: boolean | null
           salary_max?: number | null
@@ -609,6 +651,9 @@ export type Database = {
           autopilot: boolean | null
           availability: string | null
           availability_slots: Json
+          calls_enabled: boolean
+          calls_min_score: number
+          calls_targets_only: boolean
           can_background_check: string | null
           citizenship: string | null
           city: string | null
@@ -663,6 +708,9 @@ export type Database = {
           autopilot?: boolean | null
           availability?: string | null
           availability_slots?: Json
+          calls_enabled?: boolean
+          calls_min_score?: number
+          calls_targets_only?: boolean
           can_background_check?: string | null
           citizenship?: string | null
           city?: string | null
@@ -717,6 +765,9 @@ export type Database = {
           autopilot?: boolean | null
           availability?: string | null
           availability_slots?: Json
+          calls_enabled?: boolean
+          calls_min_score?: number
+          calls_targets_only?: boolean
           can_background_check?: string | null
           citizenship?: string | null
           city?: string | null
