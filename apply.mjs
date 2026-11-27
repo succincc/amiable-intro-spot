@@ -6994,6 +6994,8 @@ async function workAnswer(label, profile, job) {
  */
 const MODEL_FAILURES = new Set();
 const selfIdSeen = new Set();
+// What was worked out for a group of pick-one buttons, by the group's name.
+const RADIO_PICKS = new Map();
 
 /**
  * "How many accounts were in your most recent book?" over "Under 50",
@@ -9142,7 +9144,54 @@ async function applyToJobOnce(context, job, profile, answers) {
                 : null) ??
               lookupSaved(question) ??
               lastResort(question, profile, job);
-            if (!want) continue;
+            // A pick-one that is not a yes or a no — "How many accounts were
+            // in your most recent book?" over "Under 50", "50 to 150",
+            // "300+". Each button's own label is one of the sizes, so the
+            // question has to be read off the group and put to the whole
+            // list at once; two finished applications stopped on exactly
+            // this. Worked out once for the group, then each button is
+            // matched against it as the walk reaches it.
+            let picked = null;
+            if (!want) {
+              const grp = await el
+                .evaluate((n) => {
+                  const name = n.getAttribute("name");
+                  if (!name) return null;
+                  const all = Array.from(document.querySelectorAll(`input[type=radio][name="${CSS.escape(name)}"]`));
+                  if (all.length < 2 || all.length > 12) return null;
+                  const labelOf = (r) => (r.labels?.[0]?.innerText ?? r.closest("label")?.innerText ?? r.getAttribute("aria-label") ?? "").replace(/\s+/g, " ").trim();
+                  const options = all.map(labelOf).filter(Boolean);
+                  let box = n.closest("fieldset, [role=radiogroup], [role=group]") ?? n.parentElement;
+                  let text = "";
+                  for (let d = 0; box && d < 6; d++, box = box.parentElement) {
+                    text = (box.querySelector("legend, label:not(:has(input)), [class*=label i], [class*=question i]")?.innerText ?? box.getAttribute("aria-label") ?? "").replace(/\s+/g, " ").trim();
+                    if (!text) {
+                      let whole = (box.innerText ?? "").replace(/\s+/g, " ").trim();
+                      for (const o of options) whole = whole.replace(o, " ");
+                      text = whole.replace(/\s+/g, " ").trim();
+                    }
+                    if (text.length > 12 && !options.includes(text)) break;
+                  }
+                  return { name, options, text: text.slice(0, 200) };
+                })
+                .catch(() => null);
+              if (grp && grp.options.length >= 2 && grp.text) {
+                if (!RADIO_PICKS.has(grp.name)) {
+                  const resume = job?.tailored_resume || profile?.resume_text;
+                  RADIO_PICKS.set(grp.name, NEVER_INFER.test(grp.text) ? null : (rangeOption(grp.text, grp.options, profile) ?? evidenceOption(grp.text, grp.options, resume)));
+                }
+                picked = RADIO_PICKS.get(grp.name);
+                if (picked) question = grp.text;
+              }
+            }
+            if (!want && !picked) continue;
+            if (picked) {
+              if (String(label || "").replace(/\s+/g, " ").trim().toLowerCase() === String(picked).trim().toLowerCase()) {
+                console.log(`    pick-one "${String(question).slice(0, 34)}" -> "${String(picked).slice(0, 24)}"`);
+                if (await checkBox(el, label || question)) filled++;
+              }
+              continue;
+            }
 
             // Workday stores these as true/false and shows them as Yes/No.
             const val = String((await el.getAttribute("value")) || "").toLowerCase();
