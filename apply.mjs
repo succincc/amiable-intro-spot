@@ -6452,6 +6452,25 @@ function lastResort(label, p, job) {
       return there ? "Yes" : "No";
     }
   }
+  // "Do you have experience within B2B SaaS or Martech?" Yes where the
+  // resume itself names one of the things asked about; where it names
+  // none, it is left for the person — a No here turns away somebody who
+  // has the experience and did not write the word.
+  {
+    const m = l.match(/^\s*do you have (?:any |prior |previous |direct |professional |hands-on )*experience (?:with|in|within|using|working (?:with|in))\s+([a-z0-9][a-z0-9 .&/,+-]{1,70}?)\s*\*?\s*(\?|$)/i);
+    if (m && !NEVER_INFER.test(l)) {
+      const text = ` ${String(p?.resume_text ?? "").toLowerCase().replace(/[^a-z0-9+#]+/g, " ")} `;
+      const things = m[1].toLowerCase().split(/\s*(?:,|\/|\bor\b|\band\b|&)\s*/).map((t) => t.replace(/[^a-z0-9+# ]+/g, " ").replace(/\s+/g, " ").trim()).filter((t) => t.length > 1);
+      // The phrase as written, or each of its words somewhere: "B2B SaaS"
+      // is on a resume that says "SaaS" in one line and "B2B" in another.
+      const named = things.find((t) => text.includes(` ${t} `) || (t.includes(" ") && t.split(" ").every((w) => w.length > 2 && text.includes(` ${w} `))));
+      if (named) {
+        console.log(`    assumed "Yes" for "${l.slice(0, 50)}" (the resume names ${named})`);
+        return "Yes";
+      }
+      console.log(`    "${l.slice(0, 50)}" is left for the person: the resume names none of ${JSON.stringify(things.slice(0, 4))}`);
+    }
+  }
   // "Do you want to work in <the place the posting is in>?" Applying says so.
   if (/^\s*(do|would) you (want|like|wish) to work (in|at|out of|from)\b/i.test(l)) return "Yes";
 
