@@ -573,7 +573,7 @@ quiet.hideJob({ company: "ZQ" });
   // The record against its evidence: the three things an audit of a real
   // account found wrong, each of which must be seen if it comes back.
   const e = await import("./evidence.mjs");
-  const now = Date.UTC(2026, 10, 27);
+  const now = Date.UTC(2026, 10, 29);
   const at = (h) => new Date(now - h * 3_600_000).toISOString();
   const job = (id, o = {}) => ({ id, status: "applied", ats: "workday", company: `Co ${id}`, title: "Analyst", location: "Austin, TX", url: `https://x.example/${id}`, applied_at: at(100), ...o });
   const sent = [

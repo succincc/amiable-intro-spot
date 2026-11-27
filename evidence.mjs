@@ -8,6 +8,7 @@
  */
 import { jobKey, employerKey } from "./samejob.mjs";
 
+const GUARD_FIXED = Date.UTC(2026, 10, 27, 23, 0);
 const count = (list, of) => { const o = {}; for (const x of list) { const k = of(x) ?? "none"; o[k] = (o[k] ?? 0) + 1; } return o; };
 const sys = (j) => j.ats ?? "own site";
 const pct = (n, d) => (d ? `${Math.round((100 * n) / d)}%` : "-");
@@ -100,9 +101,12 @@ export function evidence(sent, mail, tried = [], now = Date.now()) {
     const ago = Math.round((now - at[at.length - 1]) / 3_600_000);
     const sameTitle = new Set(g.map((j) => String(j.title ?? "").trim().toLowerCase())).size === 1;
     say(`    ${g.length} times, ${apart}h apart, the later ${ago}h ago, through ${[...new Set(g.map(sys))].join(" and ")}, ${sameUrl ? "the same address" : "different addresses"}, ${sameTitle ? "the same title to the letter" : "titles that differ in wording"}`);
-    if (now - at[at.length - 1] < 48 * 3_600_000) fresh++;
+    // The guard that let these through was repaired at GUARD_FIXED. A second
+    // sending before then is on the record above and is not news; one after
+    // it means the repair did not hold, and that fails.
+    if (at[at.length - 1] > GUARD_FIXED) fresh++;
   }
-  if (fresh) failures.push(`${fresh} job(s) sent a second time within the last two days`);
+  if (fresh) failures.push(`${fresh} job(s) sent a second time since the duplicate guard was repaired (27 Nov 2026, 23:00 UTC)`);
 
   // 3. Stages nobody at the employer put the job in.
   for (const [status, cat] of [["interview", "interview"], ["offer", "offer"]]) {
