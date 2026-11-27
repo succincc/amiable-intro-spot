@@ -106,7 +106,7 @@ jobs:
           sweep.yml|1|-
           tailor.yml|1|-
           measure.yml|2|apply=true,then_apply=true
-          apply.yml|2|as_scheduled=true,max_jobs=60
+          apply.yml|1|as_scheduled=true,max_jobs=60
           oracle.yml|6|apply=true
           feeds.yml|12|apply=true
           successfactors.yml|6|apply=true
