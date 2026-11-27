@@ -309,6 +309,53 @@ export function classifyEmail(subject?: string | null, body?: string | null): Cl
 }
 
 // ---------------------------------------------------------------------------
+// What kind of mail it is, more finely than the six categories
+// ---------------------------------------------------------------------------
+//
+// The six categories decide what the pipeline does. They do not say enough
+// to count by: a one-time code to sign in to a portal and a 48-hour
+// assessment are both "action_needed", and an audit of one real inbox found
+// 130 such mails of which over a hundred were codes. The kind separates
+// them. It never moves a job; it is for counting and for what is shown.
+export type Kind =
+  | "interview_invitation" | "recruiter_inquiry" | "assessment" | "offer" | "rejection"
+  | "acknowledgement" | "verification_code" | "account_notice" | "action_needed" | "other";
+
+const K_VERIFY =
+  /(?:verification code|verify code|one[- ]time (?:pass)?(?:code|word)|\botp\b|security code|passcode|access code|(?:verify|confirm|validate|activate) your (?:candidate |new |e-?mail )?(?:e-?mail|identity|account|address|profile)|(?:e-?mail|account) (?:verification|activation|confirmation)\b|your code is)/i;
+const K_RESET = /(?:reset your password|password reset|change your password|forgot(?:ten)? (?:your )?password|new device|sign-?in attempt)/i;
+const K_ASSESS =
+  /(?:\b(?:assessment|skills? test|questionnaire|coding (?:challenge|test)|online test|one-way interview|video interview|take-?home|work sample)\b|hackerrank|codility|codesignal|hirevue|karat|coderbyte|predictive index|wonderlic)/i;
+const K_RECEIPT =
+  /\b(?:we(?:['’]ve| have)? (?:received|got) your (?:application|resume|submission)|thank(?:s| you) for (?:applying|your application|your interest|submitting)|your application (?:has been |was |is )?(?:received|submitted|complete)|application (?:received|confirmation|submitted)|successfully (?:applied|submitted))\b/i;
+const K_TIME =
+  /\b(?:(?:would|we['’]d|i['’]d|i would) like to (?:invite|schedule|set up|arrange)|are you (?:available|free)|(?:share|send|provide|let (?:me|us) know) (?:me |us )?your availability|what (?:times?|days?) (?:work|are you)|please (?:select|choose|pick|book|schedule) (?:a |an |your )?(?:time|slot|interview)|calendly\.com|book (?:a |some )?time|pick a time|invit(?:e|ing|ation) (?:you )?(?:to|for) (?:a |an )?(?:interview|phone|video|call)|schedul(?:e|ing) (?:a |an |your )?(?:interview|phone screen|call)|interview (?:is |has been )?(?:scheduled|confirmed)|phone screen)\b/i;
+
+export function emailKind(category: string | null | undefined, subject?: string | null, body?: string | null): Kind {
+  const s = String(subject ?? "").slice(0, 500);
+  const t = `${s}\n${String(body ?? "").slice(0, 6000)}`;
+  switch (category) {
+    case "offer": return "offer";
+    case "rejection": return "rejection";
+    case "confirmation": return "acknowledgement";
+    case "interview": return K_TIME.test(t) ? "interview_invitation" : "recruiter_inquiry";
+    case "action_needed":
+      // The subject is what the mail is; the body is only asked when the
+      // subject does not say.
+      if (K_VERIFY.test(s)) return "verification_code";
+      if (K_RESET.test(s)) return "account_notice";
+      if (K_ASSESS.test(s)) return "assessment";
+      if (K_RECEIPT.test(s)) return "acknowledgement";
+      if (K_ASSESS.test(t)) return "assessment";
+      if (K_VERIFY.test(t)) return "verification_code";
+      if (K_RESET.test(t)) return "account_notice";
+      if (K_RECEIPT.test(t)) return "acknowledgement";
+      return "action_needed";
+    default: return "other";
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Matching an email to the job it is about
 // ---------------------------------------------------------------------------
 

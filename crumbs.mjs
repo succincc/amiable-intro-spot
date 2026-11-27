@@ -7,6 +7,7 @@
 // by their system and the size of their last list. No names are printed.
 
 import { guardLogs, hideNames } from "./quiet.mjs";
+import { kindFromSubject } from "./evidence.mjs";
 guardLogs();
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -122,10 +123,10 @@ console.log(`employers by system: ${JSON.stringify(by)}`);
     const by = {};
     for (const m of mail) by[m.category ?? "none"] = (by[m.category ?? "none"] ?? 0) + 1;
     console.log(`mail read, by what it was called: ${JSON.stringify(by)}`);
-    const shape = (t) => String(t ?? "").toLowerCase().replace(/\d+/g, "N").replace(/[^a-z n]+/g, " ").split(/\s+/).filter(Boolean).slice(0, 5).join(" ");
-    const seen = {};
-    for (const m of mail.filter((x) => x.category === "interview")) seen[shape(m.subject)] = (seen[shape(m.subject)] ?? 0) + 1;
-    console.log(`called an interview, by how the subject begins: ${JSON.stringify(Object.entries(seen).sort((x, y) => y[1] - x[1]).slice(0, 14))}`);
+    // By kind, never by subject: a subject line names the employer.
+    const kinds = {};
+    for (const m of mail) { const k = kindFromSubject(m.category, m.subject); kinds[k] = (kinds[k] ?? 0) + 1; }
+    console.log(`employer mail by kind: ${JSON.stringify(kinds)}`);
     const jobsSaid = new Set(mail.filter((x) => x.category === "interview" && x.job_id).map((x) => x.job_id));
     console.log(`jobs with mail called an interview: ${jobsSaid.size}`);
   } catch (e) {

@@ -569,5 +569,40 @@ quiet.hideJob({ company: "ZQ" });
   ], [3, 1, 1, 1, null, 2, 1, 1, 1, 1, 10, 10, true]);
 }
 
+{
+  // The record against its evidence: the three things an audit of a real
+  // account found wrong, each of which must be seen if it comes back.
+  const e = await import("./evidence.mjs");
+  const now = Date.UTC(2026, 10, 27);
+  const at = (h) => new Date(now - h * 3_600_000).toISOString();
+  const job = (id, o = {}) => ({ id, status: "applied", ats: "workday", company: `Co ${id}`, title: "Analyst", location: "Austin, TX", url: `https://x.example/${id}`, applied_at: at(100), ...o });
+  const sent = [
+    job(1, { status: "interview" }),                       // marked up, mail later re-read as a receipt
+    job(2, { status: "interview" }),                       // really an interview
+    job(3, { confirm_state: "confirmed" }),
+    job(4, { company: "Co 3", applied_at: at(10) }),       // the same job as 3, sent again yesterday
+    job(5, { ats: "greenhouse" }),                         // receipt filed under action_needed
+    job(6, { ats: "greenhouse", applied_at: at(5) }),      // nothing but the applier's word
+  ];
+  const mail = [
+    { category: "confirmation", subject: "Thank you for applying", job_id: 1 },
+    { category: "interview", subject: "Schedule your interview", job_id: 2 },
+    { category: "action_needed", subject: "We've received your application", job_id: 5 },
+    { category: "action_needed", subject: "Confirm your identity", job_id: null },
+    { category: "action_needed", subject: "Complete your assessment", job_id: null },
+    { category: "action_needed", subject: "Reset your password", job_id: null },
+  ];
+  const r = e.evidence(sent, mail, [{ ats: "adp", status: "needs_help", help_reason: "login" }], now);
+  const text = r.lines.join("\n");
+  check("evidence: a stage with no mail behind it, a second sending and a receipt under the wrong heading are each seen", [
+    r.failures.length, /1 job\(s\) marked interview with no interview mail/.test(r.failures.join(";")), /sent a second time/.test(r.failures.join(";")),
+    r.corrected.filter((j) => j.status === "interview").length,
+    /"verification_code":1/.test(text) && /"assessment":1/.test(text) && /"account_notice":1/.test(text) && /"acknowledgement":2/.test(text),
+    /greenhouse: 2 \/ 1 /.test(text), /adp: 0 \/ 0 .* 1 \(login 1\)/.test(text), /Co \d/.test(text),
+  ], [2, true, true, 1, true, true, true, false]);
+  const clean = e.evidence([job(2, { status: "interview" }), job(3, { confirm_state: "confirmed" })], [{ category: "interview", subject: "Pick a time", job_id: 2 }], [], now);
+  check("evidence: a true record has nothing wrong with it", clean.failures, []);
+}
+
 console.log(failed ? `unit: ${failed} failed, ${passed} passed.` : `unit: all ${passed} passed.`);
 process.exit(failed ? 1 : 0);

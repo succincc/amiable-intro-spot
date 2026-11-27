@@ -76,7 +76,12 @@ export function composeSummary(d: {
   if (!d.sent.length) say("  Nothing went out. If that is a surprise, the reasons are below.");
   say();
 
-  const worth = d.replies.filter((r) => ["interview", "offer", "action_needed"].includes(String(r.category)));
+  // A one-time code or a password notice is the engine's to deal with, not
+  // something to read: on one real day they were most of this list.
+  const forTheEngine = (r: any) =>
+    r.category === "action_needed" &&
+    /(?:verification code|one[- ]time (?:pass)?(?:code|word)|security code|passcode|(?:verify|confirm|validate|activate) your (?:candidate |new )?(?:e-?mail|identity|account|address)|reset your password|password reset)/i.test(String(r.subject ?? ""));
+  const worth = d.replies.filter((r) => ["interview", "offer", "action_needed"].includes(String(r.category)) && !forTheEngine(r));
   const no = d.replies.filter((r) => r.category === "rejection").length;
   say(`REPLIES: ${worth.length} to read${no ? `, ${no} turned down` : ""}`);
   for (const r of worth.slice(0, 15)) {

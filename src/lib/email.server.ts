@@ -16,11 +16,15 @@
 
 import {
   classifyEmail,
+  emailKind,
   matchJob,
   isReplyable,
   replyPolicy,
   draftReply,
 } from "@/lib/classify.server";
+
+// Whether the emails table has its newer "kind" column, learned once.
+const HAS_KIND = { no: false };
 import { momentOf } from "@/lib/moments";
 
 export type InboundMessage = {
@@ -174,8 +178,7 @@ export async function ingestMessages(supabase: any, messages: InboundMessage[]) 
         // the owner instead (moments.server.ts).
         !(verdict.category === "interview" && momentOf({ category: "interview", subject: m.subject, body: m.body }, zone, startedNow));
 
-      const { error } = await supabase.from("emails").upsert(
-        {
+      const row: Record<string, unknown> = {
           message_id: m.message_id,
           thread_id: m.thread_id ?? null,
           from_addr: m.from_addr ?? null,
@@ -193,9 +196,16 @@ export async function ingestMessages(supabase: any, messages: InboundMessage[]) 
           reply_state,
           // is_read is deliberately untouched: on a re-delivery of a message
           // already read, marking it unread again would be maddening.
-        },
-        { onConflict: "message_id", ignoreDuplicates: false },
-      );
+      };
+      const put = (r: Record<string, unknown>) =>
+        (supabase.from("emails") as any).upsert(r, { onConflict: "message_id", ignoreDuplicates: false });
+      // The finer kind is a newer column. Where it is not there yet the mail
+      // is filed without it rather than not filed.
+      let { error } = HAS_KIND.no ? await put(row) : await put({ ...row, kind: emailKind(verdict.category, m.subject, m.body) });
+      if (error && !HAS_KIND.no && /kind/i.test(String(error.message ?? ""))) {
+        HAS_KIND.no = true;
+        ({ error } = await put(row));
+      }
 
       if (error) stats.errors++;
       else {
