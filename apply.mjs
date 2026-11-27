@@ -11049,7 +11049,9 @@ async function applyToJobOnce(context, job, profile, answers) {
                 }
                 return {
                   host: location.hostname.split(".").slice(-2).join("."),
-                  path: location.pathname.split("/").filter(Boolean).map((x) => (x.length > 14 || /\d{4,}/.test(x) ? "#" : x)).slice(0, 5).join("/"),
+                  // Only the words a portal's own addresses are built from;
+                  // anything else in a path may be an employer's name.
+                  path: location.pathname.split("/").filter(Boolean).map((x) => (/^(oneclick-ui|company|publication|jobs?|apply|careers?|application|candidate|recruitment|posting|job-details?|en|us|en-us)$/i.test(x) ? x.toLowerCase() : "#")).slice(0, 6).join("/"),
                   text: (document.body?.innerText ?? "").length,
                   shadows: all.filter((n) => n.shadowRoot).length,
                   inputs: all.filter((n) => /^(INPUT|TEXTAREA|SELECT)$/.test(n.tagName)).length,
@@ -11060,7 +11062,20 @@ async function applyToJobOnce(context, job, profile, answers) {
               })
               .catch(() => null);
           const tabs = context.pages();
-          console.log(`    no form here, by shape: ${JSON.stringify({ tabs: tabs.length, here: await shapeOf(page), others: await Promise.all(tabs.filter((t) => t !== page).slice(0, 2).map(shapeOf)) })}`);
+          const here = await shapeOf(page);
+          console.log(`    no form here, by shape: ${JSON.stringify({ tabs: tabs.length, here, others: await Promise.all(tabs.filter((t) => t !== page).slice(0, 2).map(shapeOf)) })}`);
+          // An empty page with a check's frame on it is the check: the
+          // portal is asking this visitor to prove it is a person. That is
+          // not got around; it is said, so the posting can be applied to by
+          // hand and the employer's other postings are not sent to the same
+          // wall in this run.
+          if (here && here.checks.length && here.inputs === 0 && here.text < 400) {
+            return {
+              status: "needs_help",
+              help_reason: "captcha",
+              note: "This portal asks an automated visitor to prove it is a person before it shows the application. Open the posting and apply by hand.",
+            };
+          }
         }
 
         return {
@@ -11126,6 +11141,12 @@ async function applyToJobOnce(context, job, profile, answers) {
         // employer's job search: a keyword box, a location box, nothing to
         // fill in and nothing to send. That is not a form that failed and
         // not something for a person to finish; the posting is gone.
+        // The same on a portal that, for a posting it no longer holds,
+        // offers its talent community and nothing to apply to.
+        if ((pressable ?? []).some((b) => /join our talent community/i.test(b)) && !(pressable ?? []).some((b) => /\bapply\b/i.test(b)) && !(made?.inputs ?? []).length) {
+          console.log("    the portal offers its talent community and no application: the posting is not up");
+          return { status: "skipped", skip_reason: "the posting is no longer up: the portal offers only its talent community" };
+        }
         const boxes = made?.inputs ?? [];
         if (boxes.length > 0 && boxes.length <= 4 && boxes.every((b) => /search|keyword|location|query/i.test(b))) {
           console.log("    the address now opens the employer's job search, not a posting");
@@ -12098,6 +12119,24 @@ const main = async () => {
   // older than the freshness rule is ever picked up, so these sat there
   // being counted as ready: a hundred and seven "ready" on one system of
   // which five could be applied to.
+  // SmartRecruiters puts that check in front of every application opened
+  // from here: four employers out of four, an empty page and the check's
+  // frame. Its postings are still found — they are real openings, a press
+  // away for a person — and are put where the owner sees them, with the
+  // reason, without a browser being opened on each to learn it again.
+  try {
+    const walled = await db("jobs?status=eq.queued&ats=eq.smartrecruiters", {
+      method: "PATCH",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify({
+        status: "needs_help",
+        help_reason: "captcha",
+        last_error: "SmartRecruiters asks an automated visitor to prove it is a person before it shows the application. Open the posting and apply by hand.",
+        updated_at: new Date().toISOString(),
+      }),
+    });
+    if (walled?.length) console.log(`set out to be applied to by hand (the portal's human check): ${walled.length}`);
+  } catch { /* the queue is as it was */ }
   try {
     const gone = await db(`jobs?status=eq.queued&posted_at=lt.${encodeURIComponent(FRESH_SINCE)}`, {
       method: "PATCH",
