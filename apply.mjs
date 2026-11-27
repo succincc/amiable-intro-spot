@@ -5283,7 +5283,37 @@ async function adpVerify(page, job) {
   return !still;
 }
 
+/**
+ * Workday's availability screen: a row for each day, and it will not go on
+ * until "at least 1 checkbox or any time slot" is chosen. Applying is
+ * already the claim to be available for the job's hours, so each day's "any
+ * time" is ticked where the screen offers one. A box that says not
+ * available is never ticked. Where nothing reads as "any time", what the
+ * boxes do say is printed, so the next look is not blind.
+ */
+async function workdayAvailability(page, form) {
+  if (!/myworkday(jobs|site)?\.com$/i.test(hostOf(page.url()) ?? "")) return 0;
+  const said = await form.evaluate(() => (document.body?.innerText ?? "").slice(0, 6000)).catch(() => "");
+  if (!/time slot|\bavailability\b/i.test(said) || !/monday|tuesday|weekday|weekend/i.test(said)) return 0;
+  const boxes = await form.$$('input[type=checkbox], [role=checkbox]').catch(() => []);
+  const seen = [];
+  let ticked = 0;
+  for (const box of boxes.slice(0, 80)) {
+    const label = ((await box.evaluate(readLabel).catch(() => "")) || "").replace(/\s+/g, " ").trim();
+    if (seen.length < 16) seen.push(label.slice(0, 28));
+    if (!/\b(any ?time|all day|open availability|fully available|flexible)\b/i.test(label)) continue;
+    if (/\b(not|un)\s?available\b|\bnone\b/i.test(label)) continue;
+    const on = (await box.isChecked().catch(() => false)) || (await box.getAttribute("aria-checked").catch(() => null)) === "true";
+    if (on) continue;
+    await box.click({ force: true, timeout: 3000 }).catch(() => {});
+    ticked++;
+  }
+  console.log(ticked ? `    availability: "any time" ticked on ${ticked} row(s)` : `    availability: nothing reads as "any time"; the boxes say ${JSON.stringify(seen)}`);
+  return ticked;
+}
+
 async function advanceStep(page, form, stepNo, job = null) {
+  await workdayAvailability(page, form).catch(() => 0);
   let found = null;
   for (const sel of NEXT_SELECTORS) {
     for (const el of (await form.$$(sel).catch(() => [])).slice(0, 6)) {
