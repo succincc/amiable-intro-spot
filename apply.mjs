@@ -5229,7 +5229,61 @@ async function screenSignature(frame) {
 }
 
 /** Move to the next page of a multi-page application. True only if it moved. */
-async function advanceStep(page, form, stepNo) {
+/**
+ * ADP's check that the applicant is who the form says: after its first
+ * screen a pane offers to send a code — to the email on the form, or by
+ * text — and waits for it to be typed in. The email is chosen, the code is
+ * read from the connected mailbox as an employer's security code is, and
+ * typed. Nothing is got round: it is the applicant's own code, sent to the
+ * applicant's own mailbox.
+ */
+async function adpVerify(page, job) {
+  const pane = page.locator("sdf-focus-pane, sdf-modal, [role=dialog]").filter({ has: page.locator('sdf-button:has-text("Send"), button:has-text("Send")') }).first();
+  if (!(await pane.isVisible().catch(() => false))) return false;
+  const shapeOf = async () =>
+    await pane
+      .evaluate((root) => {
+        const deep = (r, out = []) => {
+          for (const n of r.querySelectorAll("*")) {
+            out.push(n);
+            if (n.shadowRoot) deep(n.shadowRoot, out);
+          }
+          return out;
+        };
+        const all = deep(root);
+        const seen = (e) => { const b = e.getBoundingClientRect(); return b.width > 0 && b.height > 0; };
+        return {
+          picks: all.filter((n) => /^(SDF-RADIO|SDF-RADIO-BUTTON)$/.test(n.tagName) || (n.tagName === "INPUT" && n.type === "radio")).filter(seen).map((n) => (n.innerText || n.getAttribute("label") || n.getAttribute("aria-label") || n.value || "").replace(/\S+@\S+/g, "[address]").replace(/\d/g, "#").replace(/\s+/g, " ").trim().slice(0, 40)),
+          boxes: all.filter((n) => n.tagName === "INPUT" && !["radio", "checkbox", "hidden"].includes(n.type)).filter(seen).map((n) => `${n.type}:${n.maxLength}:${(n.getAttribute("aria-label") || n.name || n.id || "").slice(0, 24)}`),
+          buttons: all.filter((n) => /^(SDF-BUTTON|BUTTON)$/.test(n.tagName)).filter(seen).map((n) => (n.innerText || n.getAttribute("aria-label") || "").replace(/\s+/g, " ").trim().slice(0, 24)).filter(Boolean),
+        };
+      })
+      .catch(() => null);
+  console.log(`    ADP asks to send a code: ${JSON.stringify(await shapeOf())}`);
+  // By email, where the pane offers a choice.
+  const byMail = pane.locator('sdf-radio:has-text("mail"), sdf-radio-button:has-text("mail"), label:has-text("mail")').first();
+  if (await byMail.isVisible().catch(() => false)) await byMail.click({ timeout: 3000 }).catch(() => {});
+  const askedAt = Date.now();
+  await pane.locator('sdf-button:has-text("Send"), button:has-text("Send")').first().click({ timeout: 5000 }).catch(() => {});
+  await page.waitForTimeout(3500);
+  const after = await shapeOf();
+  console.log(`    after Send, the pane holds: ${JSON.stringify(after)}`);
+  const box = pane.locator('input:not([type=radio]):not([type=checkbox]):not([type=hidden])').first();
+  if (!(await box.isVisible().catch(() => false))) return false;
+  const code = await waitForVerificationCode(hostOf(page.url()), job.company, 9, 10_000, askedAt);
+  if (!code) return false;
+  await box.click({ timeout: 3000 }).catch(() => {});
+  await page.keyboard.type(code, { delay: 60 });
+  await page.waitForTimeout(600);
+  const go = pane.locator('sdf-button, button').filter({ hasText: /^(verify|submit|continue|confirm|next|done)/i }).first();
+  if (await go.isVisible().catch(() => false)) await go.click({ timeout: 5000 }).catch(() => {});
+  await page.waitForTimeout(5000);
+  const still = await pane.isVisible().catch(() => false);
+  console.log(`    typed ADP's code; the pane is ${still ? "still there" : "gone"}`);
+  return !still;
+}
+
+async function advanceStep(page, form, stepNo, job = null) {
   let found = null;
   for (const sel of NEXT_SELECTORS) {
     for (const el of (await form.$$(sel).catch(() => [])).slice(0, 6)) {
@@ -5317,6 +5371,12 @@ async function advanceStep(page, form, stepNo) {
         .catch(() => null);
       const label = (await el.evaluate(readLabel).catch(() => "")) || "";
       errs.push({ label: String(label).slice(0, 90), ...(about ?? {}) });
+    }
+    // On ADP the screen does change: a pane opens over it, asking where to
+    // send a code.
+    if (job && /(^|\.)adp\.com$/i.test(hostOf(page.url()) ?? "") && (await adpVerify(page, job).catch((e) => { console.log(`    ADP's code step failed: ${String(e?.message ?? e).slice(0, 90)}`); return false; }))) {
+      console.log(`    step ${stepNo}: past ADP's code`);
+      return { ok: true, rejected: [] };
     }
     console.log(
       `    step ${stepNo}: clicked "${found.words}"${found.enabled ? "" : " (disabled)"} ` +
@@ -10670,7 +10730,7 @@ async function applyToJobOnce(context, job, profile, answers) {
         filled += await oraclePills(page, form, profile, job, lookupSaved);
         filled += await oracleSelfId(page, form, profile, lookupSaved);
       }
-      const moved = await advanceStep(page, form, step + 1);
+      const moved = await advanceStep(page, form, step + 1, job);
       if (moved.ok) await page.waitForTimeout(2500);
       if (moved.rejected?.length) {
         blockedBy = moved.rejected
