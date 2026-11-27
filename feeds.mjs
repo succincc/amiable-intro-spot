@@ -412,6 +412,10 @@ async function fromJooble(titles, excludes, where, tally) {
  * place, a few titles a run. Only the employers' names are kept.
  */
 async function fromZipRecruiter(titles, excludes, where, tally) {
+  // The endpoint refused this runner outright (403 at its front door) on
+  // both tries. A refusal is not knocked on twice a day: this stays off
+  // until ZipRecruiter grants access, and is switched on by a setting.
+  if (process.env.ZIPRECRUITER !== "on") return null;
   const zip = await import("./zipmcp.mjs");
   let mcp;
   try {
