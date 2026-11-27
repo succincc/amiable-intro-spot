@@ -7469,6 +7469,30 @@ async function ukgAccount(page, form, profile, job) {
   // nobody can ever sign in to.
   await saveAccount(key, email, password, "pending_verification", job.id, "being registered on this UKG board");
   if (!(await press(/^\s*(continue|sign up|create account|register)\s*$/i))) await pass.press("Enter").catch(() => {});
+  // What the board answers while this goes on: each thing sent to it, by
+  // its kind and its last word, and how it was answered. And whether a
+  // human check is loaded on these pages at all.
+  const answers = [];
+  const onResponse = (r) => {
+    try {
+      const q = r.request();
+      if (q.method() === "GET" && !/register|signup|authcode|callback|authorize|resume/i.test(r.url())) return;
+      const u = new URL(r.url());
+      if (!/ultipro|ukg|auth0/i.test(u.hostname)) return;
+      answers.push(`${q.method()} ${u.pathname.split("/").filter(Boolean).map((x) => (x.length > 22 || /\d{4}/.test(x) ? "#" : x)).slice(-2).join("/")} ${r.status()}`);
+    } catch {}
+  };
+  page.on("response", onResponse);
+  const checks = async () => {
+    const seen = new Set();
+    for (const f of page.frames()) {
+      if (/recaptcha|hcaptcha|turnstile|datadome|perimeterx|arkoselabs|captcha/i.test(f.url())) seen.add(f.url().match(/recaptcha|hcaptcha|turnstile|datadome|perimeterx|arkoselabs|captcha/i)[0].toLowerCase());
+      const inPage = await f.evaluate(() => Array.from(document.scripts).map((x) => x.src).join(" ")).catch(() => "");
+      for (const m of inPage.matchAll(/recaptcha|hcaptcha|turnstile|datadome|perimeterx|arkoselabs/gi)) seen.add(m[0].toLowerCase());
+    }
+    return [...seen];
+  };
+  console.log(`    human checks loaded on its sign-up: ${JSON.stringify(await checks())}`);
   // What follows its sign-up is the board's own registration: a first name,
   // a last name and a box to agree to its terms. Left alone, the board drops
   // the half-made account and goes back to its front page.
@@ -7476,7 +7500,7 @@ async function ukgAccount(page, form, profile, job) {
     await page.waitForTimeout(1000);
     if (!page.frames().some((f) => /\/AuthCode\/Register/i.test(f.url()))) continue;
     await page.waitForTimeout(1200);
-    console.log(`    its registration page: ${JSON.stringify(await shapeNow())}`);
+    console.log(`    its registration page: ${JSON.stringify(await shapeNow())}; human checks loaded: ${JSON.stringify(await checks())}`);
     const first = await inAny('input[name*=first i], input[id*=first i]');
     const last = await inAny('input[name*=last i], input[id*=last i]');
     const names = String(profile.full_name ?? "").trim().split(/\s+/);
@@ -7515,6 +7539,10 @@ async function ukgAccount(page, form, profile, job) {
     await page.waitForTimeout(6000);
     console.log(`    after its registration the board stands: ${JSON.stringify(await stands())}`);
     break;
+  }
+  page.off("response", onResponse);
+  console.log(`    what the board answered: ${JSON.stringify(answers.slice(-14))}`);
+  {
   }
   {
     const trail = [];
@@ -12001,7 +12029,7 @@ async function applyToJobOnce(context, job, profile, answers) {
           // account — no confirmation mail, no reset mail, the sign-in refused.
           // It is left to the owner's own browser until a board is seen to keep
           // one; UKG_ACCOUNTS=1 turns the attempt back on.
-          if (wall && process.env.UKG_ACCOUNTS === "1" && profile.create_accounts === true && !UKG_SIGNED.has(job.id)) {
+          if (wall && (process.env.UKG_ACCOUNTS === "1" || process.env.ATS_ONLY === "ukg") && profile.create_accounts === true && !UKG_SIGNED.has(job.id)) {
             UKG_SIGNED.add(job.id);
             const account = await ukgAccount(page, form, profile, job).catch((e) => ({ ok: false, reason: String(e?.message ?? e).slice(0, 120) }));
             console.log(`    UKG account: ${account.ok ? "in" : account.reason}`);
