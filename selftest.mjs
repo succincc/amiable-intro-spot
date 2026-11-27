@@ -129,8 +129,42 @@ const PLAIN_FORM = `<!doctype html><html><head><title>Vendor Coordinator</title>
 </script>
 </body></html>`;
 
+// The shape of an Ashby board: one name box called "Name", a phone box called
+// "Contact number", a question the resume answers, and a list to tick from.
+// Every one of these stopped a real form with the rest of it filled.
+const BOARD_FORM = `<!doctype html><html><head><title>Account Coordinator</title></head><body>
+<h1>Account Coordinator</h1>
+<form id="f" novalidate>
+  <div><label for="_systemfield_name">Name</label><input id="_systemfield_name" name="_systemfield_name" type="text" placeholder="Type here..." required></div>
+  <div><label for="_systemfield_email">Email</label><input id="_systemfield_email" name="_systemfield_email" type="email" placeholder="hello@example.com..." required></div>
+  <div><label for="a2c71faa-5319-4d4a-8ec8-ebe9dcac45b3">Contact number</label><input id="a2c71faa-5319-4d4a-8ec8-ebe9dcac45b3" type="tel" placeholder="1-415-555-1234..." required></div>
+  <div><label for="_systemfield_resume">Resume</label><input id="_systemfield_resume" type="file" required></div>
+  <div><label for="c779ac6e-f4fe-4dfe-9dfa-acd7e2823ba7">Where have you most recently worked?</label><input id="c779ac6e-f4fe-4dfe-9dfa-acd7e2823ba7" type="text" placeholder="Type here..." required></div>
+  <fieldset id="tools"><legend>Which of these have you worked with? (check all that apply)</legend>
+    <label><input type="checkbox" name="tools[]" value="k"> Kubernetes clusters</label>
+    <label><input type="checkbox" name="tools[]" value="v"> Vendor scheduling</label>
+    <label><input type="checkbox" name="tools[]" value="n"> None of the above</label>
+  </fieldset>
+  <p id="err" role="alert" style="display:none"></p>
+  <p><button type="submit">Submit Application</button></p>
+</form>
+<script>
+  document.getElementById("f").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const v = (id) => document.getElementById(id).value.trim();
+    const ticked = Array.from(document.querySelectorAll('input[name="tools[]"]:checked')).map((b) => b.value);
+    const got = { name: v("_systemfield_name"), email: v("_systemfield_email"), phone: v("a2c71faa-5319-4d4a-8ec8-ebe9dcac45b3"), last: v("c779ac6e-f4fe-4dfe-9dfa-acd7e2823ba7"), ticked, resume: document.getElementById("_systemfield_resume").files[0]?.name ?? null };
+    const empty = Object.entries(got).filter(([, x]) => (Array.isArray(x) ? !x.length : !x)).map(([k]) => k);
+    if (empty.length) { const er = document.getElementById("err"); er.textContent = "Missing entry for required field: " + empty.join(", "); er.style.display = "block"; return; }
+    fetch("/board/got", { method: "POST", body: JSON.stringify(got) }).catch(() => {});
+    setTimeout(() => { document.body.innerHTML = "<h2>Application submitted</h2><p>Your application was successfully submitted.</p>"; }, 1500);
+  });
+</script>
+</body></html>`;
+
 let codeRequests = 0;
 let plainGot = null;
+let boardGot = null;
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, "http://x");
   if (url.pathname === "/plain/got") {
@@ -143,6 +177,16 @@ const server = http.createServer((req, res) => {
     });
     return;
   }
+  if (url.pathname === "/board/got") {
+    let body = "";
+    req.on("data", (d) => (body += d));
+    req.on("end", () => {
+      try { boardGot = JSON.parse(body); } catch { boardGot = {}; }
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end("{}");
+    });
+    return;
+  }
   const send = (type, body, status = 200) => {
     res.writeHead(status, { "Content-Type": type });
     res.end(body);
@@ -150,6 +194,7 @@ const server = http.createServer((req, res) => {
   if (url.pathname === "/gh/job") return send("text/html", GREENHOUSE_PAGE);
   if (url.pathname === "/gh/form") return send("text/html", GREENHOUSE_FORM);
   if (url.pathname === "/plain/job") return send("text/html", PLAIN_FORM);
+  if (url.pathname === "/board/job") return send("text/html", BOARD_FORM);
   if (url.pathname === "/api/public/email/verify-code") {
     codeRequests++;
     return send("application/json", JSON.stringify({ code: CODE }));
@@ -242,6 +287,26 @@ const cases = [
       : !/_Cover_Letter_/.test(plainGot.letterFile ?? "") ? `the cover letter's upload holds ${plainGot.letterFile ?? "nothing"}`
       : !/^Dear Hiring Manager,/.test(plainGot.letterText ?? "") || !/Sam Fixture\s*$/.test(plainGot.letterText ?? "") ? "the cover letter box was not given a letter"
       : !/vendor relationships, scheduling and inventory/i.test(plainGot.letterText) ? "the letter does not use the resume's own words"
+      : null,
+  },
+  {
+    name: "board form: a box called Name, a contact number, the last employer, a list to tick from",
+    job: {
+      id: "selftest-board",
+      url: `${base}/board/job`,
+      apply_url: `${base}/board/job`,
+      title: "Account Coordinator",
+      company: "Board Co",
+      ats: "ashby",
+      location: "Princeton, NJ",
+      description: "Requirements: vendor management and scheduling.",
+    },
+    check: () =>
+      !boardGot ? "the form never said what it was given"
+      : boardGot.name !== "Sam Fixture" ? `the name box holds "${boardGot.name}"`
+      : !/7325550100|732.?555.?0100/.test(boardGot.phone ?? "") ? `the contact number holds "${boardGot.phone}"`
+      : !/Fixture Goods/i.test(boardGot.last ?? "") ? `the last employer holds "${boardGot.last}"`
+      : JSON.stringify(boardGot.ticked) !== '["v"]' ? `the list has ${JSON.stringify(boardGot.ticked)} ticked`
       : null,
   },
 ];

@@ -753,7 +753,7 @@ function fieldValue(label, p) {
   // field is empty.
   if (/\b(where|which company)\b[^?]{0,30}\bmost recent(ly)?\b[^?]{0,20}\b(work|employ)|\bmost recent (employer|company)\b|\bcurrent or (most recent|last|previous) (employer|company)\b/i.test(String(label))) {
     let from = null;
-    try { from = latestRoleFrom(null, p)?.company ?? null; } catch { from = null; }
+    try { from = latestRoleFrom(null, p)?.company || parseWorkFromResume(p.resume_text)?.company || null; } catch { from = null; }
     return p.current_company || from || undefined;
   }
   if (has(label, "current company", "current employer", "employer name", "company name")) {
@@ -8875,7 +8875,10 @@ async function applyToJobOnce(context, job, profile, answers) {
             // the option and the question is on the container, so one of the
             // two was always wrong. They are separate now.
             const grp =
-              label && label.trim().length > 8 && !/^question_\d+|\[\]$/.test(label.trim()) &&
+              // A box that is one of a named list ("tools[]") or carries a
+              // board's own id in its label is an option, however long its
+              // words are; the question is still on the group.
+              label && label.trim().length > 8 && !/^question_\d+|\[\]|\b[0-9a-f]{8}-[0-9a-f]{4}-/.test(label.trim()) &&
               !/^(none of|none apply|not applicable)/i.test(label.trim())
                 ? null
                 : await el.evaluate(readGroupQuestion).catch(() => null);
@@ -9088,7 +9091,9 @@ async function applyToJobOnce(context, job, profile, answers) {
                   }
                   const picked = RADIO_PICKS.get(key);
                   if (picked) {
-                    if (norm(opt) === norm(picked) && !(await el.isChecked().catch(() => false))) {
+                    // The box's label as read here carries its field name
+                    // after the words; the option is how it begins.
+                    if ((norm(opt) === norm(picked) || norm(opt).startsWith(norm(picked) + " ")) && !(await el.isChecked().catch(() => false))) {
                       console.log(`    tick-from-list "${grp.ask.slice(0, 34)}" -> "${String(picked).slice(0, 24)}"`);
                       if (await checkBox(el, label)) filled++;
                     }
