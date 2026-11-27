@@ -100,7 +100,16 @@ async function greenhouse(token: string, name: string): Promise<Job[]> {
     company: name,
     location: greenhousePlace(j),
     remote: REMOTE_RE.test(j.location?.name ?? ""),
-    description: clean(j.content),
+    // Tidied when it is first read, not before. A board sends the whole
+    // text of every opening, most openings are turned away on their title
+    // alone, and tidying nine thousand descriptions nobody would read was
+    // most of the work in a round of nothing but boards like this one — a
+    // new person's rounds, which the host ended for it.
+    get description() {
+      const tidy = clean(j.content);
+      Object.defineProperty(this, "description", { value: tidy, writable: true, enumerable: true, configurable: true });
+      return tidy;
+    },
     source: "greenhouse",
     ats: "greenhouse",
     // When it first went up, where the board says. updated_at moves every
@@ -266,7 +275,6 @@ function wordHit(haystack: string, needle: string): boolean {
 
 function keep(job: Job, cfg: any): { ok: boolean; why?: string } {
   const title = (job.title ?? "").toLowerCase();
-  const blob = `${title}\n${(job.description ?? "").slice(0, 4000)}`.toLowerCase();
 
   if (!job.url || !job.title) return { ok: false, why: "missing url or title" };
 
@@ -278,11 +286,6 @@ function keep(job: Job, cfg: any): { ok: boolean; why?: string } {
   for (const bad of cfg.exclude_companies ?? []) {
     if (bad && (job.company ?? "").toLowerCase().includes(bad.toLowerCase())) {
       return { ok: false, why: `blocked company: ${job.company}` };
-    }
-  }
-  for (const pat of cfg.no_go_patterns ?? []) {
-    if (pat && blob.includes(pat.toLowerCase())) {
-      return { ok: false, why: `no-go pattern: ${pat}` };
     }
   }
 
@@ -300,6 +303,17 @@ function keep(job: Job, cfg: any): { ok: boolean; why?: string } {
       return matched / words.length >= 0.5; // half the words of any target title
     });
     if (!hit) return { ok: false, why: "title not relevant to targets" };
+  }
+
+  // Words the owner will not have in a posting. Looked for after the title
+  // has been judged, because this is the first thing that opens the
+  // description, and most postings never need theirs opened.
+  const noGo: string[] = (cfg.no_go_patterns ?? []).filter(Boolean);
+  if (noGo.length) {
+    const blob = `${title}\n${(job.description ?? "").slice(0, 4000)}`.toLowerCase();
+    for (const pat of noGo) {
+      if (blob.includes(pat.toLowerCase())) return { ok: false, why: `no-go pattern: ${pat}` };
+    }
   }
 
   // Salary floor — jobs with no stated salary always pass, because most
