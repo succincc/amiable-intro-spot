@@ -1145,9 +1145,14 @@ export async function runDiscover(supabase: any, opts: { since?: string | undefi
           if (found.status === "miss") {
             // The geocoder has seen this string and cannot place it. That is
             // settled, not pending, so strict mode acts on it.
-            if (cfg.include_unknown_location === false) {
-              await park(ids, `location could not be placed: ${place}`);
-            }
+            //
+            // It is no longer set aside here, though. This looks a place up
+            // once, as it is written; the runner's measuring (measure.mjs)
+            // takes a location apart — several places in one line, a town
+            // without its building or its street — and finds many that this
+            // cannot. One morning 177 postings were set aside here as
+            // unplaceable before that had been tried. Left unmeasured, they
+            // go to the runner, which sets aside what it cannot place either.
             continue;
           }
 

@@ -221,7 +221,7 @@ if (process.env.MEASURE_IMPORT_ONLY !== "1") {
   await auth({ email: AP_EMAIL, password: AP_PASSWORD }, "password");
 
   const [profile] = (await db("profile?id=eq.1&select=home_lat,home_lon,city,state")) ?? [];
-  const [cfg] = (await db("search_config?id=eq.1&select=radius_miles")) ?? [];
+  const [cfg] = (await db("search_config?id=eq.1&select=radius_miles,include_unknown_location")) ?? [];
   const radius = Number(cfg?.radius_miles ?? 0);
 
   let home = profile?.home_lat != null && profile?.home_lon != null ? { lat: profile.home_lat, lon: profile.home_lon } : null;
@@ -229,6 +229,21 @@ if (process.env.MEASURE_IMPORT_ONLY !== "1") {
   if (!home || !(radius > 0)) {
     console.log(`Nothing to measure against: home ${home ? "known" : "unknown"}, radius ${radius}.`);
     process.exit(0);
+  }
+
+  // Whether this search keeps only what it can place.
+  const STRICT = cfg?.include_unknown_location === false;
+  // Postings the panel set aside as unplaceable after one plain look are
+  // given the fuller try: put back as new, to be scored and measured again.
+  // Once — the panel no longer sets these aside, so there are no more.
+  if (APPLY) {
+    const since = new Date(Date.now() - 30 * 86_400_000).toISOString();
+    const back = await db(`jobs?status=eq.skipped&skip_reason=like.location%20could%20not%20be%20placed:*&found_at=gte.${encodeURIComponent(since)}`, {
+      method: "PATCH",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify({ status: "new", score: null, score_reason: null, skip_reason: null, distance_miles: null }),
+    }).catch(() => null);
+    if (back?.length) console.log(`${back.length} posting(s) set aside as unplaceable after one plain look are put back for a fuller try.`);
   }
 
   const jobs =
@@ -283,6 +298,17 @@ if (process.env.MEASURE_IMPORT_ONLY !== "1") {
       bucket.unknown++;
       const shape = shapeOfPlace(job.location);
       unfound.set(shape, (unfound.get(shape) ?? 0) + 1);
+      // Tried every way this knows and not found, on a search that keeps
+      // only what it can place: set aside here, where the trying was done.
+      // (The panel used to do this after one plain look, before any of it.)
+      if (!deferred && APPLY && STRICT) {
+        await db(`jobs?id=eq.${job.id}&status=in.(new,queued,review)`, {
+          method: "PATCH",
+          headers: { Prefer: "return=minimal" },
+          body: JSON.stringify({ status: "skipped", skip_reason: "location could not be placed, after trying its town alone" }),
+        }).catch(() => {});
+        tally.setAside = (tally.setAside ?? 0) + 1;
+      }
       continue;
     }
 
