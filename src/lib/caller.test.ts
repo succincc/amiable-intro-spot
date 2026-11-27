@@ -21,18 +21,17 @@ describe("the calling assistant", () => {
     expect(c.lines.at(-1)?.said).toBe("Thank you, I'll hold.");
     c = reply(c, "Hi, this is the manager.", job, me);
     expect(c.stage).toBe("manager");
-    expect(c.lines.at(-1)?.said).toContain("Helped customers on a busy sales floor");
-    // The owner's words are quoted and attributed; outside the quote the
-    // assistant never speaks as the applicant.
+
     const said = c.lines.at(-1)?.said ?? "";
-    expect(said).toMatch(/asked me to pass this on in Sam's own words: "/);
-    expect(said.replace(/"[^"]*"/, "")).not.toMatch(/\bI (applied|helped|can start)\b/);
+    expect(said).toBe("Thank you for taking the call. The application is for the Sales Associate role at your Exampleton location, and the name on it is Sam Sample. After reviewing the posting it looks like an excellent fit, with experience like this: helped customers on a busy sales floor and kept inventory counts accurate for two years. Would there be a good time to come in and talk?");
+    // No narrator: it neither claims to be the applicant nor speaks about them.
+    expect(said).not.toMatch(/\bI (applied|helped|can start)\b|\bSam (applied|asked|can|is)\b/);
   });
   it("answers facts from the profile and leaves the person's own questions to the person", () => {
     let c = reply(reply(start(job, me), "Speaking.", job, me), "When can he start?", job, me);
-    expect(c.lines.at(-1)?.said).toBe("Sam can start with two weeks' notice.");
+    expect(c.lines.at(-1)?.said).toBe("Available to start with two weeks' notice.");
     c = reply(c, "Why does he want to work here?", job, me);
-    expect(c.lines.at(-1)?.said).toMatch(/one Sam should answer in person/);
+    expect(c.lines.at(-1)?.said).toMatch(/deserves a proper answer in person/);
   });
   it("takes no for an answer, and a message when the manager is out", () => {
     expect(reply(start(job, me), "We're not hiring, please don't call again.", job, me)).toMatchObject({ stage: "done", outcome: "declined" });

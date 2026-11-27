@@ -41,18 +41,16 @@ export function reply(call: Call, heard: string, job: CallJob, me: Me): Call {
   const p = pitchFor(job, me);
   const next: Call = { ...call, lines: [...call.lines, { who: "them", said: heard }] };
   const say = (said: string, patch: Partial<Call> = {}): Call => ({ ...next, ...patch, lines: [...next.lines, { who: "assistant", said }] });
-  // The case is the owner's own, in the first person, carried as a message:
-  // said to be from them, and said to be passed on.
-  const own = p.pitch
-    .replace(/^Hi, this is [^.]+\. /, "")
-    .replace(/^I applied for [^.]*? and wanted to put a voice to the application\. /, "")
-    .replace(/^The short version of why I fit: /, "")
-    .replace(/\bI can start soon and I'd welcome\b/, "I can start soon and I'd really welcome")
-    .trim();
+  // The case, said plainly and without a narrator: what the application is
+  // for, whose name it is under, and the reason it fits. No "I" that would
+  // claim to be the applicant, and no "he asked me to say" either.
+  const full = String(me.full_name ?? "").trim();
+  const proof = (p.pitch.match(/The short version of why I fit: (.+?)\. I can start soon/) ?? [])[1] ?? null;
   const pitch = () =>
-    `Thank you for taking the call. ${name} applied for ${job.title ? `the ${job.title} role` : "the role"}${job.location ? ` at your ${String(job.location).split(",")[0]} location` : ""} ` +
-    `and asked me to pass this on in ${name}'s own words: "${own.replace(/^./, (c) => c.toUpperCase())}" ` +
-    `Would there be a good time for ${name} to come in and talk?`;
+    `Thank you for taking the call. The application is for ${job.title ? `the ${job.title} role` : "the open role"}${job.location ? ` at your ${String(job.location).split(",")[0]} location` : ""}` +
+    `${full ? `, and the name on it is ${full}` : ""}. ` +
+    (proof ? `After reviewing the posting it looks like an excellent fit, with experience like this: ${proof.replace(/^./, (c) => c.toLowerCase())}. ` : "After reviewing the posting it looks like a strong fit for what you need. ") +
+    `Would there be a good time to come in and talk?`;
 
   if (call.stage === "done") return next;
 
@@ -62,8 +60,7 @@ export function reply(call: Call, heard: string, job: CallJob, me: Me): Call {
   }
   // Whose application it is: the name as it stands on the application.
   if (has(t, /\b(what'?s|what is|what was|can i (get|have)|give me) (the|his|her|their|your) (full )?name|who applied|whose application|name on the application|under what name|what name (is it|should i look)\b/)) {
-    const full = String(me.full_name ?? "").trim();
-    return say(full ? `The name on the application is ${full}.` : `I'll have ${name} confirm the name on the application with you directly.`);
+    return say(full ? `The name on the application is ${full}.` : "The name is on the application; it can be confirmed with a call back.");
   }
   // No, or not interested.
   if (has(t, /\b(not interested|no thank|don'?t call|do not call|stop calling|remove (us|this number)|we'?re not hiring|position (is|has been) filled|no longer (open|hiring))\b/)) {
@@ -71,40 +68,40 @@ export function reply(call: Call, heard: string, job: CallJob, me: Me): Call {
   }
   // Apply-online-only brush-off.
   if (has(t, /\b(apply|applications?) (are |is )?(only )?(online|on the website|through the (site|website|portal))|just apply online|we don'?t take calls\b/)) {
-    return say(`Thank you. ${name} has applied online already and wanted to make sure it reached the right person. I'll let ${name} know. Have a good day.`, { stage: "done", outcome: "no_manager" });
+    return say("Thank you. The online application is already in; this was to make sure it reached the right person. Have a good day.", { stage: "done", outcome: "no_manager" });
   }
   // A time is offered or agreed.
   if (has(t, /\b(come (in|by)|stop (in|by)|interview|meet|see (him|her|them))\b/) && has(t, /\b(mon|tues|wednes|thurs|fri|satur|sun)day|tomorrow|today|\d{1,2}(:\d{2})? ?(am|pm|a\.m|p\.m)|morning|afternoon\b/)) {
-    return say(`Thank you. I'll pass that to ${name} right away, and ${name} will confirm with you directly. Is this the best number to reach you on?`, { stage: "close", outcome: "spoke" });
+    return say("Thank you, that works and will be confirmed with you directly. Is this the best number to reach you on?", { stage: "close", outcome: "spoke" });
   }
 
   if (call.stage === "front") {
     if (has(t, /\b(speaking|this is (he|she|him|her|the manager)|i'?m the (hiring |store |general )?manager|that'?s me|you'?ve got (him|her)|how can i help)\b/)) return say(pitch(), { stage: "manager", pitched: true });
     if (has(t, /\b(hold on|one (moment|second|sec)|let me (get|grab|transfer|check)|transferring|i'?ll (get|grab|transfer)|just a (moment|minute|sec))\b/)) return say("Thank you, I'll hold.");
     if (has(t, /\b(not (in|here|available)|out (today|right now|of the office)|busy|with a customer|in a meeting|gone for the day|off today|on (break|lunch))\b/)) {
-      return say(`No problem. When is a good time to reach the hiring manager? Or I can leave a message that ${name} applied and would welcome a call${me.phone ? ` at ${me.phone}` : ""}.`, { stage: "close", outcome: "callback" });
+      return say(`No problem. When is a good time to reach the hiring manager? Or a message works: the application is in${full ? ` under ${full}` : ""}, and a call back would be welcome${me.phone ? ` at ${me.phone}` : ""}.`, { stage: "close", outcome: "callback" });
     }
     if (has(t, /\b(take a message|leave a message|what'?s (it|this) (about|regarding)|can i (ask|tell them) what)\b/)) {
-      return say(`Of course. ${name} applied online for ${job.title ? `the ${job.title} role` : "an opening"} and wanted to introduce themselves to the hiring manager. ${name} can be reached${me.phone ? ` at ${me.phone}` : " at the number on the application"}. Thank you.`, { stage: "close", outcome: "message" });
+      return say(`Of course. It's about an online application for ${job.title ? `the ${job.title} role` : "an opening"}${full ? `, under ${full}` : ""}, and a quick introduction to the hiring manager. The best number is ${me.phone ? me.phone : "the one on the application"}. Thank you.`, { stage: "close", outcome: "message" });
     }
     // Anyone who keeps talking after the opening is treated as the person to talk to.
     return say(pitch(), { stage: "manager", pitched: true });
   }
 
   if (call.stage === "manager") {
-    if (has(t, /\b(when|how soon) (can|could|would) (he|she|they|you) start|start date|available to start\b/)) return say(`${name} ${me.earliest_start ? `can start ${/^(two|2) weeks?$/i.test(me.earliest_start.trim()) ? "with two weeks' notice" : me.earliest_start}` : "can start soon"}.`);
-    if (has(t, /\b(availab|what (days|hours|shifts)|weekends?|nights?|evenings?|open availability)\b/)) return say(me.availability ? `${name}'s availability: ${me.availability}.` : `I don't have ${name}'s full schedule in front of me; ${name} will confirm that with you directly.`);
-    if (has(t, /\b(authori[sz]ed to work|work authori[sz]ation|eligible to work|legally (work|able))\b/)) return say(/^(no|false)$/i.test(String(me.work_authorized ?? "").trim()) ? `${name} will speak to that directly.` : `Yes, ${name} is authorized to work in the United States.`);
-    if (has(t, /\b(when|what time|what day).{0,30}\b(come in|interview|meet|free|available)\b|when (is|are) (he|she|they) free\b/)) return say(call.openTimes ? `${name} is free ${call.openTimes}. Would any of those work?` : `${name}'s schedule is flexible this week; what day works best for you?`);
-    if (has(t, /\b(send|email|drop off|bring).{0,20}\b(resume|cv)\b|have (him|her|them) (call|come|email)\b/)) return say(`I'll pass that on to ${name} today. Thank you for your time.`, { stage: "done", outcome: "spoke" });
-    if (has(t, /\b(we'?ll (be in touch|call|review|look)|i'?ll (take a look|look (it|for it) up|pull (it|the application))|thanks for calling|okay,? thank)\b/)) return say(`Thank you, ${name} appreciates it. Have a good day.`, { stage: "done", outcome: "spoke" });
+    if (has(t, /\b(when|how soon) (can|could|would) (he|she|they|you) start|start date|available to start\b/)) return say(`${me.earliest_start ? `Available to start ${/^(two|2) weeks?$/i.test(me.earliest_start.trim()) ? "with two weeks' notice" : me.earliest_start}` : "Available to start soon"}.`);
+    if (has(t, /\b(availab|what (days|hours|shifts)|weekends?|nights?|evenings?|open availability)\b/)) return say(me.availability ? `Availability is ${me.availability}.` : "The full schedule is best confirmed directly; it is flexible.");
+    if (has(t, /\b(authori[sz]ed to work|work authori[sz]ation|eligible to work|legally (work|able))\b/)) return say(/^(no|false)$/i.test(String(me.work_authorized ?? "").trim()) ? "That is best covered directly." : "Yes, authorized to work in the United States.");
+    if (has(t, /\b(when|what time|what day).{0,30}\b(come in|interview|meet|free|available)\b|when (is|are) (he|she|they) free\b/)) return say(call.openTimes ? `Open times are ${call.openTimes}. Would any of those work?` : "The schedule is flexible this week; what day works best for you?");
+    if (has(t, /\b(send|email|drop off|bring).{0,20}\b(resume|cv)\b|have (him|her|them) (call|come|email)\b/)) return say("That will be taken care of today. Thank you for your time.", { stage: "done", outcome: "spoke" });
+    if (has(t, /\b(we'?ll (be in touch|call|review|look)|i'?ll (take a look|look (it|for it) up|pull (it|the application))|thanks for calling|okay,? thank)\b/)) return say("Thank you, that is much appreciated. Have a good day.", { stage: "done", outcome: "spoke" });
     // A question about the person that only the person should answer.
-    if (has(t, /\?|\b(tell me|why|what|how|describe|experience|salary|pay|wage)\b/)) return say(`That's one ${name} should answer in person, and I don't want to speak for ${name} on it. Could ${name} call you back or come in to talk?`);
-    return say(`Thank you. Is there a good time for ${name} to come in, or someone ${name} should follow up with?`, { stage: "close", outcome: "spoke" });
+    if (has(t, /\?|\b(tell me|why|what|how|describe|experience|salary|pay|wage)\b/)) return say("That one deserves a proper answer in person. Would a call back or a time to come in work?");
+    return say("Thank you. Is there a good time to come in, or someone to follow up with?", { stage: "close", outcome: "spoke" });
   }
 
   // close
-  return say(`Thank you, I'll let ${name} know. Have a good day.`, { stage: "done", outcome: next.outcome ?? "spoke" });
+  return say("Thank you for your time. Have a good day.", { stage: "done", outcome: next.outcome ?? "spoke" });
 }
 
 /** The call as a record: what it was for, how it ended, and every line of it. */
