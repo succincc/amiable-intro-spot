@@ -84,7 +84,7 @@ const GREENHOUSE_FORM = `<!doctype html><html><body>
       return;
     }
     const typed = Array.from(boxes.children).map((x) => x.value).join("");
-    if (typed === "${CODE}") {
+    if (/^4821\\d{4}$/.test(typed)) {
       setTimeout(() => { document.body.innerHTML = "<h2>Thanks for taking the time to apply to Fixture Co!</h2><p>In the meantime, have a look around.</p>"; }, 1500);
     } else {
       sec.insertAdjacentHTML("beforeend", '<p role="alert">That code is incorrect.</p>');
@@ -203,7 +203,9 @@ const server = http.createServer((req, res) => {
   if (url.pathname === "/board/job") return send("text/html", BOARD_FORM);
   if (url.pathname === "/api/public/email/verify-code") {
     codeRequests++;
-    return send("application/json", JSON.stringify({ code: CODE }));
+    // A fresh code each time, as a real portal sends: the applier will not
+    // type one it has typed before.
+    return send("application/json", JSON.stringify({ code: codeRequests === 1 ? CODE : `4821${String(codeRequests).padStart(4, "0")}` }));
   }
   if (url.pathname.startsWith("/auth/v1/")) {
     return send(
@@ -319,6 +321,60 @@ const cases = [
 ];
 
 const browser = await chromium.launch();
+
+// ---------------------------------------------------------------------------
+// Endurance: the same three forms, all at once, round after round, with one
+// application cut off in the middle of a round. What is watched: that every
+// round after the cut still passes, how long a round takes at the end
+// against the start, and whether this process keeps what it should let go.
+// Only when asked for (ENDURANCE_ROUNDS); the gate below is unchanged.
+// ---------------------------------------------------------------------------
+if (Number(process.env.ENDURANCE_ROUNDS) > 0) {
+  const rounds = Number(process.env.ENDURANCE_ROUNDS);
+  const mb = () => Math.round(process.memoryUsage().rss / 1048576);
+  const one = async (c, cutAfterMs = 0) => {
+    const context = await browser.newContext();
+    const started = Date.now();
+    let outcome;
+    const cut = cutAfterMs ? setTimeout(() => context.close().catch(() => {}), cutAfterMs) : null;
+    try {
+      outcome = await Promise.race([
+        applyToJob(context, { ...c.job }, profile, []),
+        new Promise((_, no) => setTimeout(() => no(new Error("took longer than 4 minutes")), 240_000)),
+      ]);
+    } catch (e) {
+      outcome = { status: "threw", note: String(e?.message ?? e).split("\n")[0] };
+    }
+    if (cut) clearTimeout(cut);
+    await context.close().catch(() => {});
+    return { ok: outcome.status === "applied", status: outcome.status, s: Math.round((Date.now() - started) / 1000) };
+  };
+  const seen = [];
+  let bad = 0, cutOutcome = null;
+  for (let r = 1; r <= rounds; r++) {
+    const cutting = r === 2;
+    const t0 = Date.now();
+    const got = await Promise.all(cases.map((c, i) => one(c, cutting && i === 1 ? 6000 : 0)));
+    if (cutting) cutOutcome = got[1].status;
+    const fails = got.filter((g, i) => !g.ok && !(cutting && i === 1)).length;
+    bad += fails;
+    seen.push({ r, secs: Math.round((Date.now() - t0) / 1000), rss: mb(), contexts: browser.contexts().length, fails });
+    console.log(`round ${r}: ${got.map((g) => `${g.status} ${g.s}s`).join(", ")}; process ${mb()} MB; browser contexts left open ${browser.contexts().length}${cutting ? "  [one cut off after 6s on purpose]" : ""}`);
+  }
+  await browser.close();
+  server.close();
+  const steady = seen.slice(2);
+  const first = steady[0] ?? seen[0], last = seen[seen.length - 1];
+  console.log(`\nendurance: ${rounds} rounds of 3 at once, ${rounds * 3 - 1} applications meant to finish, ${rounds * 3 - 1 - bad} did; the one cut off ended as "${cutOutcome}" and stopped nothing after it`);
+  console.log(`  a round took ${first.secs}s at the start and ${last.secs}s at the end; memory ${first.rss} MB then, ${last.rss} MB at the end, most ${Math.max(...seen.map((x) => x.rss))} MB`);
+  const leak = last.rss > first.rss * 1.5 + 100;
+  const slow = last.secs > first.secs * 1.5 + 10;
+  if (leak) console.log("  WRONG: memory kept growing round over round");
+  if (slow) console.log("  WRONG: rounds got slower as they went");
+  if (seen.some((x) => x.contexts)) console.log("  WRONG: a browser context was left open after its application ended");
+  process.exit(bad || leak || slow || cutOutcome === "applied" || seen.some((x) => x.contexts) ? 1 : 0);
+}
+
 let failed = 0;
 for (const c of cases) {
   const context = await browser.newContext();

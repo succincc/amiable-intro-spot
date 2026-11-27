@@ -1,0 +1,54 @@
+name: endurance
+
+# The engine's own test forms, three at once, round after round, with one
+# application cut off part-way. Nothing leaves the runner: the forms, the
+# database and the mailbox are one local server. Fails if a later round
+# fails, if memory keeps growing, or if rounds slow down.
+
+on:
+  workflow_dispatch:
+    inputs:
+      rounds:
+        description: "How many rounds of three"
+        default: "10"
+  schedule:
+    - cron: "43 7 * * 0"
+
+permissions:
+  contents: read
+
+jobs:
+  endurance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Restore Playwright + Chromium
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/ms-playwright
+            ~/pw/node_modules
+          key: pw-1.49.0-${{ runner.os }}
+      - name: Install Playwright + Chromium
+        run: |
+          set -euo pipefail
+          PW_DIR="$HOME/pw"
+          mkdir -p "$PW_DIR"
+          cd "$PW_DIR"
+          if [ ! -d node_modules/playwright ]; then
+            npm init -y >/dev/null
+            npm install --no-audit --no-fund playwright@1.49.0
+          fi
+          npx playwright install --with-deps chromium >/dev/null
+          command -v pdftotext >/dev/null || sudo apt-get install -y -q poppler-utils >/dev/null 2>&1 || true
+          ln -sfn "$PW_DIR/node_modules" "$GITHUB_WORKSPACE/node_modules"
+      - name: Rounds
+        env:
+          ENDURANCE_ROUNDS: ${{ github.event.inputs.rounds || '10' }}
+        run: |
+          set -o pipefail
+          node selftest.mjs 2>&1 | grep -E "^round|^endurance|^  a round|WRONG|Error"
