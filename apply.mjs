@@ -13420,6 +13420,18 @@ const main = async () => {
       }).catch(() => null)) ?? [];
     if (moved.length) console.log(`review: ${moved.length} posting(s) that were held for a yes are now in the queue.`);
   }
+  // A rehearsal sends nothing, so what an old one left marked as stopped
+  // was never tried for real. The audit found ten such on one account,
+  // sitting in the by-hand list for no reason. They go back in the queue.
+  if (!DRY_RUN && LEADS_THE_ROUND) {
+    const back =
+      (await db("jobs?status=eq.needs_help&help_reason=eq.dry_run", {
+        method: "PATCH",
+        headers: { Prefer: "return=representation" },
+        body: JSON.stringify({ status: "queued", help_reason: null, attempts: 0, updated_at: new Date().toISOString() }),
+      }).catch(() => null)) ?? [];
+    if (back.length) console.log(`rehearsed, never sent: ${back.length} posting(s) put back in the queue.`);
+  }
   const answers = await db("answers?confirmed=eq.true&select=q_key,answer") ?? [];
 
   // Adopt the row the panel opened when it dispatched this run.
