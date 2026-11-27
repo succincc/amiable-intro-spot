@@ -7510,7 +7510,11 @@ async function ukgAccount(page, form, profile, job) {
   for (let i = 0; i < 10; i++) {
     await page.waitForTimeout(1000);
     if (!page.frames().some((f) => /\/AuthCode\/Register/i.test(f.url()))) continue;
-    await page.waitForTimeout(1200);
+    // The registration is a dialog the board draws over itself: its address
+    // is the board's own a few seconds later, and what was typed before
+    // then is drawn over. It is let settle first.
+    for (let j = 0; j < 12 && page.frames().some((f) => /\/AuthCode\/Register/i.test(f.url())); j++) await page.waitForTimeout(1000);
+    await page.waitForTimeout(3000);
     console.log(`    its registration page: ${JSON.stringify(await shapeNow())}; human checks loaded: ${JSON.stringify(await checks())}`);
     const first = await inAny('input[name*=first i], input[id*=first i]');
     const last = await inAny('input[name*=last i], input[id*=last i]');
