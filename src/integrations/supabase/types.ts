@@ -118,7 +118,9 @@ export type Database = {
       }
       call_keys: {
         Row: {
+          agent_id: string | null
           id: number
+          phone_id: string | null
           phone_number: string | null
           phone_sid: string | null
           phone_token: string | null
@@ -127,7 +129,9 @@ export type Database = {
           voice_key: string | null
         }
         Insert: {
+          agent_id?: string | null
           id?: number
+          phone_id?: string | null
           phone_number?: string | null
           phone_sid?: string | null
           phone_token?: string | null
@@ -136,7 +140,9 @@ export type Database = {
           voice_key?: string | null
         }
         Update: {
+          agent_id?: string | null
           id?: number
+          phone_id?: string | null
           phone_number?: string | null
           phone_sid?: string | null
           phone_token?: string | null
@@ -478,6 +484,7 @@ export type Database = {
           attempts: number | null
           call_at: string | null
           call_note: string | null
+          call_ref: string | null
           call_state: string | null
           company: string | null
           confirm_state: string | null
@@ -516,6 +523,7 @@ export type Database = {
           attempts?: number | null
           call_at?: string | null
           call_note?: string | null
+          call_ref?: string | null
           call_state?: string | null
           company?: string | null
           confirm_state?: string | null
@@ -554,6 +562,7 @@ export type Database = {
           attempts?: number | null
           call_at?: string | null
           call_note?: string | null
+          call_ref?: string | null
           call_state?: string | null
           company?: string | null
           confirm_state?: string | null
