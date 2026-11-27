@@ -6,6 +6,9 @@
 // round that never finished, the employers it was reading when it stopped,
 // by their system and the size of their last list. No names are printed.
 
+import { guardLogs, hideNames } from "./quiet.mjs";
+guardLogs();
+
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const ANON_KEY = process.env.SUPABASE_ANON_KEY;
 const ACT_AS = process.env.AP_ACT_AS ? { "x-act-as": process.env.AP_ACT_AS } : {};
@@ -80,6 +83,24 @@ console.log(`employers by system: ${JSON.stringify(by)}`);
   const why = {};
   for (const r of stuck) { const k = `${r.ats ?? "none"} / ${r.help_reason ?? "?"}`; why[k] = (why[k] ?? 0) + 1; }
   console.log(`stopped for a person, by system and reason: ${JSON.stringify(Object.fromEntries(Object.entries(why).sort((x, y) => y[1] - x[1]).slice(0, 24)))}`);
+}
+// What the applier wrote down on the ones it could not finish, by system:
+// the first words of each note, with numbers evened out, most common first.
+// Employers' names are taken out before anything is printed.
+{
+  const rows = (await db("jobs?status=eq.needs_help&help_reason=in.(error,no_form,incomplete,login)&select=ats,company,last_error&order=updated_at.desc&limit=400").catch(() => [])) ?? [];
+  hideNames(rows.map((r) => r.company).filter(Boolean));
+  // And the person's own details, should a note have quoted a form back.
+  const [whose] = (await db("profile?id=eq.1&select=*").catch(() => [])) ?? [];
+  if (whose) guardLogs(whose);
+  const said = {};
+  for (const r of rows) {
+    const note = String(r.last_error ?? "").replace(/[\w.+-]+@[\w.-]+/g, "[address]").replace(/\d+/g, "N").replace(/\s+/g, " ").trim().slice(0, 120);
+    const k = `${r.ats ?? "none"} | ${note}`;
+    said[k] = (said[k] ?? 0) + 1;
+  }
+  console.log("what was written on the ones not finished:");
+  for (const [k, n] of Object.entries(said).sort((x, y) => y[1] - x[1]).slice(0, 26)) console.log(`  ${n} x ${k}`);
 }
 // The mailbox: when it was last read and what the last reading said, with
 // anything that looks like an address taken out.
