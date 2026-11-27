@@ -49,6 +49,11 @@ on:
         type: boolean
         required: false
         default: false
+      prove_gate:
+        description: "Fail the shared check on purpose, to see that no lane then starts"
+        type: boolean
+        required: false
+        default: false
       as_scheduled:
         description: "Run exactly as the timer would (autopilot decides whether it submits)"
         type: boolean
@@ -103,6 +108,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
+      # Asked for by hand only: the proof that a failed check stops the lanes.
+      - name: Fail on purpose
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.prove_gate == 'true' }}
+        run: |
+          echo "failing the shared check on purpose; no lane should start after this"
+          exit 1
       - name: Every script parses
         run: for f in *.mjs; do node --check "$f"; done
       - name: Unit checks
