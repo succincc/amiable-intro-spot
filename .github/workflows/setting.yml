@@ -1,0 +1,36 @@
+name: setting
+
+# One switch of the owner's own search, flipped from a run started by hand,
+# for when the owner has asked for it while away from the panel.
+
+on:
+  workflow_dispatch:
+    inputs:
+      setting:
+        description: "same_state_only or include_unknown_location"
+        required: true
+      value:
+        description: "true or false"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  setting:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Set it
+        env:
+          SUPABASE_URL: https://inqhfkshqndkxyztzita.supabase.co
+          SUPABASE_ANON_KEY: sb_publishable_QK4kidijM8nk46uK6L22Qw_XA0RQu5U
+          APPLYPILOT_EMAIL: ${{ secrets.APPLYPILOT_EMAIL }}
+          APPLYPILOT_PASSWORD: ${{ secrets.APPLYPILOT_PASSWORD }}
+          SETTING: ${{ github.event.inputs.setting }}
+          VALUE: ${{ github.event.inputs.value }}
+        run: node setting.mjs
