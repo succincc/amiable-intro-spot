@@ -47,8 +47,9 @@ async function main() {
   if (!mail) mail = await db("emails?direction=eq.in&select=category,subject,job_id&order=received_at.desc&limit=3000");
 
   const { lines, failures, corrected } = evidence(sent, mail, tried);
+  // What came back first, the evidence last: the end of the log is what is read.
+  if (sent.length >= 20) for (const line of outcomeLines(outcomes(corrected))) console.log(line);
   for (const l of lines) console.log(l);
-  for (const line of outcomeLines(outcomes(corrected))) console.log(line);
   if (failures.length) {
     for (const f of failures) console.log(`WRONG: ${f}`);
     process.exitCode = 1;

@@ -753,7 +753,11 @@ function fieldValue(label, p) {
   // "Where have you most recently worked?" is the same question in a
   // sentence, and the resume on file answers it where the profile's own
   // field is empty.
-  if (/\b(where|which company)\b[^?]{0,30}\bmost recent(ly)?\b[^?]{0,20}\b(work|employ)|\bmost recent (employer|company)\b|\bcurrent or (most recent|last|previous) (employer|company)\b/i.test(String(label))) {
+  // A question to be answered yes or no is not one about who the employer
+  // is, whatever it goes on to mention: "To your knowledge, do you or a
+  // close relative…" was given the name of the last employer.
+  const yesNoFirst = /^\s*(to (the best of )?your knowledge,?\s*)?(do|does|did|have|has|are|is|were|was|will|would|can|could)\b/i.test(String(label));
+  if (!yesNoFirst && /\b(where|which company)\b[^?]{0,30}\bmost recent(ly)?\b[^?]{0,20}\b(work|employ)|\bmost recent (employer|company)\b|\bcurrent or (most recent|last|previous) (employer|company)\b/i.test(String(label))) {
     let from = null;
     try { from = (typeof WORK !== "undefined" && WORK?.company) || latestRoleFrom(null, p)?.company || parseWorkFromResume(p.resume_text)?.company || null; } catch { from = null; }
     // The roles the person has entered themselves: the one with no end, or
@@ -8879,6 +8883,13 @@ async function greenhouseBoard(company) {
 // and two sign-ins under it at once undo each other: ADP answered one of two
 // workers "another user account already exists" and the other with its code
 // box. Their postings are taken one at a time.
+// What a list was asked for, as the log may show it: a plain yes, no or
+// number as it is, anything else — a name, an employer, a town — by its
+// length only. The log is public.
+function shownWant(want) {
+  const w = String(want ?? "").trim();
+  return /^(yes|no|n\/a|none|other|not listed|\d{1,4}|(i )?(do not|don't|decline|prefer not)\b.{0,40})$/i.test(w) ? `"${w.slice(0, 24)}"` : `a ${w.length}-letter answer`;
+}
 const ONE_AT_A_TIME = { adp: null, ukg: null };
 async function applyToJob(context, job, profile, answers) {
   const lane = job.ats === "adp" || job.ats === "ukg" ? job.ats : null;
@@ -10298,7 +10309,7 @@ async function applyToJobOnce(context, job, profile, answers) {
             if (combo && /hear about|source/i.test(label)) {
               const got = await workdaySourcePrompt(form, page, label, want, job?.company ?? "");
               if (got !== null) {
-                console.log(`    combo "${label.slice(0, 34)}" wanted "${String(want).slice(0, 24)}" -> ${got} selected`);
+                console.log(`    combo "${label.slice(0, 34)}" wanted ${shownWant(want)} -> ${got} selected`);
                 if (got > 0) filled++;
                 // Answered or not, it stops here. The general chooser below
                 // ends by taking whatever a list offers first, and for this
@@ -11072,7 +11083,7 @@ async function applyToJobOnce(context, job, profile, answers) {
 
               let after = await node.inputValue().catch(() => "");
               console.log(
-                `    combo "${label.slice(0, 34)}" wanted "${String(want).slice(0, 24)}" -> ` +
+                `    combo "${label.slice(0, 34)}" wanted ${shownWant(want)} -> ` +
                   `${chosen === null ? (after ? `"${after.slice(0, 30)}"` : "empty") : `${chosen} selected`}`,
               );
               // A list that takes the wrong line is worse than one that takes

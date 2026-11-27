@@ -58,6 +58,9 @@ export function evidence(sent, mail, tried = [], now = Date.now()) {
   const age = (j) => { const h = (now - new Date(j.applied_at ?? now).getTime()) / 3_600_000; return h < 24 ? "under a day old" : h < 72 ? "one to three days" : "over three days"; };
   if (bare.length) say(`  those on the applier's word only, by age: ${JSON.stringify(count(bare, age))}; by system: ${JSON.stringify(count(bare, sys))}`);
 
+  // Sent against the scorer's own rating: what it rated low should not have gone.
+  say(`  by the scorer's rating when sent: ${JSON.stringify(count(sent, (j) => (j.score == null ? "unscored" : String(Math.round(j.score)))))}`);
+
   // 2. Sent twice.
   const groups = {};
   for (const j of sent) { const k = jobKey(j); if (k) (groups[k] ??= []).push(j); }
@@ -69,7 +72,9 @@ export function evidence(sent, mail, tried = [], now = Date.now()) {
     const at = g.map((j) => new Date(j.applied_at ?? 0).getTime()).sort((a, b) => a - b);
     const apart = Math.round((at[at.length - 1] - at[0]) / 3_600_000);
     const sameUrl = new Set(g.map((j) => String(j.url ?? "").split("?")[0])).size < g.length;
-    say(`    ${g.length} times, ${apart}h apart, through ${[...new Set(g.map(sys))].join(" and ")}, ${sameUrl ? "the same address" : "different addresses"}`);
+    const ago = Math.round((now - at[at.length - 1]) / 3_600_000);
+    const sameTitle = new Set(g.map((j) => String(j.title ?? "").trim().toLowerCase())).size === 1;
+    say(`    ${g.length} times, ${apart}h apart, the later ${ago}h ago, through ${[...new Set(g.map(sys))].join(" and ")}, ${sameUrl ? "the same address" : "different addresses"}, ${sameTitle ? "the same title to the letter" : "titles that differ in wording"}`);
     if (now - at[at.length - 1] < 48 * 3_600_000) fresh++;
   }
   if (fresh) failures.push(`${fresh} job(s) sent a second time within the last two days`);
