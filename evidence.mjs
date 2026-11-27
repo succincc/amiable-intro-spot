@@ -39,6 +39,7 @@ export function kindFromSubject(category, subject) {
  * @param now   ms
  */
 export function evidence(sent, mail, tried = [], now = Date.now()) {
+  const digest = {};
   const lines = [];
   const failures = [];
   const say = (t) => lines.push(t);
@@ -58,6 +59,7 @@ export function evidence(sent, mail, tried = [], now = Date.now()) {
   const unverified = tried.filter((j) => j.help_reason === "unconfirmed").length;
   const firm = sent.filter((j) => receipt(j) || anyWord(j)).length;
   say(`  confidence: confirmed by the employer ${firm}; probable (the portal showed its confirmation, nothing since) ${sent.length - firm}; unverified (sent, no confirmation seen — held, never sent again) ${unverified}`);
+  Object.assign(digest, { sent: sent.length, confirmed: firm, probable: sent.length - firm, unverified });
   const bare = sent.filter((j) => !receipt(j) && !anyWord(j));
   const age = (j) => { const h = (now - new Date(j.applied_at ?? now).getTime()) / 3_600_000; return h < 24 ? "under a day old" : h < 72 ? "one to three days" : "over three days"; };
   if (bare.length) say(`  those on the applier's word only, by age: ${JSON.stringify(count(bare, age))}; by system: ${JSON.stringify(count(bare, sys))}`);
@@ -81,6 +83,7 @@ export function evidence(sent, mail, tried = [], now = Date.now()) {
       return "no mail from this employer at all";
     };
     say(`  why: ${JSON.stringify(count(bare, why))}`);
+    digest.why = count(bare, why);
     say(`  employers sent to more than once: ${Object.values(byEmp).filter((g) => g.length > 1).length} of ${Object.keys(byEmp).length}; jobs holding two or more receipts: ${sent.filter((j) => acks(j).length > 1).length}`);
   }
 
@@ -146,5 +149,7 @@ export function evidence(sent, mail, tried = [], now = Date.now()) {
     say(`  ${k}: ${s.length} / ${s.filter(receipt).length} (${pct(s.filter(receipt).length, s.length)}) / ${s.filter((j) => real(j) === "rejected").length} / ${s.filter((j) => real(j) === "interview").length} / ${t.length}${why ? ` (${why})` : ""}${s.length < 20 ? "  [under 20 sent: too few to call a rate]" : ""}`);
   }
 
-  return { lines, failures, corrected: sent.map((j) => ({ ...j, status: real(j) })) };
+  digest.duplicates = extra;
+  digest.wrong = failures.length;
+  return { digest, lines, failures, corrected: sent.map((j) => ({ ...j, status: real(j) })) };
 }

@@ -46,7 +46,7 @@ async function main() {
   let mail = await db("emails?direction=eq.in&select=category,kind,subject,job_id,from_addr,received_at&order=received_at.desc&limit=3000").catch(() => null);
   if (!mail) mail = await db("emails?direction=eq.in&select=category,subject,job_id,from_addr,received_at&order=received_at.desc&limit=3000");
 
-  const { lines, failures, corrected } = evidence(sent, mail, tried);
+  const { digest, lines, failures, corrected } = evidence(sent, mail, tried);
   // What came back first, the evidence last: the end of the log is what is read.
   if (sent.length >= 20) for (const line of outcomeLines(outcomes(corrected))) console.log(line);
   for (const l of lines) console.log(l);
@@ -66,6 +66,8 @@ async function main() {
       if (fresh) console.log(`  ${fresh} of those in the last day: by this person's own yes, or something to look into`);
     }
   }
+  // One line that says it all, for whoever reads only the end.
+  console.log(`DIGEST ${process.env.AP_ACT_AS ? "another person" : "owner"}: ${JSON.stringify(digest)}`);
   if (failures.length) {
     for (const f of failures) console.log(`WRONG: ${f}`);
     process.exitCode = 1;
