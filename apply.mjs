@@ -6621,7 +6621,7 @@ const plainLog = console.log.bind(console);
 // two rounds into one.
 const EVIDENCE = new Map();
 const EVIDENCE_RE =
-  /offered \[|offers \[|offering \[|-> empty|did not take|refused|missing "|no options|never enabled|no box was found|what the form shows|own verdict|what was clicked|page offered|no form here|registering at|source trace|skills trace|prompt skeleton|password reset|    oracle |oracle:|resume reader|from the resume|is yes\/no but|self-identified|opened a second|pressed "|pressing "|pressed it|form state|click did not land|asked for a box|still on the login|page complaints|assumed "|wall|code lookup|no security code|has no answer|required but no answer|page says|second list|found a subject|code in the boxes|after the code/;
+  /offered \[|offers to press|offers \[|offering \[|-> empty|did not take|refused|missing "|no options|never enabled|no box was found|what the form shows|own verdict|what was clicked|page offered|no form here|registering at|source trace|skills trace|prompt skeleton|password reset|    oracle |oracle:|resume reader|from the resume|is yes\/no but|self-identified|opened a second|pressed "|pressing "|pressed it|form state|click did not land|asked for a box|still on the login|page complaints|assumed "|wall|code lookup|no security code|has no answer|required but no answer|page says|second list|found a subject|code in the boxes|after the code/;
 console.log = (...parts) => {
   const n = TAG.getStore();
   if (n === undefined) return plainLog(...parts);
@@ -10724,6 +10724,21 @@ async function applyToJobOnce(context, job, profile, answers) {
             `Filled ${filled} fields, then the portal refused to move past this ` +
             `screen over: ${blockedBy.join("; ")}`.slice(0, 300),
         };
+      }
+      // Say what there is to press. "No submit button" on a form that took
+      // eighteen answers means the button is there under a name or a shape
+      // this does not look for, and only the page can say which.
+      {
+        const pressable = await form
+          .evaluate(() =>
+            Array.from(document.querySelectorAll("button, input[type=submit], input[type=button], [role=button], a[class*=btn i], a[class*=button i]"))
+              .filter((b) => { const r = b.getBoundingClientRect(); return r.width > 0 && r.height > 0; })
+              .map((b) => [b.tagName.toLowerCase(), b.getAttribute("type") ?? "", b.disabled || b.getAttribute("aria-disabled") === "true" ? "off" : "on",
+                           (b.innerText || b.value || b.getAttribute("aria-label") || "").replace(/\s+/g, " ").trim().slice(0, 26)].join("/"))
+              .slice(-14),
+          )
+          .catch(() => null);
+        console.log(`    no submit button; what the form offers to press: ${JSON.stringify(pressable)}`);
       }
       return { status: "needs_help", help_reason: "error",
                note: `No submit button found after filling ${filled} fields.` };
