@@ -407,6 +407,60 @@ async function askByName(careersUrl) {
   return null;
 }
 
+/**
+ * The names an employer might go by on a hiring system: the one in its own
+ * web address, and its name run together. Short ones are left out; three
+ * letters are anybody's.
+ */
+export function namesFor(name, careersUrl) {
+  const own = ownDomain(careersUrl);
+  const run = String(name ?? "").toLowerCase().replace(/&/g, "and").replace(/\b(inc|llc|corp|corporation|company|co|group|holdings|plc|ltd)\b\.?/g, " ").replace(/[^a-z0-9]/g, "");
+  const out = [];
+  for (const n of [own?.label, run]) if (n && n.length >= 4 && !out.includes(n)) out.push(n);
+  // The name and the address agreeing is what makes a bare name on a system
+  // this employer's and not a namesake's.
+  return { names: out.slice(0, 2), agree: Boolean(own?.label && run && (own.label === run || (own.label.length >= 5 && (run.includes(own.label) || own.label.includes(run))))) };
+}
+
+/**
+ * Asking the systems the applier already works on whether the employer is
+ * there, by name. Used when the employer's own careers site refused the
+ * visit or showed nothing: the hiring system is a different server, and its
+ * list is public. A refusal is still honoured where it was given; nothing
+ * more is asked of the site that said no.
+ *
+ * Returned as feeds for bestFeed to count and to check against the
+ * employer's name, as any feed found on a page is.
+ */
+async function askFeedsByName(name, careersUrl) {
+  const { names, agree } = namesFor(name, careersUrl);
+  const feeds = [];
+  for (const n of names) {
+    // Workday: a tenant's own address sends a visitor on to its careers
+    // site, and that address says which site it is.
+    for (const pod of ["wd1", "wd5", "wd3", "wd12", "wd2", "wd10"]) {
+      try {
+        const res = await fetch(`https://${n}.${pod}.myworkdayjobs.com/`, { headers: { "User-Agent": UA, Accept: "text/html" }, redirect: "follow", signal: AbortSignal.timeout(12_000) });
+        const t = res.ok ? atsFrom(res.url) : null;
+        if (t && t.ats === "workday" && t.site && agree) {
+          feeds.push(t);
+          break;
+        }
+      } catch {
+        /* not on this pod */
+      }
+    }
+    // Boards named in an address. Greenhouse says whose board it is, and
+    // bestFeed holds it to that; the others are taken only where the
+    // employer's name and web address agree on the word.
+    feeds.push({ ats: "greenhouse", token: n });
+    if (agree && n.length >= 5) {
+      feeds.push({ ats: "lever", token: n }, { ats: "ashby", token: n });
+    }
+  }
+  return feeds;
+}
+
 /** Why a board's list could not be confirmed: the answer its address gave. */
 async function listAnswer(t) {
   const url =
@@ -874,8 +928,31 @@ if (process.env.RESOLVE_IMPORT_ONLY !== "1") {
         continue;
       }
 
-      // Last, the two systems that can be asked directly by the employer's
-      // own name.
+      // The systems the applier already works on, asked by name.
+      const asked = await bestFeed(await askFeedsByName(c.name, c.careers_url).catch(() => []), c.name).catch(() => null);
+      if (asked) {
+        const t = asked.feed;
+        tally.found++;
+        tally.byname = (tally.byname ?? 0) + 1;
+        byAts[t.ats] = (byAts[t.ats] ?? 0) + 1;
+        lines.push(`  ok ${c.name} — ${t.ats} ${t.token}${t.site ? "/" + t.site : ""}, found by asking it (${asked.count} openings)`);
+        if (APPLY && !LOCAL) {
+          try {
+            const where = `ats=eq.${t.ats}&token=eq.${encodeURIComponent(t.token)}&` + (t.site ? `site=eq.${encodeURIComponent(t.site)}` : "site=is.null");
+            const have = (await db(`companies?${where}&select=id&limit=1`)) ?? [];
+            if (!have.length) {
+              await db("companies", { method: "POST", headers: { Prefer: "return=minimal" }, body: JSON.stringify([{ ats: t.ats, token: t.token, name: c.name, enabled: true, pod: t.pod ?? null, site: t.site ?? null, careers_url: c.careers_url, last_error: null }]) });
+            }
+            await save(c, { status: "ok", ats: t.ats, token: t.token, pod: t.pod ?? null, site: t.site ?? null, resolved_url: seen.final, note: `asked ${t.ats} by name (${asked.count} openings)` });
+          } catch (e) {
+            lines.push(`     could not save ${c.name}: ${String(e.message).slice(0, 90)}`);
+          }
+        }
+        continue;
+      }
+
+      // Then the two systems with readers of their own that can be asked by
+      // the employer's name.
       const named2 = await askByName(c.careers_url).catch(() => null);
       if (named2) {
         tally.asked = (tally.asked ?? 0) + 1;
