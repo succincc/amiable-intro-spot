@@ -7351,6 +7351,19 @@ async function ukgAccount(page, form, profile, job) {
   const stillWalled = async () => {
     await page.goto(job.apply_url || job.url, { waitUntil: "domcontentloaded", timeout: 45_000 }).catch(() => {});
     await page.waitForTimeout(7000);
+    // What the posting offers now, by its short words: a way to apply means
+    // the board knows who this is, whatever else is printed on it.
+    let words = [];
+    for (const f of page.frames()) {
+      const w = await f.evaluate(() => {
+        const on = (e) => { const b = e.getBoundingClientRect(); return b.width > 0 && b.height > 0; };
+        return Array.from(document.querySelectorAll("a, button, [role=button], input[type=button], input[type=submit]")).filter(on).map((e) => (e.innerText || e.value || "").replace(/\s+/g, " ").trim()).filter((t) => t && t.length < 24);
+      }).catch(() => []);
+      words = words.concat(w);
+    }
+    const kinds = words.filter((t) => /apply|sign|log ?out|account|profile|presence|welcome|my /i.test(t)).map((t) => t.replace(/welcome,?\s+.*/i, "Welcome [name]")).filter((t, i, a) => a.indexOf(t) === i).slice(0, 10);
+    console.log(`    back at the posting it offers: ${JSON.stringify(kinds)}`);
+    if (words.some((t) => /^apply( now| for this (job|position))?$/i.test(t)) || words.some((t) => /^(sign|log) ?out$/i.test(t))) return null;
     for (const f of page.frames()) {
       const b = f.getByText(/^\s*sign in\s*$/i).first();
       if (await b.isVisible().catch(() => false)) return f;
