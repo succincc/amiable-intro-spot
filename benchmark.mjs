@@ -14,7 +14,7 @@
  */
 import { guardLogs } from "./quiet.mjs";
 import { requirementReport, unsupportedClaims, writingFindings, segmentPosting } from "./quality.mjs";
-import { requirementTerms, NAMED_TERMS } from "./ats.mjs";
+import { requirementTerms, isNamedTerm, showsTerm } from "./ats.mjs";
 guardLogs();
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -53,6 +53,7 @@ export function compare(own, material, rows) {
     out.read++;
     const pa = a.required.percent ?? 0, pb = b.required.percent ?? 0;
     out.before.push(pa); out.after.push(pb);
+    if (a.named.total >= 3) { (out.nBefore ??= []).push(a.named.percent); (out.nAfter ??= []).push(b.named.percent); if (b.named.percent > a.named.percent) out.nBetter = (out.nBetter ?? 0) + 1; else if (b.named.percent < a.named.percent) out.nWorse = (out.nWorse ?? 0) + 1; }
     if (a.preferred.total) { out.prefBefore.push(a.preferred.percent ?? 0); out.prefAfter.push(b.preferred.percent ?? 0); }
     if (pb > pa) out.better++; else if (pb === pa) out.same++; else out.worse++;
     const extra = unsupportedClaims(written, material);
@@ -75,11 +76,11 @@ export function compare(own, material, rows) {
  *     claim it: a matter of which jobs are chosen, or of a thin profile).
  */
 export function whereItGoes(material, rows) {
-  const named = new Set(NAMED_TERMS.map((t) => String(t).toLowerCase()));
-  const mat = String(material ?? "").toLowerCase();
+  const named = { has: isNamedTerm };
+  const mat = String(material ?? "");
   const o = { postings: 0, terms: 0, words: 0, wordsCovered: 0, named: 0, covered: 0, leftOut: 0, notClaimed: 0, marked: 0, byScore: {}, missingNamed: {}, commonWords: {} };
   for (const j of rows) {
-    const posting = String(j.description ?? ""), written = String(j.tailored_resume ?? "").toLowerCase();
+    const posting = String(j.description ?? ""), written = String(j.tailored_resume ?? "");
     if (posting.length < 300 || written.length < 300) continue;
     const seg = segmentPosting(posting);
     const marked = seg.marked && Boolean(seg.required.trim());
@@ -90,10 +91,10 @@ export function whereItGoes(material, rows) {
     let n = 0, c = 0;
     for (const t of terms) {
       o.terms++;
-      if (!named.has(t)) { o.words++; if (written.includes(t)) o.wordsCovered++; else o.commonWords[t] = (o.commonWords[t] ?? 0) + 1; continue; }
+      if (!named.has(t)) { o.words++; if (written.toLowerCase().includes(t)) o.wordsCovered++; else o.commonWords[t] = (o.commonWords[t] ?? 0) + 1; continue; }
       o.named++; n++;
-      if (written.includes(t)) { o.covered++; c++; }
-      else if (mat.includes(t)) o.leftOut++;
+      if (showsTerm(written, t)) { o.covered++; c++; }
+      else if (showsTerm(mat, t)) o.leftOut++;
       else { o.notClaimed++; o.missingNamed[t] = (o.missingNamed[t] ?? 0) + 1; }
     }
     const band = j.score == null ? "unscored" : j.score >= 8 ? "8-10" : j.score >= 6 ? "6-7" : "1-5";
@@ -123,7 +124,8 @@ export function compareLines(o) {
   if (!o.read) return [`resume benchmark: no posting on record has both a written resume and requirements that could be read (${o.noRequirements} had no requirements to read)`];
   return [
     `resume benchmark over ${o.read} posting(s), the person's own resume against the one written for each, same postings, same measure:`,
-    `  required qualifications named — own: ${mean(o.before)}% on average (middle ${median(o.before)}%, lowest ${Math.min(...o.before)}%); written: ${mean(o.after)}% (middle ${median(o.after)}%, lowest ${Math.min(...o.after)}%)`,
+    o.nBefore?.length ? `  named skills, tools and credentials shown (${o.nBefore.length} posting(s) name three or more) — own: ${mean(o.nBefore)}% on average (lowest ${Math.min(...o.nBefore)}%); written: ${mean(o.nAfter)}% (lowest ${Math.min(...o.nAfter)}%); written shows more on ${o.nBetter ?? 0}, fewer on ${o.nWorse ?? 0}` : `  no posting named three or more skills, tools or credentials`,
+    `  all frequent terms of the posting, most of which are not qualifications — own: ${mean(o.before)}% on average (middle ${median(o.before)}%, lowest ${Math.min(...o.before)}%); written: ${mean(o.after)}% (middle ${median(o.after)}%, lowest ${Math.min(...o.after)}%)`,
     `  written one names more of them on ${o.better}, the same on ${o.same}, fewer on ${o.worse}`,
     o.prefBefore.length ? `  preferred qualifications named (${o.prefBefore.length} posting(s) list any) — own: ${mean(o.prefBefore)}%; written: ${mean(o.prefAfter)}%` : `  no posting set its preferred qualifications apart`,
     `  figures or credentials in a written resume that the person's own material does not hold: ${o.claims} across ${o.claimsJobs} resume(s)${o.claims ? " — each of these is replaced by the person's own resume before sending" : ""}`,

@@ -604,5 +604,17 @@ quiet.hideJob({ company: "ZQ" });
   check("evidence: a true record has nothing wrong with it", clean.failures, []);
 }
 
+{
+  // The named qualifications, apart from the posting's frequent words.
+  const q = await import("./quality.mjs");
+  const posting = "Requirements:\n- 3 years of SQL and Microsoft Excel\n- Strong communication with customers\n- Lift 50 pounds; related degree or equivalent\n" + "We offer compensation and programs for employees. ".repeat(4);
+  const shows = q.requirementReport("Built SQL queries and Excel pivot tables. Presented weekly results to clients.", posting, "X");
+  const lacks = q.requirementReport("Stocked shelves and ran the register.", posting, "X");
+  check("requirements: named skills are counted apart from frequent words, and shown experience counts without the word", [
+    shows.named.total, shows.named.covered, lacks.named.covered, lacks.named.missing.includes("sql"),
+    shows.required.total > shows.named.total,
+  ], [3, 3, 0, true, true]);
+}
+
 console.log(failed ? `unit: ${failed} failed, ${passed} passed.` : `unit: all ${passed} passed.`);
 process.exit(failed ? 1 : 0);

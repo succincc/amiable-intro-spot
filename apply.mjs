@@ -8399,8 +8399,13 @@ async function attachResumeOnly(context, page, form, profile, job) {
     if ((job.description ?? "").length > 300) {
       const own = standardResume(profile?.resume_text, profile) || String(profile?.resume_text ?? "");
       const plain = tidyWriting(alignToPosting(own, job.description ?? "", job.company ?? "").text || own).text;
-      const a = requirementReport(finalText, job.description, job.company ?? "").required;
-      const b = requirementReport(plain, job.description, job.company ?? "").required;
+      // By the named skills, tools and credentials where the posting names
+      // three or more; by every frequent term otherwise.
+      const ra = requirementReport(finalText, job.description, job.company ?? "");
+      const rb = requirementReport(plain, job.description, job.company ?? "");
+      const byName = ra.named.total >= 3;
+      const a = byName ? ra.named : ra.required;
+      const b = byName ? rb.named : rb.required;
       if (plain.trim() && plain !== finalText && a.total && b.covered > a.covered && !unsupportedClaims(plain, ownMaterial).length) {
         console.log(`    the written resume named ${a.covered} of ${a.total} required qualifications and the candidate's own names ${b.covered}; their own goes instead`);
         finalText = plain;
@@ -8439,10 +8444,16 @@ async function attachResumeOnly(context, page, form, profile, job) {
     console.log(`    ${check.line}`);
     if (check.requirements?.required?.total) {
       const had = ATS_REPORT.get(job.id) ?? { match: aligned.after, gaps: [] };
-      ATS_REPORT.set(job.id, { ...had, match: check.requirements.required.percent ?? had.match, gaps: [...new Set([...check.requirements.required.missing, ...(had.gaps ?? [])])].slice(0, 12) });
+      // What is kept on the job: the share of the posting's named skills,
+      // tools and credentials the resume shows, and which it does not —
+      // where the posting names at least three. Otherwise the wider reading.
+      const nm = check.requirements.named;
+      const useNamed = nm && nm.total >= 3;
+      ATS_REPORT.set(job.id, { ...had, match: (useNamed ? nm.percent : check.requirements.required.percent) ?? had.match, gaps: [...new Set([...(nm?.missing ?? []), ...(useNamed ? [] : check.requirements.required.missing), ...(useNamed ? [] : (had.gaps ?? []))])].slice(0, 12) });
     }
     if (check.pdf.checked) { LAST_LOOK.pdfRead++; if (!check.pdf.ok) LAST_LOOK.pdfBad++; }
     if (check.requirements?.required?.total) LAST_LOOK.required.push(check.requirements.required.percent ?? 0);
+    if (check.requirements?.named?.total >= 3) (LAST_LOOK.named ??= []).push(check.requirements.named.percent ?? 0);
     if (check.pdf.checked && !check.pdf.ok) console.log(`    the PDF does not read back cleanly: ${check.pdf.problems.join("; ")}`);
   } catch { /* a report, not a gate */ }
 
@@ -14021,7 +14032,7 @@ const main = async () => {
     if (Object.keys(ORIGINS).length) console.log(`why each one did not go: ${JSON.stringify(ORIGINS)}`);
     if (LAST_LOOK.resumes) {
       const r = LAST_LOOK.required;
-      console.log(`last look at ${LAST_LOOK.resumes} resume(s): ${LAST_LOOK.tidied} tidied, ${LAST_LOOK.ownCovers ?? 0} sent as the person's own because it named more of what was required, ${LAST_LOOK.ownInstead} sent as the person's own because the written one claimed something of its own, ${LAST_LOOK.contactAdded} given an email or phone number; PDFs read back ${LAST_LOOK.pdfRead - LAST_LOOK.pdfBad} of ${LAST_LOOK.pdfRead}${LAST_LOOK.pdfRead ? "" : " (no reader on this machine)"}; required qualifications covered, by this system's own estimate: ${r.length ? `${Math.round(r.reduce((a, b) => a + b, 0) / r.length)}% on average, lowest ${Math.min(...r)}%` : "not measured"}`);
+      console.log(`last look at ${LAST_LOOK.resumes} resume(s): ${LAST_LOOK.tidied} tidied, ${LAST_LOOK.ownCovers ?? 0} sent as the person's own because it named more of what was required, ${LAST_LOOK.ownInstead} sent as the person's own because the written one claimed something of its own, ${LAST_LOOK.contactAdded} given an email or phone number; PDFs read back ${LAST_LOOK.pdfRead - LAST_LOOK.pdfBad} of ${LAST_LOOK.pdfRead}${LAST_LOOK.pdfRead ? "" : " (no reader on this machine)"}; named qualifications shown, by this system's own estimate: ${LAST_LOOK.named?.length ? `${Math.round(LAST_LOOK.named.reduce((a, b) => a + b, 0) / LAST_LOOK.named.length)}% on average over ${LAST_LOOK.named.length}, lowest ${Math.min(...LAST_LOOK.named)}%` : "no posting named three"}; all frequent terms of the posting: ${r.length ? `${Math.round(r.reduce((a, b) => a + b, 0) / r.length)}% on average, lowest ${Math.min(...r)}%` : "not measured"}`);
     }
     if (sameJobSkipped) used("same job under another address set aside", sameJobSkipped);
     if (ATS_REPORT.size) used("requirements report kept", ATS_REPORT.size);

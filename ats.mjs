@@ -92,7 +92,12 @@ const STOP = new Set(
     "across within including include includes also well best better " +
     "opportunity opportunities benefits salary range equal employer diverse " +
     "inclusive applicants please apply applying hiring process offer offers " +
-    "looking seeking want wants need needs like likes plus bonus nice have")
+    "looking seeking want wants need needs like likes plus bonus nice have " +
+    // Measured over 120 real postings: the commonest "requirements" no
+    // resume could be expected to hold, because they are not requirements.
+    "related compensation based minimum equivalent pounds information field " +
+    "knowledge programs degree product teams equipment employees future place " +
+    "career impact ensure provide support various duties perform environment")
     .split(/\s+/),
 );
 
@@ -156,6 +161,28 @@ export function requirementTerms(posting, limit = 40, company = "") {
     .sort((a, b) => b[1] - a[1])
     .slice(0, limit)
     .map(([term, weight]) => ({ term, weight }));
+}
+
+/** Whether a term is one of the named skills, tools or credentials, rather than a frequent word. */
+export function isNamedTerm(term) {
+  const t = String(term ?? "").toLowerCase();
+  return EVIDENCE.some((e) => e.term.toLowerCase() === t) || ACRONYMS.some(([s, l]) => s.toLowerCase() === t || l.toLowerCase() === t);
+}
+
+/**
+ * Whether a resume names a term, or shows the experience the term stands
+ * for (by the same proof alignToPosting demands before it will add the
+ * employer's wording). "Presented quarterly results to clients" shows
+ * communication without the word.
+ */
+export function showsTerm(resumeText, term) {
+  const text = String(resumeText ?? "");
+  const t = String(term ?? "").toLowerCase();
+  if (text.toLowerCase().includes(t)) return true;
+  const rule = EVIDENCE.find((e) => e.term.toLowerCase() === t);
+  if (rule && rule.proof.test(text)) return true;
+  const pair = ACRONYMS.find(([s, l]) => s.toLowerCase() === t || l.toLowerCase() === t);
+  return Boolean(pair && (text.toLowerCase().includes(pair[0].toLowerCase()) || text.toLowerCase().includes(pair[1].toLowerCase())));
 }
 
 /** How much of what the posting screens on this resume actually says. */
