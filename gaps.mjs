@@ -40,6 +40,11 @@ async function db(path, init = {}) {
 
 // At most this many questions waiting at once: a page of forty is a page nobody answers.
 const WAITING_AT_MOST = 8;
+// Words every posting uses about itself ("we are hiring", "strong
+// communication"): found as requirements, but no question worth a person's
+// time. On the first real run "hiring" was asked of someone for 125
+// postings. Not asked; and one already asked and unanswered is taken down.
+const NOT_WORTH_ASKING = new Set(["hiring", "communication", "problem solving", "attention to detail", "time management", "teamwork", "leadership"]);
 // Asked for by at least this many postings before it is worth a question.
 const ASKED_BY_AT_LEAST = 3;
 
@@ -87,10 +92,15 @@ async function main() {
   console.log(`named qualifications required by ${read} posting(s) matched to this person and shown nowhere in their material: ${gaps.length ? gaps.slice(0, 20).map(([t, n]) => `${t} ${n}`).join(", ") : "none"}`);
 
   let waiting = state.filter((s) => s === "waiting").length;
+  for (const [term, st] of asked) {
+    if (st !== "waiting" || !NOT_WORTH_ASKING.has(term)) continue;
+    const gone = await db(`answers?q_key=eq.${encodeURIComponent(qualKey(term))}&confirmed=eq.false`, { method: "DELETE", headers: { Prefer: "return=minimal" } }).then(() => true).catch(() => false);
+    if (gone) { waiting--; asked.delete(term); }
+  }
   let put = 0;
   for (const [term, n] of gaps) {
     if (waiting >= WAITING_AT_MOST) break;
-    if (n < ASKED_BY_AT_LEAST || asked.has(term.toLowerCase())) continue;
+    if (n < ASKED_BY_AT_LEAST || asked.has(term.toLowerCase()) || NOT_WORTH_ASKING.has(term.toLowerCase())) continue;
     const ok = await db("answers", {
       method: "POST",
       headers: { Prefer: "resolution=ignore-duplicates,return=minimal" },
