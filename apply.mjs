@@ -755,6 +755,10 @@ function fieldValue(label, p) {
   if (/\b(where|which company)\b[^?]{0,30}\bmost recent(ly)?\b[^?]{0,20}\b(work|employ)|\bmost recent (employer|company)\b|\bcurrent or (most recent|last|previous) (employer|company)\b/i.test(String(label))) {
     let from = null;
     try { from = latestRoleFrom(null, p)?.company || parseWorkFromResume(p.resume_text)?.company || null; } catch { from = null; }
+    if (!p.current_company && !from) {
+      const r = String(p.resume_text ?? "");
+      console.log(`    "most recently worked" has no answer: no current employer on file; the resume is ${r.length} character(s) with ${(r.match(/(19|20)\d{2}\s*(-|–|—|to|through)\s*(present|current|now|(19|20)\d{2})/gi) ?? []).length} date range(s) and ${(r.match(/\n/g) ?? []).length} line break(s)`);
+    }
     return p.current_company || from || undefined;
   }
   if (has(label, "current company", "current employer", "employer name", "company name")) {
@@ -820,6 +824,9 @@ function fieldValue(label, p) {
     has(label, "how did you hear", "referral source", "referred by", "how did you learn",
                "how did you find", "where did you hear", "where did you find",
                "how did you come across", "how did you discover", "source of application")
+    // "How did you first hear about <employer>?" — one word between "you"
+    // and "hear", and a required box went empty on a form otherwise full.
+    || /\b(how|where) did you (first|originally|initially) (hear|learn|find out|come across|discover)\b/i.test(String(label))
   ) {
     return "Company website";
   }
