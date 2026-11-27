@@ -109,6 +109,7 @@ if (process.env.INDEXES_IMPORT_ONLY !== "1") {
 
   // 2. Each company's entry in Wikidata, fifty at a time.
   const item = new Map();
+  const errors = [];
   for (let i = 0; i < companies.length; i += 50) {
     const batch = companies.slice(i, i + 50);
     try {
@@ -126,8 +127,8 @@ if (process.env.INDEXES_IMPORT_ONLY !== "1") {
           from = back.get(from);
         }
       }
-    } catch {
-      /* this batch is tried again next month */
+    } catch (e) {
+      errors.push(`entry lookup: ${String(e?.message ?? e).slice(0, 60)}`);
     }
     await pause(600);
   }
@@ -144,11 +145,12 @@ if (process.env.INDEXES_IMPORT_ONLY !== "1") {
         const url = best?.mainsnak?.datavalue?.value;
         if (typeof url === "string") site.set(q, url);
       }
-    } catch {
-      /* this batch is tried again next month */
+    } catch (e) {
+      errors.push(`web address lookup: ${String(e?.message ?? e).slice(0, 60)}`);
     }
     await pause(600);
   }
+  console.log(`entries found for ${item.size} name(s), ${ids.length} distinct; web addresses for ${site.size}${errors.length ? `; errors ${JSON.stringify([...new Set(errors)].slice(0, 4))}` : ""}`);
 
   // 4. The ones not already held.
   const known = (await db("company_candidates?select=name,careers_url&limit=10000")) ?? [];
@@ -160,14 +162,21 @@ if (process.env.INDEXES_IMPORT_ONLY !== "1") {
   let held = 0;
   for (const c of companies) {
     const name = employerName(c.name);
-    const url = careersFrom(site.get(item.get(c.title)) ?? "");
-    if (!url) { noSite++; continue; }
+    // The company's own address where one is on file; otherwise the guess
+    // from its name, which the resolver follows or drops.
+    let url = careersFrom(site.get(item.get(c.title)) ?? "");
+    if (!url) {
+      noSite++;
+      const slug = flat(name);
+      if (slug.length < 4 || slug.length > 30) continue;
+      url = `https://www.${slug}.com/careers`;
+    }
     if (names.has(flat(name)) || urls.has(url)) { held++; continue; }
     names.add(flat(name));
     urls.add(url);
     fresh.push({ name, careers_url: url, status: "pending" });
   }
-  console.log(`${companies.length} companies on the two lists; ${site.size} with a web address on file; ${held} already held; ${noSite} with no address; ${fresh.length} new`);
+  console.log(`${companies.length} companies on the two lists; ${site.size} with a web address on file; ${held} already held; ${noSite} with no address on file (started from a guess at it); ${fresh.length} new`);
 
   if (APPLY && fresh.length) {
     let added = 0;
