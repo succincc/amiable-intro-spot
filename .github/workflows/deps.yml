@@ -6,9 +6,13 @@ name: deps
 
 on:
   workflow_dispatch:
+    inputs:
+      branch:
+        description: "true: also put the upgraded lockfile on the branch deps-audit-fix (never on main)"
+        default: "false"
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   trial:
@@ -29,6 +33,19 @@ jobs:
       - name: Types
         run: bunx tsc --noEmit -p .
       - name: Tests
-        run: bunx vitest run 2>&1 | tail -6
+        run: |
+          set -o pipefail
+          bunx vitest run 2>&1 | grep -E "Tests|Test Files|FAIL"
       - name: Build
-        run: bun run build 2>&1 | tail -8
+        run: |
+          set -o pipefail
+          bun run build 2>&1 | tail -4
+      - name: The upgraded lockfile, on its own branch
+        if: github.event.inputs.branch == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B deps-audit-fix
+          git add bun.lock
+          git commit -m "Dependency upgrades within the ranges already allowed (bun audit fix); types, tests and build passed on the runner"
+          git push -f origin deps-audit-fix
