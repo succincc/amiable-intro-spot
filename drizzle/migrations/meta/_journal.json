@@ -260,6 +260,13 @@
       "when": 1795747658005,
       "tag": "0036_workspaces_contract",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1795748323575,
+      "tag": "0037_admin_overview",
+      "breakpoints": true
     }
   ]
 }

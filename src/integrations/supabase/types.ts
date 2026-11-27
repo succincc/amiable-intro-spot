@@ -1196,6 +1196,7 @@ export type Database = {
       }
     }
     Functions: {
+      admin_overview: { Args: never; Returns: Json }
       admin_reset_workspace: { Args: { p_user: string }; Returns: string }
       app_uid: { Args: never; Returns: string }
       app_uid_or_owner: { Args: never; Returns: string }
