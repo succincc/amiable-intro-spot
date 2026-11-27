@@ -697,6 +697,10 @@ function fieldValue(label, p) {
   // Workday repeats a label into its own id, so a bare signature box reads
   // "name name name" and matched none of the rules above it.
   if (/^(name ?)+$/.test(String(label).trim())) return p.full_name;
+  // Ashby calls its one name box "Name" on some boards and "Full Name" on
+  // others; the box itself is the same, and says so in its id. Ten forms in
+  // a row stopped with every other field filled and this one empty.
+  if (/_systemfield_name\b/.test(String(label))) return p.full_name;
   if (has(label, "email", "e-mail")) return p.email;
   // Before the generic phone rule, which matches on "phone" and would put the
   // phone NUMBER into a country-code box and an extension box alike. Workday
@@ -717,7 +721,7 @@ function fieldValue(label, p) {
   // number on file is a mobile for virtually everyone, and leaving it blank
   // stopped a Johnson & Johnson application dead.
   if (has(label, "phone device type", "device type", "phone type")) return "Mobile";
-  if (has(label, "phone", "mobile", "telephone", "cell")) return p.phone;
+  if (has(label, "phone", "mobile", "telephone", "cell", "contact number")) return p.phone;
   if (has(label, "linkedin")) return p.linkedin_url;
   if (has(label, "github")) return p.github_url;
   if (has(label, "portfolio", "website", "personal site")) return p.portfolio_url;
@@ -743,6 +747,14 @@ function fieldValue(label, p) {
   }
   if (has(label, "location") && !has(label, "relocate", "relocating", "salary", "compensation", "currency")) {
     return [p.city, p.state].filter(Boolean).join(", ");
+  }
+  // "Where have you most recently worked?" is the same question in a
+  // sentence, and the resume on file answers it where the profile's own
+  // field is empty.
+  if (/\b(where|which company)\b[^?]{0,30}\bmost recent(ly)?\b[^?]{0,20}\b(work|employ)|\bmost recent (employer|company)\b|\bcurrent or (most recent|last|previous) (employer|company)\b/i.test(String(label))) {
+    let from = null;
+    try { from = latestRoleFrom(null, p)?.company ?? null; } catch { from = null; }
+    return p.current_company || from || undefined;
   }
   if (has(label, "current company", "current employer", "employer name", "company name")) {
     return p.current_company;
@@ -11057,6 +11069,15 @@ async function applyToJobOnce(context, job, profile, answers) {
           })
           .catch(() => null);
         console.log(`    no submit button; the page offered ${JSON.stringify(made)}`);
+        // A posting that has come down often sends its address on to the
+        // employer's job search: a keyword box, a location box, nothing to
+        // fill in and nothing to send. That is not a form that failed and
+        // not something for a person to finish; the posting is gone.
+        const boxes = made?.inputs ?? [];
+        if (boxes.length > 0 && boxes.length <= 4 && boxes.every((b) => /search|keyword|location|query/i.test(b))) {
+          console.log("    the address now opens the employer's job search, not a posting");
+          return { status: "skipped", skip_reason: "the posting is no longer up: its address opens the employer's job search" };
+        }
       }
       return { status: "needs_help", help_reason: "error",
                note: `No submit button found after filling ${filled} fields.` };
@@ -11981,7 +12002,12 @@ const main = async () => {
   // A scheduled run sets RESPECT_AUTOPILOT and carries no dry_run of its own.
   // It submits only if the panel says so. Four real applications once went
   // out because a YAML default said false and nobody had been asked.
-  if (process.env.RESPECT_AUTOPILOT === "true") {
+  //
+  // And for anybody but the owner, always: a run the owner starts by hand to
+  // try something is the owner's own decision about the owner's own
+  // applications. It was also going down the line and filling forms, ready
+  // to submit, for a person whose autopilot was off.
+  if (process.env.RESPECT_AUTOPILOT === "true" || process.env.AP_ACT_AS) {
     if (profileRow.autopilot !== true) {
       // The checkbox is on the DASHBOARD, under "autopilot", and reads
       // "apply automatically every 3 hours". This said Settings, which is
@@ -12014,6 +12040,19 @@ const main = async () => {
   // The owner's rule, built in rather than configurable: only postings from
   // the last two weeks are applied to.
   const FRESH_SINCE = new Date(Date.now() - FRESH_DAYS * 86_400_000).toISOString().slice(0, 19) + "Z";
+
+  // What waited in the queue until it went stale is taken out of it. Nothing
+  // older than the freshness rule is ever picked up, so these sat there
+  // being counted as ready: a hundred and seven "ready" on one system of
+  // which five could be applied to.
+  try {
+    const gone = await db(`jobs?status=eq.queued&posted_at=lt.${encodeURIComponent(FRESH_SINCE)}`, {
+      method: "PATCH",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify({ status: "skipped", skip_reason: `posted more than ${FRESH_DAYS} days ago`, updated_at: new Date().toISOString() }),
+    });
+    if (gone?.length) console.log(`taken out of the queue as stale: ${gone.length}`);
+  } catch { /* the queue is as it was */ }
 
   // Employers whose portal has asked for a human check on the last attempts.
   // Judged employer by employer, on what happened, and only briefly: each
