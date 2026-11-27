@@ -109,7 +109,12 @@ export async function open(fetchImpl = fetch) {
     });
     session = res.headers.get("mcp-session-id") ?? session;
     if (notify) return null;
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (!res.ok) {
+      // What the refusal itself says, so it can be told apart: a key that is
+      // wanted, a client that is not known, or an address that is not served.
+      const said = (await res.text().catch(() => "")).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 140);
+      throw new Error(`HTTP ${res.status}${res.headers.get("www-authenticate") ? " (asks for sign-in)" : ""}${res.headers.get("server") ? ` from ${res.headers.get("server")}` : ""}: ${said}`);
+    }
     const reply = readReply(await res.text(), res.headers.get("content-type") ?? "");
     if (!reply) throw new Error("no answer that could be read");
     if (reply.error) throw new Error(`refused: ${String(reply.error.message ?? reply.error.code).slice(0, 60)}`);

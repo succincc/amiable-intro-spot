@@ -417,7 +417,7 @@ async function fromZipRecruiter(titles, excludes, where, tally) {
   try {
     mcp = await zip.open();
   } catch (e) {
-    tally.errors.push(`ziprecruiter: ${String(e?.message ?? e).slice(0, 50)}`);
+    tally.errors.push(`ziprecruiter: ${String(e?.message ?? e).slice(0, 220)}`);
     return [];
   }
   if (!mcp.tool) {
