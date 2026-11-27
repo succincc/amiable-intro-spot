@@ -1,10 +1,11 @@
 import { useState } from "react";
-import { Link } from "@tanstack/react-router";
+import { Link, useRouteContext } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 
 import { Btn, Cursor, ErrorLine, Section } from "@/components/mission-control/async-state";
 import { supabase } from "@/integrations/supabase/client";
+import { aiKeyStatus } from "@/lib/aikey.functions";
 import { startBackfill } from "@/lib/engine.functions";
 import { STARTED, isStarted, readyToStart, setupSteps } from "@/lib/start";
 
@@ -19,6 +20,8 @@ export function StartCard() {
   const backfill = useServerFn(startBackfill);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const keyStatus = useServerFn(aiKeyStatus);
+  const { access } = useRouteContext({ from: "/_authenticated" });
   const q = useQuery({
     queryKey: ["start"],
     refetchInterval: 60_000,
@@ -32,7 +35,9 @@ export function StartCard() {
         supabase.from("google_tokens").select("connected_at,refresh_token").eq("id", 1).maybeSingle(),
       ]);
       if (p.error) throw p.error;
-      return { profile: (p.data ?? null) as Record<string, unknown> | null, titles: c.data?.titles ?? [], mailLastRun: m.data?.last_run_at ?? null, mailConnectedAt: g.data?.refresh_token ? (g.data.connected_at ?? null) : null, waiting: a.count ?? 0, reviewing: r.count ?? 0 };
+      // Whether a key of their own is saved; the key itself never comes here.
+      const key = await keyStatus().catch(() => null);
+      return { ownKey: key && key.ok ? key.set : undefined, profile: (p.data ?? null) as Record<string, unknown> | null, titles: c.data?.titles ?? [], mailLastRun: m.data?.last_run_at ?? null, mailConnectedAt: g.data?.refresh_token ? (g.data.connected_at ?? null) : null, waiting: a.count ?? 0, reviewing: r.count ?? 0 };
     },
   });
 
@@ -50,7 +55,7 @@ export function StartCard() {
   if (q.isLoading) return <Section title="start"><Cursor /></Section>;
   if (q.error || !q.data) return <Section title="start"><ErrorLine error={q.error ?? "could not read the profile"} onRetry={() => q.refetch()} /></Section>;
 
-  const steps = setupSteps({ ...q.data, now: new Date() });
+  const steps = setupSteps({ ...q.data, mustHaveOwnKey: access !== "owner", now: new Date() });
   const ready = readyToStart(steps);
   const on = isStarted(q.data.profile);
   const wrong = String(q.data.profile?.["health_state"] ?? "").split("\n").filter(Boolean);

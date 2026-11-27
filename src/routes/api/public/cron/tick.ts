@@ -118,7 +118,20 @@ async function tick() {
   const mailFor = async (supabase: any) => {
       const { fetchMessages } = await import("@/lib/gmail.server");
       const { ingestMessages, sendApprovedReplies } = await import("@/lib/email.server");
+      // Each step is written down before it is taken. A reading the host
+      // ends partway raises no error anywhere: the turn was taken, nothing
+      // was recorded, and the mailbox simply read as stale — for six hours,
+      // once. The step it stopped on is what says why.
+      const step = async (what: string) => {
+        try {
+          await supabase.from("email_sync").update({ last_status: what }).eq("id", 1);
+        } catch {
+          /* a note, never a reason to stop */
+        }
+      };
+      await step("reading: asking Gmail");
       const messages = await fetchMessages(supabase, "in:inbox newer_than:6h", 30);
+      await step(`reading: filing ${messages.length}`);
       const counts: { read: number; stored?: number; drafted?: number; sent?: number; failed?: number; told?: number; booked?: number } = { read: messages.length };
       if (messages.length) {
         const r: any = await ingestMessages(supabase, messages);
@@ -137,6 +150,7 @@ async function tick() {
         // the health check like a mailbox nobody is reading.
         await ingestMessages(supabase, []);
       }
+      await step("reading: checking what was filed as an interview");
       // Mail filed under interviews by an older reading is read again by
       // the current one, so a receipt that was called an interview stops
       // being one. Only ever from "interview" to something lesser.
@@ -162,12 +176,14 @@ async function tick() {
       } catch {
         /* tidying the labels never stops the mail */
       }
+      await step("reading: sending approved replies");
       const replies = await sendApprovedReplies(supabase);
       counts.sent = replies.sent;
       counts.failed = replies.failed;
       // The few messages the owner has to know about: an interview with a
       // time on it, a link to pick one, an assessment, an offer.
       try {
+        await step("reading: telling the owner what needs them");
         const { tellOwner } = await import("@/lib/moments.server");
         const told = await tellOwner(supabase);
         counts.told = told.told;
@@ -175,6 +191,7 @@ async function tick() {
       } catch {
         /* telling the owner never stops the mail; it is tried again next hour */
       }
+      await step("ok");
       return counts;
   };
 

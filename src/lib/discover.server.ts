@@ -131,7 +131,12 @@ async function lever(token: string, name: string): Promise<Job[]> {
     salary_text: j.salaryRange
       ? `${j.salaryRange.min}-${j.salaryRange.max} ${j.salaryRange.currency ?? ""}`
       : undefined,
-    description: clean(j.descriptionPlain ?? j.description),
+    // Tidied when first read, as a Greenhouse description is.
+    get description() {
+      const tidy = clean(j.descriptionPlain ?? j.description);
+      Object.defineProperty(this, "description", { value: tidy, writable: true, enumerable: true, configurable: true });
+      return tidy;
+    },
     source: "lever",
     ats: "lever",
     posted_at: j.createdAt ? new Date(j.createdAt).toISOString() : undefined,
@@ -150,7 +155,12 @@ async function ashby(token: string, name: string): Promise<Job[]> {
     location: j.location,
     remote: !!j.isRemote || REMOTE_RE.test(j.location ?? ""),
     salary_text: j.compensation?.compensationTierSummary,
-    description: clean(j.descriptionPlain ?? j.descriptionHtml),
+    // Tidied when first read, as a Greenhouse description is.
+    get description() {
+      const tidy = clean(j.descriptionPlain ?? j.descriptionHtml);
+      Object.defineProperty(this, "description", { value: tidy, writable: true, enumerable: true, configurable: true });
+      return tidy;
+    },
     source: "ashby",
     ats: "ashby",
     posted_at: j.publishedAt,

@@ -17,6 +17,10 @@ export function setupSteps(s: {
   waiting: number;
   /** Postings scored in the middle band, held for the owner's yes. */
   reviewing?: number;
+  /** Whether this person has saved a writing key of their own; left out where that is not known. */
+  ownKey?: boolean | undefined;
+  /** True for everyone but the owner, whose key the shared one is. */
+  mustHaveOwnKey?: boolean;
   now: Date;
 }): Step[] {
   const p = s.profile ?? {};
@@ -33,6 +37,13 @@ export function setupSteps(s: {
     { key: "resume", label: "resume on file", done: String(p["resume_text"] ?? "").trim().length > 200, required: true, hint: "every application is written from it", to: "/settings" },
     { key: "contact", label: "name, email and phone", done: has("full_name") && has("email") && has("phone"), required: true, hint: "the first three boxes on every form", to: "/settings" },
     { key: "titles", label: "what to look for", done: Array.isArray(s.titles) && s.titles.length > 0, required: true, hint: "at least one job title to search", to: "/settings" },
+    // The free model's daily allowance belongs to a key. One person's
+    // applications spend one key's allowance, so thirty people on the
+    // owner's key would have it gone by mid-morning: everyone else brings
+    // their own, free, before they start.
+    ...(s.ownKey === undefined
+      ? []
+      : [{ key: "aikey", label: "your own writing key", done: s.ownKey, required: Boolean(s.mustHaveOwnKey), hint: "free, three minutes, no card: your resumes and answers are written on your own daily allowance", to: "/settings" as const }]),
     { key: "facts", label: "citizenship and ethnicity", done: has("citizenship") && has("hispanic_latino"), required: false, hint: "asked on most forms; never guessed, so unanswered they come to you", to: "/settings" },
     { key: "windows", label: "interview windows marked", done: windows > 0 || has("availability"), required: false, hint: "the times offered when an employer asks", to: "/settings" },
     { key: "answers", label: s.waiting ? `${s.waiting} question${s.waiting === 1 ? "" : "s"} waiting for you` : "no questions waiting", done: s.waiting === 0, required: false, hint: "answered once, reused on every form after", to: "/answers" },
