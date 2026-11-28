@@ -427,6 +427,10 @@ if (process.env.MEASURE_IMPORT_ONLY !== "1") {
   // aside for the distance. Should the rule be switched on again, the
   // panel's own check sets aside whatever it covers, as before.
   if (cfg?.same_state_only !== true) {
+    // Counted on every run; written only when asked for by name. The rule
+    // was switched off for a time, and whether what it set aside comes back
+    // is the owner's to say, not this program's.
+    const APPLY = process.env.APPLY === "true" && process.env.REVISIT_STATE_RULE === "1";
     const since = new Date(Date.now() - 30 * 86_400_000).toISOString();
     const rows = [];
     for (let from = 0; from < 10000; from += 500) {
@@ -453,8 +457,8 @@ if (process.env.MEASURE_IMPORT_ONLY !== "1") {
         await db(`jobs?id=eq.${job.id}&status=eq.skipped`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify(patch) }).catch(() => {});
       }
     }
-    console.log(`set aside by the same-state rule, which is switched off, read again: ${JSON.stringify(st)}`);
-    console.log(`  of ${st.held}: ${st.within} are within the radius and go back to be rated; ${st.beyond} are too far (now said so); ${st.abroad} are in another country; ${st.unplaced} cannot be placed yet and stay held`);
+    console.log(`set aside by the same-state rule, which is switched off, read again${APPLY ? "" : " (counted only; nothing written)"}: ${JSON.stringify(st)}`);
+    console.log(`  of ${st.held}: ${st.within} are within the radius${APPLY ? " and go back to be rated" : ""}; ${st.beyond} are too far (now said so); ${st.abroad} are in another country; ${st.unplaced} cannot be placed yet and stay held`);
   } else {
     console.log("the same-state rule is switched on: what it set aside stays set aside");
   }
