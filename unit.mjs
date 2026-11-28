@@ -678,5 +678,39 @@ quiet.hideJob({ company: "ZQ" });
   ], [1, 1, -1, 1, -1, 2, 0, "12/08/2026", "2026-12-08", null]);
 }
 
+{
+  // Where a posting is, worked out on this machine: what is written, placed; what is not, said to be unplaced.
+  const g = await import("./geo.mjs");
+  const names = (l, m) => g.readLocation(l, m).places.map((p) => p.name);
+  check("geo: a town and its state are placed however an employer writes them", [
+    g.placesKnown() > 25000,
+    names("US-NJ-Florham Park-100 Park Ave"), names("NJ - Florham Park - 100 Park Ave"), names("Edison NJ Distribution Center"),
+    names("St. Louis, Missouri"), names("1000 Nicollet Mall, Minneapolis,MN 55403-2542"), names("Morristown, New Jersey, United States"),
+    names("New York, New York"), names("Washington, DC"), names("NYC"), names("Greater Boston Area"),
+    names("New York, NY; Boston, MA | Remote"), names("Springfield, IL and Columbus, OH"),
+    g.readLocation("Middlesex County, NJ").places[0]?.exact,
+  ], [true, ["Florham Park, NJ"], ["Florham Park, NJ"], ["Edison, NJ"], ["St. Louis, MO"], ["Minneapolis, MN"], ["Morristown, NJ"],
+      ["New York, NY"], ["Washington, DC"], ["New York, NY"], ["Boston, MA"], ["New York, NY", "Boston, MA"], ["Springfield, IL", "Columbus, OH"], "county"]);
+  check("geo: nothing is placed on a guess — a town in many states, a state alone, a place not on the list, no place at all", [
+    names("Springfield"), names("Boston"), names("New Jersey"), g.readLocation("New Jersey").states, names("Atlantis, ZZ"), names("3 Locations"), names("Remote - US"), names(""),
+    g.nearest(g.readLocation("Springfield"), { lat: 40, lon: -74 }),
+  ], [[], [], [], ["NJ"], [], [], [], [], null]);
+  check("geo: the posting's own text names the town where the field does not, and only a town with its state that is on the list", [
+    names("", { description: "<p>Location: Parsippany, NJ. We are a team of forty.</p>" }),
+    g.readLocation("", { description: "Location: Parsippany, NJ." }).fromDescription,
+    names("", { description: "We love Narnia, ZZ and Gotham." }),
+    names("Hazlet, NJ", { description: "Our other office is in Austin, TX." }),
+  ], [["Parsippany, NJ"], true, [], ["Hazlet, NJ"]]);
+  check("geo: remote, hybrid and on site are told apart, and a remote posting's residency rule is read only where it is stated as one", [
+    g.readLocation("Remote - US").mode, g.readLocation("Hybrid (3 days a week in office) - Jersey City, NJ").mode, g.readLocation("On-site, Edison, NJ").mode, g.readLocation("Edison, NJ").mode,
+    g.residency("Remote (must reside in TX or FL)"), g.residency("Remote - California only"), g.residency("Remote - US"),
+    g.residency("Remote", "We are based in Austin, TX. Our office is located in New York."),
+    g.residency("Remote", "Candidates must reside in New Jersey, New York, or Pennsylvania."),
+    g.residency("Remote", "This role is only open to residents of the following states: CA, WA, OR."),
+  ], ["remote", "hybrid", "onsite", null, ["TX", "FL"], ["CA"], [], [], ["NJ", "NY", "PA"], ["CA", "WA", "OR"]]);
+  const d = g.nearest(g.readLocation("Princeton, NJ; Austin, TX"), { lat: 40.7484, lon: -73.9967 });
+  check("geo: a posting open in several places is as near as its nearest", [d.miles > 30 && d.miles < 60, g.nearest(g.readLocation("Austin, TX"), { lat: 40.7484, lon: -73.9967 }).miles > 1400], [true, true]);
+}
+
 console.log(failed ? `unit: ${failed} failed, ${passed} passed.` : `unit: all ${passed} passed.`);
 process.exit(failed ? 1 : 0);

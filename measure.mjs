@@ -17,6 +17,7 @@
 // Nothing here costs anything, and nothing leaves but place names.
 
 import { guardLogs, hideNames } from "./quiet.mjs";
+import { readLocation, nearest, placesKnown, residency } from "./geo.mjs";
 // Nothing this prints names an employer, a posting or a place: see quiet.mjs.
 guardLogs();
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -252,6 +253,8 @@ if (process.env.MEASURE_IMPORT_ONLY !== "1") {
     )) ?? [];
   console.log(`${jobs.length} waiting job(s) have no measured distance; radius is ${radius} mi; ${APPLY ? "writing results" : "report only"}.`);
 
+  const UNPLACED = "location not placed yet: kept, and tried again each time";
+  console.log(`towns this machine can place without asking anyone: ${placesKnown()}`);
   const tally = { within: 0, beyond: 0, remote: 0, noPlace: 0, notFound: 0, deferred: 0 };
   const byAts = {};
   const unreadable = new Map();
@@ -265,6 +268,26 @@ if (process.env.MEASURE_IMPORT_ONLY !== "1") {
   for (const job of jobs) {
     const bucket = (byAts[job.ats ?? "none"] ??= { within: 0, beyond: 0, unknown: 0 });
     if (job.remote === true) { tally.remote++; bucket.within++; continue; }
+
+    // On this machine first (geo.mjs): a town and its state are looked up
+    // in a list, with no request made and nothing waited for.
+    {
+      const read = readLocation(job.location, { title: job.title });
+      const here = nearest(read, home);
+      // Taken as the answer when every place the posting names was placed,
+      // or when one of them is already within reach. A posting with a place
+      // still unread might be nearer than it looks: that goes the long way.
+      if (here && (here.miles <= radius || (!read.unread.length && !read.states.length))) {
+        tally.placedHere = (tally.placedHere ?? 0) + 1;
+        for (const edge of BANDS) if (here.miles <= edge) bands[edge]++;
+        if (here.miles <= radius) { tally.within++; bucket.within++; } else { tally.beyond++; bucket.beyond++; }
+        if (APPLY) {
+          await db(`jobs?id=eq.${job.id}`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ lat: here.lat, lon: here.lon, distance_miles: here.miles }) })
+            .then(() => written++).catch(() => {});
+        }
+        continue;
+      }
+    }
 
     const places = placesIn(job.location);
     if (!places.length) {
@@ -302,10 +325,13 @@ if (process.env.MEASURE_IMPORT_ONLY !== "1") {
       // only what it can place: set aside here, where the trying was done.
       // (The panel used to do this after one plain look, before any of it.)
       if (!deferred && APPLY && STRICT) {
+        // Held, not thrown away: the reason says it is unplaced, which is a
+        // different thing from far, and every later run tries it again
+        // (below) with whatever this has learned since.
         await db(`jobs?id=eq.${job.id}&status=in.(new,queued,review)`, {
           method: "PATCH",
           headers: { Prefer: "return=minimal" },
-          body: JSON.stringify({ status: "skipped", skip_reason: "location could not be placed, after trying its town alone" }),
+          body: JSON.stringify({ status: "skipped", skip_reason: UNPLACED }),
         }).catch(() => {});
         tally.setAside = (tally.setAside ?? 0) + 1;
       }
@@ -329,6 +355,71 @@ if (process.env.MEASURE_IMPORT_ONLY !== "1") {
         .then(() => written++)
         .catch((e) => console.log(`  could not write job: ${String(e.message).slice(0, 80)}`));
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // The postings set aside as unplaceable, tried again.
+  //
+  // In one week 513 postings on one account were set aside because the
+  // geocoder could not find where they were. Unplaced is not far. Each is
+  // read again here — its location, then its own text — and what can now
+  // be placed is measured: inside the radius it goes back to be rated;
+  // outside it, it is set aside for the distance, which is the true reason.
+  // What still cannot be placed stays held, and is tried again next time.
+  // -------------------------------------------------------------------------
+  {
+    const since = new Date(Date.now() - 30 * 86_400_000).toISOString();
+    const held = [];
+    for (let from = 0; from < 10000; from += 500) {
+      const rows = (await db(`jobs?status=eq.skipped&or=(skip_reason.like.location%20could%20not%20be%20placed*,skip_reason.like.location%20not%20placed%20yet*)&found_at=gte.${encodeURIComponent(since)}&select=id,location,title,description,remote&order=id.asc&offset=${from}&limit=500`).catch(() => null)) ?? [];
+      held.push(...rows);
+      if (rows.length < 500) break;
+    }
+    const again = { held: held.length, placedByField: 0, placedByText: 0, within: 0, beyond: 0, stateOnly: 0, noLocation: 0, unread: 0 };
+    const shapes = new Map();
+    for (const job of held) {
+      const read = readLocation(job.location, { title: job.title, description: job.description, remote: job.remote });
+      const here = nearest(read, home);
+      if (!here) {
+        if (!String(job.location ?? "").trim()) again.noLocation++;
+        else if (read.states.length) again.stateOnly++;
+        else again.unread++;
+        const shape = shapeOfPlace(job.location);
+        shapes.set(shape, (shapes.get(shape) ?? 0) + 1);
+        continue;
+      }
+      if (read.fromDescription) again.placedByText++; else again.placedByField++;
+      const inside = here.miles <= radius;
+      if (inside) again.within++; else again.beyond++;
+      if (APPLY) {
+        const patch = inside
+          // Back to be rated, as a posting newly found would be.
+          ? { status: "new", score: null, score_reason: null, skip_reason: null, lat: here.lat, lon: here.lon, distance_miles: here.miles }
+          : { skip_reason: `${here.miles} mi away (limit ${radius})`, lat: here.lat, lon: here.lon, distance_miles: here.miles };
+        await db(`jobs?id=eq.${job.id}&status=eq.skipped`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify(patch) }).catch(() => {});
+      }
+    }
+    console.log(`set aside as unplaceable, tried again: ${JSON.stringify(again)}`);
+    console.log(`  of ${again.held}: ${again.within} are within reach and go back to be rated; ${again.beyond} are placed and too far (now said so); ${again.held - again.within - again.beyond} still cannot be placed and stay held`);
+    const top = [...shapes.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12);
+    if (top.length) console.log(`  still unplaced, by shape (a = a word, 9 = a number, ST = a state): ${JSON.stringify(top.map(([sh, n]) => `${sh} x${n}`))}`);
+  }
+
+  // A remote posting that keeps itself to residents of named states, none
+  // of them the person's: remote, and still not open to them.
+  if (profile?.state) {
+    const mine = String(profile.state).trim().toUpperCase();
+    const rows = (await db("jobs?status=in.(queued,review,new)&remote=is.true&select=id,location,description&limit=2000").catch(() => null)) ?? [];
+    let shut = 0, open = 0, silent = 0;
+    for (const job of rows) {
+      const only = residency(job.location, String(job.description ?? "").replace(/<[^>]+>/g, " ").slice(0, 8000));
+      if (!only.length) { silent++; continue; }
+      const home2 = readLocation(mine).states[0] ?? mine;
+      if (only.includes(home2)) { open++; continue; }
+      shut++;
+      if (APPLY) await db(`jobs?id=eq.${job.id}&status=in.(new,queued,review)`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ status: "skipped", skip_reason: "remote, but only for residents of other states" }) }).catch(() => {});
+    }
+    console.log(`remote postings waiting: ${rows.length}; ${silent} say nothing about where one must live, ${open} name states that include the person's, ${shut} name only other states${APPLY ? " and are set aside for that" : ""}`);
   }
 
   console.log(`looked up ${lookups} new place(s); ${seen.size} distinct place(s) in all.`);

@@ -94,6 +94,16 @@ async function main() {
       .replace(/^outside [a-z ]{2,20}:.*$/, "outside the person's own state").replace(/^no state given.*$/, "no state given").replace(/^[a-z]{2} is far beyond/, "a state far beyond").slice(0, 60);
     const aside = found.filter((j) => j.status === "skipped");
     console.log(`discovery, set aside (${aside.length}): ${JSON.stringify(Object.fromEntries(Object.entries(count(aside, reason)).sort((a, b) => b[1] - a[1]).slice(0, 8)))}`);
+    // The largest source on its own, and whether the same-state rule is still at work.
+    const big = Object.entries(by).sort((a, b) => b[1].length - a[1].length)[0];
+    if (big) console.log(`discovery, ${big[0]} alone, set aside (${big[1].filter((j) => j.status === "skipped").length} of ${big[1].length}): ${JSON.stringify(Object.fromEntries(Object.entries(count(big[1].filter((j) => j.status === "skipped"), reason)).sort((a, b) => b[1] - a[1]).slice(0, 5)))}`);
+    try {
+      const [sc] = (await db("search_config?select=same_state_only,include_unknown_location,radius_miles&limit=1")) ?? [];
+      const day = new Date(Date.now() - 86_400_000).toISOString();
+      const stateRule = (j) => /^outside [a-z ]{2,20}:/i.test(String(j.skip_reason ?? ""));
+      const recent = await db(`jobs?status=eq.skipped&skip_reason=like.outside*&found_at=gte.${encodeURIComponent(day)}&select=id&limit=1000`).catch(() => []);
+      console.log(`discovery, the same-state rule: switched ${sc?.same_state_only === true ? "ON" : "off"}; postings it set aside in seven days ${found.filter(stateRule).length}, of those found in the last day ${recent.length}; postings with no placeable location are ${sc?.include_unknown_location === false ? "held back" : "let through"}`);
+    } catch { /* said nothing rather than something wrong */ }
     console.log(`discovery, still waiting to be rated or held: ${found.filter((j) => j.status === "new").length} new, ${found.filter((j) => j.status === "review").length} held for a yes`);
     digest.discovered7d = found.length;
     digest.takenForward7d = found.filter(eligible).length;
