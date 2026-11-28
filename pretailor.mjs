@@ -20,6 +20,7 @@
 //
 // Free: a public-repo runner, public feeds, the free Gemini tier.
 
+import { isBlocked } from "./blocked.mjs";
 import { useOwnKey } from "./ownkey.mjs";
 import { tailorResume, rolesText, structureResume } from "./tailor.mjs";
 import { guardLogs, hideJob } from "./quiet.mjs";
@@ -264,9 +265,9 @@ if (process.env.PRETAILOR_IMPORT_ONLY !== "1") {
 
   // The jobs the applier will reach first: queued, best score first.
   const jobs =
-    (await db(
+    ((await db(
       `jobs?status=eq.queued&tailored_resume=is.null&select=id,title,company,url,apply_url,description,ats,score&order=score.desc.nullslast&limit=${MAX * 3}`,
-    )) ?? [];
+    )) ?? []).filter((j) => !isBlocked(j)); // nothing is written for an employer the owner has blocked
   for (const j of jobs) hideJob(j);
   console.log(`${jobs.length} queued job(s) without a resume of their own; writing up to ${MAX}, ${GAP_MS / 1000}s apart${roles ? "; the list of roles in settings is in use" : ""}.`);
 

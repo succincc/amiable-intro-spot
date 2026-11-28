@@ -15,6 +15,8 @@
  *
  * Run for each person by forusers.mjs. Prints counts only.
  */
+// Everything printed here goes through the nets in quiet.mjs: this log is public.
+import "./quiet.mjs";
 import fs from "node:fs";
 
 export const ALL = ["workday@0of3", "workday@1of3", "workday@2of3", "greenhouse@0of2", "greenhouse@1of2", "oracle", "successfactors", "ashby", "lever", "linkedin", "indeed", "ziprecruiter", "other", "none"];

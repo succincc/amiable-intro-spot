@@ -8,6 +8,8 @@
 // Structure only: no row of anybody's data is read or printed, and anything
 // that looks like an address or an id is struck out before printing.
 
+// Everything printed here goes through the nets in quiet.mjs: this log is public.
+import "./quiet.mjs";
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const ANON_KEY = process.env.SUPABASE_ANON_KEY;
 // Whose round this is, when the runner is doing somebody else's: see forusers.mjs.

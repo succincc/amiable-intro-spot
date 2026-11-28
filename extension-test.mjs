@@ -2,6 +2,8 @@
 // and a made-up panel on this machine. Three runs: plain, WALL=1 (a check a
 // person answers first), EXTRA=1 (a question only its owner can answer).
 //   node extension-test.mjs "$PWD/extension"
+// A check: made-up people only. Its printing goes through the same nets as everything else.
+import "./quiet.mjs";
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";

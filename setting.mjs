@@ -5,6 +5,8 @@
 // only the switches named here, only the owner's own search, and the value
 // before and after is printed.
 
+// Everything printed here goes through the nets in quiet.mjs: this log is public.
+import "./quiet.mjs";
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const ANON_KEY = process.env.SUPABASE_ANON_KEY;
 const ACT_AS = process.env.AP_ACT_AS ? { "x-act-as": process.env.AP_ACT_AS } : {};

@@ -17,6 +17,11 @@
 // People are counted, never named: this log is public.
 
 import { spawnSync } from "node:child_process";
+// What this prints, and what every job it starts prints, goes through the
+// nets in quiet.mjs. The job is started with them already in place, so a
+// script that forgot to ask for them has them all the same.
+import "./quiet.mjs";
+const QUIET = new URL("./quiet.mjs", import.meta.url).href;
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const ANON_KEY = process.env.SUPABASE_ANON_KEY;
@@ -89,7 +94,7 @@ if (process.env.FORUSERS_IMPORT_ONLY !== "1") {
     if (actAs) env.AP_ACT_AS = actAs;
     else delete env.AP_ACT_AS;
     if (script === "apply.mjs" && rest.length) env.RUN_BUDGET_MIN = String(share);
-    return spawnSync(process.execPath, [script, ...args], { stdio: "inherit", env }).status ?? 1;
+    return spawnSync(process.execPath, ["--import", QUIET, script, ...args], { stdio: "inherit", env }).status ?? 1;
   };
 
   // The owner's round first, as it has always run.

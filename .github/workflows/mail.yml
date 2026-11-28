@@ -29,6 +29,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 4
     steps:
+      # For quiet.mjs, which makes the panel's answers safe to print.
+      - uses: actions/checkout@v4
+        continue-on-error: true
       - name: Ask the panel whether anything is due
         env:
           APP_URL: https://applynow.lol
@@ -38,7 +41,11 @@ jobs:
             -X POST "${APP_URL}/api/public/cron/tick" \
             -H "Content-Type: application/json" -d '{}' || echo "000")
           echo "the panel answered ${code}"
-          head -c 500 /tmp/tick.json 2>/dev/null || true
+          # Nothing from the panel's answer is printed as it came: this log
+          # is public. It goes through the same nets as everything a script
+          # prints (quiet.mjs), and if they cannot be reached, it is not printed.
+          safe() { node "${GITHUB_WORKSPACE}/quiet.mjs" 2>/dev/null || echo "(an answer that could not be made safe to print)"; }
+          head -c 500 /tmp/tick.json 2>/dev/null | safe || true
           echo
           case "${code}" in
             200) exit 0 ;;

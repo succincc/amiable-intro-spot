@@ -10,6 +10,8 @@
 // Free: two public reference sites and a GitHub runner. Nothing is printed
 // but counts.
 
+// Everything printed here goes through the nets in quiet.mjs: this log is public.
+import "./quiet.mjs";
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const ANON_KEY = process.env.SUPABASE_ANON_KEY;
 // Whose round this is, when the runner is doing somebody else's: see forusers.mjs.
@@ -187,7 +189,7 @@ if (process.env.INDEXES_IMPORT_ONLY !== "1") {
     if (names.has(flat(name)) || urls.has(url)) { held++; continue; }
     names.add(flat(name));
     urls.add(url);
-    fresh.push({ name, careers_url: url, status: "pending" });
+    fresh.push({ name, careers_url: url, status: "pending", note: "index: a list of large companies" });
   }
   console.log(`${companies.length} companies on the two lists; ${site.size} with a web address on file; ${held} already held; ${noSite} with no address on file (started from a guess at it); ${fresh.length} new`);
 

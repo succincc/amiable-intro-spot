@@ -282,6 +282,8 @@ async function waysIn(page) {
         [/job search|search jobs|all jobs|open (positions|roles|jobs)|current openings|job openings|view openings/i, 8],
         [/find (a|your)( next)? (job|role|career)|explore (jobs|roles|opportunities|careers)|see (jobs|roles|openings)/i, 7],
         [/^(apply|apply now|apply today|join us|join our team|work with us)$/i, 5],
+        // What a small business calls the page: one word in a menu or a footer.
+        [/^(careers?|jobs?|employment|employment opportunities|job opportunities|career opportunities|join the team|work (for|with) us|work here|we(’|')?re hiring|now hiring|hiring|open positions)$/i, 6],
         [/careers?|jobs/i, 2],
       ];
       const DETAIL = /\/(job|jobs|position|positions|opening|requisition|vacancy|details?)\/[^/?#]{3,}|[?&](jobid|job_id|reqid|gh_jid|id)=/i;
@@ -514,6 +516,11 @@ export function census(rows) {
   return out;
 }
 
+/** Where an employer came from, as its record says: "map: 3 place(s) in reach", "feed: near home". */
+export function originOf(note) {
+  return (String(note ?? "").match(/(?:^|; )((?:map|feed|index|crawl|seed): [^;]{0,60})/) ?? [])[1]?.trim() ?? null;
+}
+
 export function otherAddresses(careersUrl) {
   let host = "";
   try {
@@ -601,6 +608,22 @@ async function look(browser, name, careersUrl) {
         }
       } catch {
         /* keep the first failure */
+      }
+    }
+    // A careers address that was only ever a guess — "www.<site>/careers"
+    // for a business found on the map — answers "no such page" more often
+    // than not: 248 employers were written off that way. The front page is
+    // there, and links to wherever the jobs are.
+    if (first && [404, 410].includes(first.status())) {
+      try {
+        const front = new URL("/", careersUrl).href;
+        if (front.replace(/\/+$/, "") !== careersUrl.replace(/\/+$/, "")) {
+          const alt = await open(front);
+          if (alt && alt.status() < 400) first = alt;
+          else blocked = `HTTP ${first.status()}`;
+        }
+      } catch {
+        /* keep the first answer */
       }
     }
     await settle(page);
@@ -725,39 +748,10 @@ if (process.env.RESOLVE_IMPORT_ONLY !== "1") {
       process.exit(1);
     }
     await auth({ email: AP_EMAIL, password: AP_PASSWORD }, "password");
-    // Employers the panel has not heard of yet, from the list kept beside
-    // this file. Added as ordinary candidates; resolved below like the rest.
-    if (APPLY) {
-      try {
-        const seeds = fs
-          .readFileSync(new URL("./employers-local.txt", import.meta.url), "utf8")
-          .split("\n")
-          .map((l) => l.trim())
-          .filter((l) => l && !l.startsWith("#") && l.includes("|"))
-          .map((l) => {
-            const [name, url] = l.split("|").map((x) => x.trim());
-            return { name, careers_url: url };
-          })
-          .filter((x) => x.name && /^https?:\/\//.test(x.careers_url));
-        const known = (await db("company_candidates?select=name,careers_url&limit=5000")) ?? [];
-        const firms = (await db("companies?select=name&limit=5000")) ?? [];
-        const names = new Set([...known, ...firms].map((r) => flat(r.name)));
-        const urls = new Set(known.map((r) => String(r.careers_url ?? "").replace(/\/+$/, "").toLowerCase()));
-        const fresh = seeds.filter(
-          (x) => !names.has(flat(x.name)) && !urls.has(x.careers_url.replace(/\/+$/, "").toLowerCase()),
-        );
-        for (let i = 0; i < fresh.length; i += 50) {
-          await db("company_candidates?on_conflict=user_id,careers_url", {
-            method: "POST",
-            headers: { Prefer: "resolution=ignore-duplicates,return=minimal" },
-            body: JSON.stringify(fresh.slice(i, i + 50).map((x) => ({ ...x, status: "pending" }))),
-          });
-        }
-        console.log(`${seeds.length} local employer(s) on file; ${fresh.length} were new to the panel and have been added.`);
-      } catch (e) {
-        console.log(`could not add the local employers: ${String(e?.message ?? e).slice(0, 120)}`);
-      }
-    }
+    // There was a list of employers near the owner kept beside this file.
+    // It is gone on purpose: this repository is public, and such a list says
+    // where somebody lives. Its employers are in the database already, and
+    // the employers near each person now come from the map (nearby.mjs).
     // An employer on a system that has a reader of its own is found, not
     // failed. Ones marked before that was the rule are put right here, in
     // one statement each, rather than waiting weeks to be looked at again.
@@ -800,6 +794,11 @@ if (process.env.RESOLVE_IMPORT_ONLY !== "1") {
 
   const save = async (c, patch) => {
     if (!APPLY || LOCAL) return;
+    // Where the employer came from stays on its record when what was found
+    // is written over the rest: it is what the worth of each way of finding
+    // employers is measured by afterwards.
+    const from = originOf(c.note);
+    if (from && patch.note && !patch.note.includes(from)) patch = { ...patch, note: `${String(patch.note).slice(0, 376 - from.length)}; ${from}` };
     await db(`company_candidates?id=eq.${c.id}`, {
       method: "PATCH",
       headers: { Prefer: "return=minimal" },

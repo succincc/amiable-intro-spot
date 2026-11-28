@@ -1,7 +1,7 @@
 name: icims
 
-# Postings from employers whose careers portal is iCIMS — the hospital
-# systems nearest Princeton among them. Read from a runner with a browser and
+# Postings from employers whose careers portal is iCIMS — hospital systems
+# among them. Read from a runner with a browser and
 # put in the same queue as every other posting. Free; nothing signed in to.
 
 on:

@@ -958,7 +958,8 @@ export async function runDiscover(supabase: any, opts: { since?: string | undefi
             if (coarse.basis === "non-us" || (coarse.state && coarse.state !== homeState)) {
               row.skip_reason = `outside ${homeState}: ${row.location}`;
               stats.filtered++;
-              bump(`outside ${homeState}`);
+              // Not the state's letters: this tally is printed in a public log.
+              bump("outside the home state");
               continue;
             }
             // A posting with no state at all cannot be shown to be in it.

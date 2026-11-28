@@ -14,6 +14,8 @@
 // A few pages of the archive's index a day, a different few each day; one
 // request at a time, as the archive asks. Nothing is printed but counts.
 
+// Everything printed here goes through the nets in quiet.mjs: this log is public.
+import "./quiet.mjs";
 process.env.FEEDS_IMPORT_ONLY = "1";
 const { wanted } = await import("./feeds.mjs");
 const { nearPattern, stateName } = await import("./near.mjs");

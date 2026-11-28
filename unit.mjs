@@ -728,5 +728,122 @@ quiet.hideJob({ company: "ZQ" });
   ], [true, true, true, true, false, false, false, false]);
 }
 
+// ---------------------------------------------------------------------------
+// Nothing of anybody's reaches a public log. These try to make it.
+{
+  const fs = await import("node:fs");
+  const { spawnSync } = await import("node:child_process");
+  const HERE = new URL(".", import.meta.url);
+  const who = { full_name: "Jordan Q. Whitcombe", email: "jordan.whitcombe@mail.test", phone: "(609) 555-0142", city: "Plainsboro", state: "NJ", postal_code: "08536", address: "41 Whitlock Lane", linkedin_url: "https://www.linkedin.com/in/jwhitcombe-77" };
+  const past = { experience: [{ company: "Fixture Freight Lines", title: "Dispatch Supervisor" }], education: [{ school: "Example State University" }] };
+  quiet.learn(who, past);
+  quiet.secret("Zx9!kQ2mPp@77aLw4tRe");
+  // Every line here is something a script could print by mistake: a value
+  // typed, a reason stored, a subject read, a question quoted, an error's
+  // own words. Some of it was learned (the person, the resume); most was not.
+  const LINES = [
+    'typed "Jordan Q. Whitcombe" into First Name; hello JORDAN, hello Whitcombe',
+    "code sent to jordan.whitcombe@mail.test and to JORDAN.WHITCOMBE@MAIL.TEST; reply-to talent@brightwell-logistics.example",
+    "phone 609-555-0142 / +1 (609) 555 0142 / 6095550142 / 609.555.0142",
+    "lives at 41 Whitlock Lane, Plainsboro, NJ 08536; near Hamilton Township, NJ and Trenton NJ 08608",
+    'set aside: outside NJ: Trenton, NJ | {"workday / outside NJ":33} | US-NJ-Plainsboro | state: NJ | New Jersey | NEW JERSEY | moved from Pennsylvania',
+    "subject: Your application to Brightwell Logistics for Warehouse Lead",
+    "Thanks for applying, Jordan! - Priya Raman, Talent Partner at Brightwell",
+    "opening https://brightwell.wd5.myworkdayjobs.com/en-US/careers/job/Trenton-NJ/Warehouse-Lead_R-10442 then careers.brightwell.com/apply/778",
+    "the code is 482913; verification code: 771-209; your one-time code 5512; OTP=A7K9Q2; passcode was 90412",
+    "portal password set to Zx9!kQ2mPp@77aLw4tRe; password: hunter2hunter2; pwd=Tr0ub4dor&3",
+    "Authorization: Bearer abc.def.ghi-long-token-value-123456; apikey=AIzaSyA1234567890abcdefghijklmnopqrstuvw; gsk_abcdefghijklmnopqrstuvwxyz012345",
+    "cookie: session=s%3Aabcdef0123456789abcdef0123456789; token eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c",
+    "acting for 3f2b8c1e-1111-2222-3333-444455556666; home at 40.3573,-74.6672; SSN 123-45-6789",
+    "resume line: Dispatch Supervisor, Fixture Freight Lines, 2019 - 2024; Example State University",
+    'question: "Have you previously worked for Brightwell Logistics or any of its subsidiaries?"',
+    '{"company":"Brightwell Logistics","location":"Hamilton Township, NJ","recruiter":"Priya Raman","zip":"08536"}',
+    "DB 409: duplicate key value violates unique constraint Key (user_id, careers_url)=(3f2b8c1e-1111-2222-3333-444455556666, https://www.brightwell.com/careers) already exists",
+    "Error: page.goto: net::ERR_NAME_NOT_RESOLVED at https://jobs.brightwell.io/whitcombe\n    at apply (file:///home/runner/work/x/apply.mjs:10:5)",
+  ];
+  const NEVER = ["jordan", "whitcombe", "mail.test", "609", "0142", "plainsboro", "08536", "08608", "whitlock", "brightwell", "priya", "raman", "trenton", "hamilton", "482913", "771", "5512", "a7k9q2", "90412", "hunter2", "tr0ub4dor", "zx9!", "aiza", "eyj", "gsk_abc", "abc.def", "abcdef0123", "3f2b8c1e", "40.3573", "74.6672", "6789", "fixture freight", "example state", "new jersey", "pennsylvania", "10442"];
+  const leaksIn = (text) => { const t = String(text).toLowerCase(); return [...NEVER.filter((w) => t.includes(w)), .../(^|[^A-Za-z0-9])NJ(?![A-Za-z0-9])/.test(String(text)) ? ["NJ"] : []]; };
+  check("leaks: nothing of a person, an employer, a place or a credential survives the nets", LINES.flatMap((l) => leaksIn(quiet.asPublic(l, false))), []);
+  // The other half: a net that strikes out everything tells nobody anything.
+  check("leaks: what a run needs to say still comes through", [
+    quiet.asPublic("verdict: 0 sent of 1 tried - did not go: 1 this program's to fix", false),
+    quiet.asPublic('standing: sent in the last 24h 44 {"workday":25,"greenhouse":14,"oracle":1,"none":1}; today\'s cap 300', false),
+    quiet.asPublic("on-site jobs within 25 mi: 12; read in 340ms; HTTP 404; ID 7 is OK", false),
+    quiet.asPublic("  - error: This info is required. (1 issue)", false),
+  ], [
+    "verdict: 0 sent of 1 tried - did not go: 1 this program's to fix",
+    'standing: sent in the last 24h 44 {"workday":25,"greenhouse":14,"oracle":1,"none":1}; today\'s cap 300',
+    "on-site jobs within 25 mi: 12; read in 340ms; HTTP 404; ID 7 is OK",
+    "  - error: This info is required. (1 issue)",
+  ]);
+  // Every fixed message the scripts print is made of words the net lets
+  // through: a log with holes in the program's own words is no log.
+  {
+    let read = 0;
+    const holed = [];
+    for (const f of fs.readdirSync(HERE).filter((x) => x.endsWith(".mjs") && !["unit.mjs", "selftest.mjs", "extension-test.mjs"].includes(x))) {
+      const src = fs.readFileSync(new URL(f, HERE), "utf8");
+      for (const m of src.matchAll(/console\.(?:log|error|warn|info)\(\s*(["'`])((?:\\.|(?!\1)[^\\\n])*)\1/g)) {
+        let lit = m[2];
+        if (m[1] === "`") lit = lit.replace(/\$\{[^`{}]*\}/g, "0");
+        if (lit.includes("${") || /[a-z0-9-]+\.(gov|com|org|io)\b/.test(lit)) continue;
+        lit = lit.replace(/\\n/g, " ").replace(/\\(["'`])/g, "$1");
+        read++;
+        if (quiet.asPublic(lit, false) !== lit) holed.push(`${f}: ${lit.slice(0, 60)}`);
+      }
+    }
+    check("leaks: the scripts' own fixed messages pass whole (several hundred of them)", [read > 400, holed], [true, []]);
+  }
+  // The same nets, under a whole process, as a public runner has them: what
+  // console prints, what is written straight to a stream, an object, a
+  // buffer, and the error nobody caught.
+  const child = (code, extra = []) => spawnSync(process.execPath, [...extra, "--input-type=module", "-e", code], { cwd: new URL(".", import.meta.url), encoding: "utf8", env: { ...process.env, GITHUB_ACTIONS: "true", PORTAL_PASSWORD: "S3cretPortalPass!9", APPLYPILOT_EMAIL: "jordan.whitcombe@mail.test" } });
+  const body = LINES.map((l) => JSON.stringify(l)).join(",");
+  {
+    const r = child(`import { guardLogs, secret } from "./quiet.mjs"; guardLogs(${JSON.stringify(who)}, ${JSON.stringify(past)}); secret("Zx9!kQ2mPp@77aLw4tRe");
+      const L = [${body}]; for (const l of L) { console.log(l); console.error(l); process.stdout.write(l + "\\n"); process.stderr.write(Buffer.from(l + "\\n")); }
+      console.log({ company: "Brightwell Logistics", to: "jordan.whitcombe@mail.test" }, ["Priya Raman"]); console.log("env said " + process.env.PORTAL_PASSWORD);
+      setTimeout(() => { throw new Error("could not open https://brightwell.wd5.myworkdayjobs.com/x for Jordan Whitcombe of Plainsboro, NJ"); }, 5);`);
+    const out = `${r.stdout}\n${r.stderr}`;
+    check("leaks: a whole process on a runner prints nothing of it, by any of the ways of printing, and still fails when it throws",
+      [leaksIn(out), out.includes("S3cretPortalPass"), r.status, /stopped by an error nobody caught/.test(out), out.split("\n").length > 60], [[], false, 1, true, true]);
+  }
+  {
+    const r = child(`import "./quiet.mjs"; console.log("a start"); await Promise.reject(new Error("refused for jordan.whitcombe@mail.test at Brightwell Logistics, code 482913"));`);
+    const r2 = child(`import "./quiet.mjs"; Promise.reject(new Error("refused for Priya Raman, token eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4fw")); setTimeout(() => {}, 50);`);
+    check("leaks: a script that only imports the net, and never learns whose round it is, is still held to it; a rejection nobody handled too",
+      [leaksIn(`${r.stdout}\n${r.stderr}`), r.status !== 0, leaksIn(`${r2.stdout}\n${r2.stderr}`), r2.status !== 0], [[], true, [], true]);
+  }
+  {
+    // A script that never heard of the net, started the way forusers.mjs starts every job.
+    const r = spawnSync(process.execPath, ["--import", new URL("./quiet.mjs", import.meta.url).href, "-e", `console.log("sent jordan.whitcombe@mail.test the code 482913 at Brightwell")`], { encoding: "utf8", env: { ...process.env, GITHUB_ACTIONS: "true" } });
+    check("leaks: a job started by forusers has the nets under it without asking", [leaksIn(`${r.stdout}${r.stderr}`), /sent \[address\] the code \[code\] at \[…\]/.test(r.stdout)], [[], true]);
+  }
+  {
+    // What a workflow reads back from a script must come through exactly.
+    const file = `${process.env.RUNNER_TEMP || "/tmp"}/lanes-check-${process.pid}.txt`;
+    fs.writeFileSync(file, "workday\ngreenhouse\nother\nok\n");
+    const r = spawnSync(process.execPath, ["lanes.mjs", "matrix"], { cwd: new URL(".", import.meta.url), encoding: "utf8", env: { ...process.env, GITHUB_ACTIONS: "true", LANES_FILE: file } });
+    fs.rmSync(file, { force: true });
+    let lanes = null; try { lanes = JSON.parse(r.stdout); } catch { /* compared below */ }
+    check("leaks: the list of lanes a workflow reads back is not altered by the net", lanes, ["workday@0of3", "workday@1of3", "workday@2of3", "greenhouse@0of2", "greenhouse@1of2", "other"]);
+  }
+  // Coverage, by reading the files: every script that prints is under the
+  // nets, and no workflow prints an answer from outside without making it
+  // safe first.
+  {
+    const scripts = fs.readdirSync(HERE).filter((x) => x.endsWith(".mjs"));
+    const bare = scripts.filter((f) => { const src = fs.readFileSync(new URL(f, HERE), "utf8"); return f !== "quiet.mjs" && /console\.(log|info|warn|error|debug)\(|process\.std(out|err)\.write\(/.test(src) && !src.includes("./quiet.mjs"); });
+    check("leaks: every script that prints anything imports the nets", bare, []);
+    const flows = fs.readdirSync(new URL("./.github/workflows/", HERE)).filter((x) => x.endsWith(".yml"));
+    const raw = [];
+    for (const f of flows) {
+      const lines = fs.readFileSync(new URL(`./.github/workflows/${f}`, HERE), "utf8").split("\n");
+      lines.forEach((l, i) => { if (!/^\s*#/.test(l) && /(head -c|\bcat) [^|]*\/tmp\/[a-z]+\.json/.test(l) && !/\bsafe\b/.test(l)) raw.push(`${f}:${i + 1}`); });
+    }
+    check("leaks: no workflow prints a response file as it came", raw, []);
+  }
+}
+
 console.log(failed ? `unit: ${failed} failed, ${passed} passed.` : `unit: all ${passed} passed.`);
 process.exit(failed ? 1 : 0);

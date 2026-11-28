@@ -7,7 +7,7 @@
 -- remote branch kept it without ever asking which country it was in.
 --
 -- That is why German listings kept appearing in a search measured in miles
--- from Princeton, New Jersey, including one that was actually applied to.
+-- from a town in the United States, including one that was actually applied to.
 --
 -- The source is gone from the code. This clears the rows it created and
 -- takes it out of the stored preference, so re-enabling it is not one tick

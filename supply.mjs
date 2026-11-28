@@ -104,9 +104,16 @@ async function main() {
   const digest = {};
 
   // 1. The employers on file.
+  let cands = [];
+  // Where each came from, as its record says. Records made before that was
+  // kept (27 Nov) say nothing once they have been looked at.
+  const origin = (c) => {
+    const m = String(c.note ?? "").match(/(?:^|; )(map|feed|index|crawl|seed): ([^;]*)/);
+    if (m) return { map: "the map", feed: /near home/.test(m[2]) ? "a feed asked about home" : "a feed of remote jobs", index: "a list of large companies", crawl: "the web archive", seed: "a list" }[m[1]];
+    return c.status === "pending" && !c.note ? "a list or a feed" : null;
+  };
   try {
-    const cands = await all("company_candidates?select=id,name,status,ats,note,checked_at,created_at");
-    const origin = (c) => { const n = String(c.note ?? ""); return /^map:/.test(n) ? "the map" : /^crawl:/.test(n) ? "the web archive" : c.status === "pending" && !n ? "a list or a feed" : null; };
+    cands = await all("company_candidates?select=id,name,status,ats,note,checked_at,created_at");
     const pending = cands.filter((c) => c.status === "pending");
     const week = Date.now() - 7 * 86_400_000;
     console.log(`employers on file to be placed on a hiring system: ${cands.length}; by standing ${JSON.stringify(count(cands, (c) => c.status))}; added in 7 days ${cands.filter((c) => new Date(c.created_at ?? 0).getTime() > week).length}; looked at in 7 days ${cands.filter((c) => new Date(c.checked_at ?? 0).getTime() > week).length}`);
@@ -187,6 +194,23 @@ async function main() {
   // finding more employers nearby instead of more postings anywhere.
   const far = aside.filter((j) => ["too far", "outside the country", "the same-state rule"].includes(family(j.skip_reason)));
   console.log(`  set aside for where it is: ${far.length} = ${pct(far.length, recent.length)} of everything found; qualified came from ${new Set(recent.filter((j) => TAKEN.has(j.status)).map((j) => employerKey(j.company))).size} employer(s)`);
+
+  // What each way of finding employers came to: how many it named, how many
+  // were placed on a system, and how many of those have since shown a job
+  // worth applying to. The employers near home are "the map" and "a feed
+  // asked about home"; the rest are from anywhere.
+  if (cands.length) {
+    const good = new Set(jobs.filter((j) => TAKEN.has(j.status)).map((j) => employerKey(j.company)));
+    const by = {};
+    for (const c of cands) (by[origin(c) ?? "not recorded (found before 27 Nov)"] ??= []).push(c);
+    console.log(`employers by how they were found (named / looked at / placed on a system / with a qualified posting in 30 days):`);
+    for (const [k, list] of Object.entries(by).sort((a, b) => b[1].length - a[1].length)) {
+      const placed = list.filter((c) => c.status === "ok");
+      console.log(`    ${k}: ${list.length} / ${list.filter((c) => c.checked_at).length} / ${placed.length} / ${list.filter((c) => good.has(employerKey(c.name))).length}`);
+    }
+    const local = cands.filter((c) => ["the map", "a feed asked about home"].includes(origin(c)));
+    Object.assign(digest, { local_employers_named: local.length, local_employers_placed: local.filter((c) => c.status === "ok").length, local_employers_with_qualified: local.filter((c) => good.has(employerKey(c.name))).length });
+  }
 
   // Qualified and not sent: what found a job worth applying to and then
   // did not apply. Each stop is this system's own code for it.

@@ -15,13 +15,24 @@
 // is able to say.
 
 import crypto from "node:crypto";
+import fs from "node:fs";
 
 const MARK = "[…]";
 
 // What stands in for an employer's name: the same few letters every time for
 // the same employer, so that one run can be compared with the next, and no
 // way back from the letters to the name without a key that is never printed.
-const SALT = String(process.env.ENGINE_API_KEY || process.env.APPLYPILOT_PASSWORD || "applypilot");
+//
+// The key is the engine's own, where the run has it. Where it has only the
+// panel's password, the key is that password put through a slow function
+// first: an alias in a public log would otherwise be a way to test guesses
+// at the password, thousands a second. And with neither, the key is made up
+// on the spot — aliases then hold for one run only, and nobody can undo them.
+const SALT = process.env.ENGINE_API_KEY
+  ? String(process.env.ENGINE_API_KEY)
+  : process.env.APPLYPILOT_PASSWORD
+    ? crypto.scryptSync(String(process.env.APPLYPILOT_PASSWORD), "applypilot: names in a public log", 32, { N: 16384, r: 8, p: 1 }).toString("hex")
+    : crypto.randomBytes(24).toString("hex");
 export function aliasFor(name) {
   const flat = String(name ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "");
   if (!flat) return "employer-none";
@@ -215,24 +226,305 @@ function swap(line) {
 /** A line as it would be printed, for the checks. */
 export const asPrinted = (line) => swap(line);
 
-let ACTIVE = false;
+// ---------------------------------------------------------------------------
+// The second net: what may be printed at all.
+//
+// Everything above strikes out what is known to be somebody's. It cannot
+// strike out what it was never told: an employer in an email's subject, a
+// town in a reason somebody stored, a code a portal sent. Four times a line
+// like that reached a public log. So this works the other way round. A word
+// is printed only if this program's own source already uses it — its
+// messages, its field names, the names of the portals it knows — and the
+// source is public, so nothing is told by printing it. Any other word came
+// from outside: a form, a posting, a mailbox, a person. It is struck out,
+// whatever it is, without anybody having to have thought of it first.
+//
+// Numbers are counts and pass, except where their shape says what they are:
+// a phone number, a code that was sent, a postcode, a place on the map.
+// Anything shaped like a key, a token or a password is struck out wherever
+// it is, and so is any value a script has handed to secret().
+
+const HERE = new URL(".", import.meta.url);
+// Files whose words are places, or people and employers made up for the
+// checks: real code, but not a vocabulary anything should be printed from.
+const PLACES = new Set(["geo.mjs", "near.mjs"]);
+const CHECKS = new Set(["unit.mjs", "selftest.mjs", "extension-test.mjs"]);
+// The checks themselves work on made-up people only, and say what failed in
+// their own words. When the script that was started is one of the checks,
+// its own words are printed whole. Nothing else can ask for that.
+const FOR_CHECKS = () => CHECKS.has(String(process.argv[1] ?? "").split(/[\\/]/).pop());
+
+/** A source file without its comments: what the program says, not what is said about it. */
+export function withoutComments(src) {
+  const out = [];
+  let inBlock = false;
+  for (let line of String(src).split("\n")) {
+    if (inBlock) {
+      const end = line.indexOf("*/");
+      if (end < 0) continue;
+      line = line.slice(end + 2);
+      inBlock = false;
+    }
+    line = line.replace(/\/\*.*?\*\//g, " ");
+    const open = line.indexOf("/*");
+    if (open >= 0 && !/["'`]/.test(line.slice(0, open))) { line = line.slice(0, open); inBlock = true; }
+    if (/^\s*(\/\/|\*)/.test(line)) continue;
+    // A comment after code: two slashes with a space before them. An
+    // address has a colon there instead.
+    line = line.replace(/\s\/\/\s.*$/, "");
+    out.push(line);
+  }
+  return out.join("\n");
+}
+
 /**
- * From here on, everything this process prints goes through the net. Safe to
- * call twice; the second call adds to what is struck out.
+ * The words of a text, as two sets: those written small somewhere (or as the
+ * inner part of a joinedName), and those only ever written in CAPITALS. A
+ * word met only with a capital first letter — a name — is in neither.
  */
+export function wordsOf(text, into = { lower: new Set(), upper: new Set() }) {
+  for (const m of String(text).matchAll(/[A-Za-z]+/g)) {
+    const run = m[0];
+    if (run.length > 1 && run === run.toUpperCase()) { into.upper.add(run); continue; }
+    // helpReason -> help, Reason; XMLHttp -> XML, Http.
+    const parts = run.match(/[A-Z]+(?![a-z])|[A-Z]?[a-z]+/g) ?? [];
+    parts.forEach((w, k) => {
+      if (w.length < 2) return;
+      if (w === w.toLowerCase()) into.lower.add(w);
+      else if (w === w.toUpperCase()) into.upper.add(w);
+      // A capital inside a joined name is the program's own; one standing
+      // at the front of a word may be anybody's name.
+      else if (k > 0) into.lower.add(w.toLowerCase());
+    });
+  }
+  return into;
+}
+
+// Never part of the vocabulary, whatever the source says: the two letters
+// of a state, and a state's or the country's own name.
+const STATE_CODES = "AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY|DC";
+// Two letters that are also words a log writes in capitals: these are left
+// alone unless they stand where a state stands, or are the person's own.
+const ALSO_WORDS = new Set(["ID", "OK", "OR", "IN", "ME", "HI"]);
+const STATE_SET = new Set(STATE_CODES.split("|"));
+
+const VOCABULARY = new Map();
+/**
+ * The words this program's own source uses. Read once, when first needed.
+ * `forChecks` adds the checks' own words, and is true only when a check is
+ * the script that was started.
+ */
+export function vocabulary(forChecks = FOR_CHECKS()) {
+  if (VOCABULARY.has(forChecks)) return VOCABULARY.get(forChecks);
+  const v = { lower: new Set(), upper: new Set() };
+  try {
+    for (const name of fs.readdirSync(HERE)) {
+      if (!name.endsWith(".mjs") || PLACES.has(name) || (CHECKS.has(name) && !forChecks)) continue;
+      wordsOf(withoutComments(fs.readFileSync(new URL(name, HERE), "utf8")), v);
+    }
+  } catch { /* with nothing read, nothing but numbers is printed: safe, and plainly broken */ }
+  for (const code of STATE_CODES.split("|")) v.upper.delete(code);
+  for (const name of Object.values(STATES)) for (const w of name.toLowerCase().split(" ")) if (!PLAIN_PLACE.test(w) && w !== "of") v.lower.delete(w);
+  VOCABULARY.set(forChecks, v);
+  return v;
+}
+
+// Values never to be printed, handed over by the script that holds them: a
+// code read from a mailbox, a password made for a portal, a key from the
+// database. And the run's own secrets, which the runner strikes out only
+// when they are printed exactly as given.
+const SECRETS = new Set();
+export function secret(...values) {
+  for (const v of values) {
+    const t = String(v ?? "").trim();
+    if (t.length < 4) continue;
+    SECRETS.add(t);
+    try { SECRETS.add(encodeURIComponent(t)); SECRETS.add(Buffer.from(t).toString("base64")); } catch { /* as given is enough */ }
+  }
+}
+/**
+ * Rows read from where credentials are kept: every value under a name that
+ * says it is one — a password, a token, a key — is handed to secret().
+ */
+export function secretsIn(rows) {
+  const walk = (v, depth) => {
+    if (!v || typeof v !== "object" || depth > 4) return;
+    for (const [k, x] of Object.entries(v)) {
+      if (typeof x === "string" && /pass|secret|token|key|cookie|session|credential/i.test(k)) secret(x);
+      else walk(x, depth + 1);
+    }
+  };
+  walk(Array.isArray(rows) ? rows : [rows], 0);
+  return rows;
+}
+for (const [k, v] of Object.entries(process.env)) {
+  if (/(KEY|TOKEN|SECRET|PASSWORD|PASSWD|COOKIE|SESSION|CREDENTIAL)/i.test(k) && String(v ?? "").length >= 8 && !/^(GITHUB_|ACTIONS_|RUNNER_|npm_)/.test(k) && k !== "SUPABASE_ANON_KEY") secret(v);
+}
+const OWN_ADDRESSES = new Set();
+if (process.env.APPLYPILOT_EMAIL) OWN_ADDRESSES.add(String(process.env.APPLYPILOT_EMAIL).toLowerCase());
+
+const SHAPED = [
+  // Keys and tokens, by the way their makers write them.
+  [/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{4,}/g, "[token]"],
+  [/\b(?:Bearer|Basic)\s+[A-Za-z0-9._~+\/=-]{8,}/gi, "[token]"],
+  [/\bAIza[0-9A-Za-z_-]{30,}/g, "[key]"],
+  [/\b(?:sk|pk|rk|gsk|xox[abprs]|ya29|sbp|sb_secret|gh[pousr]|github_pat|glpat)[-_][A-Za-z0-9_-]{16,}/g, "[key]"],
+  // "password: hunter2", "token=abc", "cookie: a=b; c=d" — the name stays, what it holds goes.
+  [/\b((?:pass(?:word|wd|code|phrase)?|pwd|secret|token|api[_-]?key|apikey|authorization|cookie|session(?:[_-]?id)?|credential)s?)(["']?\s*[:=]\s*["']?)(?!\[)[^\s"',;}{]{4,}/gi, "$1$2[secret]"],
+  // A code that was sent: digits, or letters and digits, close after the word for one.
+  [/\b(code|otp|passcode|pin|one[- ]time[^.\n]{0,12}?|verification[^.\n]{0,12}?)((?:\s+(?:is|was|of|sent|read|entered|typed))?["':=\s]{1,4})(?=[A-Z0-9-]*\d)([A-Z0-9]{4,10}|\d{3}[- ]\d{3})\b/gi, "$1$2[code]"],
+  // Addresses for mail.
+  [/[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+/g, "[address]"],
+  // A row's own id: thirty-six characters that name one person or one job.
+  [/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, "[id]"],
+  // Anything long and unreadable is a key until shown otherwise.
+  [/\b[0-9a-f]{32,}\b/gi, "[key]"],
+  [/\b(?=[A-Za-z0-9_-]*\d)(?=[A-Za-z0-9_-]*[A-Za-z])[A-Za-z0-9_-]{40,}\b/g, "[key]"],
+  // A person's numbers.
+  [/(?<![\d.])\d{3}-\d{2}-\d{4}(?![\d.])/g, "[number]"],
+  [/(?<![\d.-])(?:\+?1[\s.-]?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]\d{4}(?![\d-])/g, "[phone]"],
+  [/(?<![\d.-])\+?1?\d{10}(?![\d.-])/g, "[phone]"],
+  // A place on the map, and a postcode: one that starts with a nought is
+  // never a count, and one after a state or a place is where somebody is.
+  [/-?\d{1,3}\.\d{3,}\s*,\s*-?\d{1,3}\.\d{3,}/g, "[a point on the map]"],
+  [/(?<![\d.,-])0\d{4}(?:-\d{4})?(?![\d.,-])/g, "[postcode]"],
+  [new RegExp(`(\\[a place\\]|\\[state\\]|\\b(?:${STATE_CODES})\\b)([ ,]{1,2})\\d{5}(?:-\\d{4})?(?!\\d)`, "g"), "$1$2[postcode]"],
+];
+
+const STATE_NAMES = new RegExp(`\\b(?:${Object.values(STATES).sort((a, b) => b.length - a.length).map((n) => n.replace(/ /g, "\\s+")).join("|")})\\b`, "gi");
+const STATE_ALONE = new RegExp(`(^|[^A-Za-z0-9])(${STATE_CODES})(?![A-Za-z0-9])`, "g");
+let OWN_STATE = null;
+
+/** Keys, codes, addresses and numbers, by their shape and by having been named. */
+export function scrubShaped(line) {
+  let s = String(line);
+  for (const v of [...SECRETS].sort((a, b) => b.length - a.length)) if (s.includes(v)) s = s.split(v).join("[secret]");
+  for (const [re, to] of SHAPED) s = s.replace(re, to);
+  // A state by name, and by its two letters where they stand as one.
+  s = s.replace(STATE_NAMES, "[state]");
+  s = s.replace(STATE_ALONE, (whole, lead, code) => (ALSO_WORDS.has(code) && code !== OWN_STATE ? whole : `${lead}[state]`));
+  return s;
+}
+
+// What the nets above have already put in place of something: left as it is.
+const PLACED = /\[(?:workday|oracle|successfactors|greenhouse|lever|ashby|icims|site) [0-9a-f]{5}\]|employer-(?:[0-9a-f]{5}|none)|\[[a-z …]{1,24}\]/g;
+
+/** Every word this program does not itself use, struck out. */
+export function ownWordsOnly(line, forChecks = FOR_CHECKS()) {
+  const { lower, upper } = vocabulary(forChecks);
+  const text = String(line);
+  let out = "";
+  let at = 0;
+  const pass = (piece) => piece.replace(/[A-Za-z0-9]*[A-Za-z][A-Za-z0-9]*/g, (run) => {
+    // Short and made of 0-9a-f with a digit in it: a count in sixteens, an alias.
+    if (/\d/.test(run) && /^[0-9a-f]+$/i.test(run) && run.length <= 16) return run;
+    return run.replace(/[A-Za-z]+/g, (letters) => {
+      if (letters.length === 1) return letters;
+      // Two capitals that are a state are a state, whatever they are joined to ("mi" is miles; "MI" is not).
+      const known = (w) => (w.length === 2 && w === w.toUpperCase() && STATE_SET.has(w) && !ALSO_WORDS.has(w) ? false : w === w.toUpperCase() ? upper.has(w) || lower.has(w.toLowerCase()) : lower.has(w.toLowerCase()));
+      if (letters === letters.toUpperCase()) return known(letters) ? letters : MARK;
+      const parts = letters.match(/[A-Z]+(?![a-z])|[A-Z]?[a-z]+/g) ?? [letters];
+      return parts.map((w) => (w.length === 1 || known(w) ? w : MARK)).join("");
+    });
+  });
+  for (const m of text.matchAll(PLACED)) {
+    out += pass(text.slice(at, m.index)) + m[0];
+    at = m.index + m[0].length;
+  }
+  out += pass(text.slice(at));
+  // A run of struck-out words is one thing struck out.
+  return out.replace(/\[…\](?:[\s,.'’&/-]{0,3}\[…\])+/g, MARK);
+}
+
+// Outside a public runner the last net can be lifted, to read a fixture's
+// own words while working on it. On a runner nothing lifts it.
+const ON_A_RUNNER = process.env.GITHUB_ACTIONS === "true";
+const OWN_WORDS = ON_A_RUNNER || process.env.QUIET_WORDS !== "off";
+
+/** A line as it may be printed where anybody can read it. */
+export function asPublic(line, forChecks = FOR_CHECKS()) {
+  const terms = [...TERMS].sort((a, b) => b.length - a.length);
+  let s = scrubPlaces(swap(scrub(String(line), terms, PHONE)));
+  for (const a of OWN_ADDRESSES) if (s.toLowerCase().includes(a)) s = s.replace(new RegExp(esc(a), "gi"), "[address]");
+  s = scrubShaped(s);
+  return OWN_WORDS ? ownWordsOnly(s, forChecks) : s;
+}
+
+let ACTIVE = false;
 const TERMS = new Set();
 let PHONE = null;
-export function guardLogs(profile, structured = null) {
-  for (const t of privateTerms(profile, structured)) TERMS.add(t);
-  PHONE = phonePattern(profile?.phone) ?? PHONE;
+
+/**
+ * Puts the nets under everything this process writes: what console prints,
+ * what is written to the two streams directly, and what an error nobody
+ * caught would have printed on its way out. Done once.
+ */
+export function install() {
   if (ACTIVE) return;
   ACTIVE = true;
   const text = (a) => (typeof a === "string" ? a : a instanceof Error ? String(a.stack ?? a.message) : (() => { try { return JSON.stringify(a); } catch { return String(a); } })());
-  for (const kind of ["log", "info", "warn", "error"]) {
+  for (const kind of ["log", "info", "warn", "error", "debug"]) {
     const plain = console[kind].bind(console);
-    console[kind] = (...args) => {
-      const terms = [...TERMS].sort((a, b) => b.length - a.length);
-      plain(...args.map((a) => scrubPlaces(swap(scrub(text(a), terms, PHONE)))));
+    // One piece of text per thing printed, as before; the stream below makes it safe.
+    console[kind] = (...args) => plain(...args.map(text));
+  }
+  for (const stream of [process.stdout, process.stderr]) {
+    const write = stream.write.bind(stream);
+    stream.write = (chunk, encoding, done) => {
+      if (typeof encoding === "function") { done = encoding; encoding = undefined; }
+      let out;
+      try {
+        const raw = typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8");
+        out = raw.split("\n").map((l) => (l ? asPublic(l) : l)).join("\n");
+      } catch {
+        // Nothing unsafe is printed because making it safe failed.
+        out = "[a line that could not be made safe to print]\n";
+      }
+      return write(out, done);
     };
   }
+  // An error nobody caught is printed by the runtime itself, past every
+  // net. Caught here, it is printed through them, and the run still fails.
+  const fatal = (e) => {
+    try { console.error(`stopped by an error nobody caught: ${e instanceof Error ? String(e.stack ?? e.message) : String(e)}`.slice(0, 1500)); } catch { /* the exit code says it */ }
+    process.exit(1);
+  };
+  process.on("uncaughtException", fatal);
+  process.on("unhandledRejection", fatal);
+}
+
+/**
+ * From here on, everything this process prints goes through the nets, with
+ * this person's own details among what is struck out. Safe to call twice;
+ * the second call adds to what is struck out.
+ */
+export function guardLogs(profile, structured = null) {
+  learn(profile, structured);
+  install();
+}
+
+/** A person's details, added to what is struck out. Changes nothing about where printing goes. */
+export function learn(profile, structured = null) {
+  for (const t of privateTerms(profile, structured)) TERMS.add(t);
+  PHONE = phonePattern(profile?.phone) ?? PHONE;
+  const st = String(profile?.state ?? profile?.home_state ?? "").trim().toUpperCase();
+  if (/^[A-Z]{2}$/.test(st)) OWN_STATE = st;
+  if (profile?.email) OWN_ADDRESSES.add(String(profile.email).toLowerCase());
+}
+
+// On a public runner the nets are under every script that so much as
+// imports this file, from its first line, whether or not it ever learns
+// whose round it is.
+if (ON_A_RUNNER || process.env.QUIET === "on") install();
+
+// Run as a program, this is a filter: what a workflow is about to print
+// that no script wrote — the panel's answer to a request, say — is passed
+// in on one side and comes out the other through the same nets.
+if (String(process.argv[1] ?? "").split(/[\\/]/).pop() === "quiet.mjs") {
+  let all = "";
+  process.stdin.setEncoding("utf8");
+  for await (const chunk of process.stdin) all += chunk;
+  const out = all.split("\n").map((l) => (l ? asPublic(l) : l)).join("\n");
+  // The stream has the nets under it already on a runner; twice is the same as once.
+  process.stdout.write(out.endsWith("\n") || !out ? out : `${out}\n`);
 }

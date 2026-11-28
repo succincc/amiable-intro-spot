@@ -29,6 +29,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      # For quiet.mjs, which makes the panel's answers safe to print.
+      - uses: actions/checkout@v4
+        continue-on-error: true
       - name: Ask the panel for the day's summary
         env:
           APP_URL: https://applynow.lol
@@ -43,6 +46,10 @@ jobs:
           # The owner's summary, then each approved person's in turn; the
           # panel answers 403 when there is nobody at the next place.
           first=0
+          # Nothing from the panel's answer is printed as it came: this log
+          # is public. It goes through the same nets as everything a script
+          # prints (quiet.mjs), and if they cannot be reached, it is not printed.
+          safe() { node "${GITHUB_WORKSPACE}/quiet.mjs" 2>/dev/null || echo "(an answer that could not be made safe to print)"; }
           for PERSON in $(seq 0 60); do
             # Past the owner, the panel is first asked whether anybody is at
             # this place in the line; one from before there was more than one
@@ -63,8 +70,9 @@ jobs:
               -H "Content-Type: application/json" \
               -d "{\"dry\":${DRY}}" || echo "000")
             echo "person $((PERSON + 1)): the panel answered ${code}"
-            # Counts and a state; nothing of anybody's is in it.
-            head -c 400 /tmp/summary.json 2>/dev/null || true
+            # Counts and a state; nothing of anybody's is in it, and it
+            # goes through the nets all the same.
+            head -c 400 /tmp/summary.json 2>/dev/null | safe || true
             echo
             if [ "${PERSON}" = "0" ]; then
               case "${code}" in

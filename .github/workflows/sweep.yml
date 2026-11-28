@@ -89,6 +89,9 @@ jobs:
       matrix:
         person: ${{ fromJSON(needs.people.outputs.list) }}
     steps:
+      # For quiet.mjs, which makes the panel's answers safe to print.
+      - uses: actions/checkout@v4
+        continue-on-error: true
       - name: Run discovery and scoring
         env:
           APP_URL: ${{ secrets.APP_URL || 'https://applynow.lol' }}
@@ -102,6 +105,10 @@ jobs:
             exit 1
           fi
           echo "Running: ${ONLY}"
+          # Nothing from the panel's answer is printed as it came: this log
+          # is public. It goes through the same nets as everything a script
+          # prints (quiet.mjs), and if they cannot be reached, it is not printed.
+          safe() { node "${GITHUB_WORKSPACE}/quiet.mjs" 2>/dev/null || echo "(an answer that could not be made safe to print)"; }
 
           # One request reads as many employers as fit in its time limit —
           # a few dozen — and stops, leaving the rest for "the next run". At
@@ -138,7 +145,7 @@ jobs:
               for round in $(seq 1 22); do
                 if call discover; then
                   good=$((good + 1))
-                  jq -c '{round: '"${round}"', ms, found: .discover.found, kept: .discover.kept, inserted: .discover.inserted, filtered: .discover.filtered, why: .discover.filtered_by, errors: .discover.errors, employers: .discover.employers, not_read_yet: .discover.stale}' /tmp/sweep.json 2>/dev/null || head -c 400 /tmp/sweep.json
+                  jq -c '{round: '"${round}"', ms, found: .discover.found, kept: .discover.kept, inserted: .discover.inserted, filtered: .discover.filtered, why: .discover.filtered_by, errors: .discover.errors, employers: .discover.employers, not_read_yet: .discover.stale}' /tmp/sweep.json 2>/dev/null | safe || head -c 400 /tmp/sweep.json | safe || true
                   left=$(jq -r '.discover.stale // "unknown"' /tmp/sweep.json 2>/dev/null || echo unknown)
                   # Every employer read: done. A panel that does not say how
                   # many are left gets four rounds and no more.
@@ -147,7 +154,7 @@ jobs:
                 else
                   bad=$((bad + 1))
                   echo "discover round ${round}: HTTP ${code}"
-                  head -c 600 /tmp/sweep.json 2>/dev/null || true
+                  head -c 600 /tmp/sweep.json 2>/dev/null | safe || true
                   echo
                   # Two failures in a row is the server, not bad luck.
                   if [ "${bad}" -ge 2 ]; then break; fi
@@ -162,12 +169,12 @@ jobs:
               for round in $(seq 1 3); do
                 if call score; then
                   good=$((good + 1))
-                  jq -c '{score_round: '"${round}"', ms, score}' /tmp/sweep.json 2>/dev/null | head -c 600 || head -c 400 /tmp/sweep.json
+                  jq -c '{score_round: '"${round}"', ms, score}' /tmp/sweep.json 2>/dev/null | head -c 600 | safe || head -c 400 /tmp/sweep.json | safe || true
                   echo
                 else
                   bad=$((bad + 1))
                   echo "score round ${round}: HTTP ${code}"
-                  head -c 600 /tmp/sweep.json 2>/dev/null || true
+                  head -c 600 /tmp/sweep.json 2>/dev/null | safe || true
                   echo
                   break
                 fi

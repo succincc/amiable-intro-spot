@@ -117,10 +117,14 @@ const fresh14 = (iso) => {
   return Number.isFinite(t) ? Date.now() - t <= FRESH_MS : true;
 };
 
-/** The Muse: jobs by city, twenty to a page. */
-async function fromMuse(titles, excludes, tally) {
+/**
+ * The Muse: jobs by city, twenty to a page. The cities are the caller's to
+ * give — the person's own town and the places they have listed — and none
+ * is written here: this file is public, and a list of towns says where
+ * somebody lives.
+ */
+async function fromMuse(titles, excludes, tally, places = []) {
   const out = [];
-  const places = ["New York, NY", "Jersey City, NJ", "Newark, NJ", "Princeton, NJ", "Edison, NJ", "New Brunswick, NJ", "Trenton, NJ", "Flexible / Remote"];
   for (const place of places) {
     for (let page = 1; page <= 12; page++) {
       let j;
@@ -513,8 +517,11 @@ if (process.env.FEEDS_IMPORT_ONLY !== "1") {
   for (const h of hits) {
     const k = flat(h.name);
     if (!k || NOT_AN_EMPLOYER.test(h.name)) continue;
-    const c = count.get(k) ?? { name: h.name.trim(), n: 0, link: null };
+    const c = count.get(k) ?? { name: h.name.trim(), n: 0, link: null, near: false };
     c.n++;
+    // A feed asked about the person's own town says the employer is hiring
+    // there; a feed of remote jobs says nothing about where it is.
+    if (["adzuna", "jooble", "ziprecruiter"].includes(h.source)) c.near = true;
     c.link ??= h.link ?? null;
     count.set(k, c);
   }
@@ -533,7 +540,7 @@ if (process.env.FEEDS_IMPORT_ONLY !== "1") {
     const url = c.link ?? guessCareersUrl(c.name);
     if (!url || urls.has(url.toLowerCase())) continue;
     urls.add(url);
-    fresh.push({ name: c.name, careers_url: url, status: "pending" });
+    fresh.push({ name: c.name, careers_url: url, status: "pending", note: c.near ? "feed: near home" : "feed: remote" });
     if (fresh.length >= MAX_NEW) break;
   }
 

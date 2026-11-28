@@ -30,7 +30,7 @@ import { chromium } from "playwright";
 import { chooseOption, generateAnswer, resumeFacts } from "./answers.mjs";
 import { alignToPosting, composeAnswer } from "./ats.mjs";
 import { tailorResume, rolesText, standardResume, arrangedResume, structureResume } from "./tailor.mjs";
-import { guardLogs, hideJob, STATES } from "./quiet.mjs";
+import { guardLogs, hideJob, secret, secretsIn, STATES } from "./quiet.mjs";
 import { FRESH_DAYS } from "./fresh.mjs";
 import { schoolNameOnly, schoolOption } from "./school.mjs";
 import { fromProfile } from "./fromprofile.mjs";
@@ -154,7 +154,10 @@ async function dbOnce(path, init = {}) {
   });
   if (!res.ok) throw new Error(`DB ${res.status}: ${(await res.text()).slice(0, 200)}`);
   const text = await res.text();
-  return text ? JSON.parse(text) : null;
+  const rows = text ? JSON.parse(text) : null;
+  // What is read from where sign-ins and keys are kept is never printed.
+  if (rows && /^(site_accounts|user_keys|google_tokens|call_keys)\b/.test(String(path))) secretsIn(rows);
+  return rows;
 }
 
 const rpc = (fn, args = {}) =>
@@ -258,7 +261,7 @@ async function requeueStaleParked() {
     })
       .then(() => true)
       .catch((e) => {
-        console.log(`Requeueing parked jobs failed: ${String(e?.message ?? e).slice(0, 120)}`);
+        console.log(`putting parked jobs back in the queue failed: ${String(e?.message ?? e).slice(0, 120)}`);
         return false;
       });
     if (!ok) break;
@@ -1223,7 +1226,10 @@ function portalPassword() {
   // words, "password must include a minimum of 16 characters", twice a
   // round for three rounds. One made here is twenty.
   const fits = own.length >= 16 && own.length <= 64 && /[a-z]/.test(own) && /[A-Z]/.test(own) && /\d/.test(own) && /[^A-Za-z0-9]/.test(own);
-  return fits ? own : generatePassword();
+  const made = fits ? own : generatePassword();
+  // Never printed, whatever prints: the nets are told its value.
+  secret(made);
+  return made;
 }
 
 function generatePassword() {
@@ -1240,7 +1246,9 @@ function generatePassword() {
     const j = crypto.randomInt(i + 1);
     [chars[i], chars[j]] = [chars[j], chars[i]];
   }
-  return chars.join("");
+  const made = chars.join("");
+  secret(made);
+  return made;
 }
 
 /** Is this a registration form rather than a sign-in one? */
@@ -5039,6 +5047,7 @@ async function waitForVerificationCode(host, company, attempts = 6, gapMs = 10_0
       if (data?.error) console.log(`    the code lookup said: ${String(data.error).slice(0, 110)}`);
       if (data?.code) {
         const code = String(data.code);
+        secret(code); // a code that was sent is not printed, by anything
         // The email names the employer and nothing else, so two applications
         // to the same company cannot be told apart by it. A code another
         // application in this run has already typed is not this one's;

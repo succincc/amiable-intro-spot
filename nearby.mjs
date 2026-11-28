@@ -6,9 +6,11 @@
 // the resolver as a place to start, the same as any company from a list;
 // a chain with twenty branches in reach is looked at first.
 //
-// One question to the map a week. The owner's position is rounded before it
-// is sent, and nothing is printed but counts. Free, no key.
+// One question to the map every three days. The owner's position is rounded
+// before it is sent, and nothing is printed but counts. Free, no key.
 
+// Everything printed here goes through the nets in quiet.mjs: this log is public.
+import "./quiet.mjs";
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const ANON_KEY = process.env.SUPABASE_ANON_KEY;
 // Whose round this is, when the runner is doing somebody else's: see forusers.mjs.
@@ -16,7 +18,10 @@ const ACT_AS = process.env.AP_ACT_AS ? { "x-act-as": process.env.AP_ACT_AS } : {
 const AP_EMAIL = process.env.APPLYPILOT_EMAIL;
 const AP_PASSWORD = process.env.APPLYPILOT_PASSWORD;
 const APPLY = process.env.APPLY === "true";
-const MAX_NEW = Number(process.env.MAX_NEW || 400);
+// How many new employers one run hands to the resolver. It was 400 a week
+// against 2,283 the map knows within reach: a month to hear of them all,
+// while the resolver was looking at 2,000 a day and running out of new ones.
+const MAX_NEW = Number(process.env.MAX_NEW || 1000);
 
 // Addresses that are a page on somebody else's site, not the business's own.
 const NOT_ITS_OWN =
@@ -101,9 +106,16 @@ if (process.env.NEARBY_IMPORT_ONLY !== "1") {
     `nwr(${around})["name"]["office"]${site};` +
     `nwr(${around})["name"]["craft"]${site};` +
     `nwr(${around})["name"]["healthcare"]${site};` +
-    `nwr(${around})["name"]["amenity"~"^(restaurant|fast_food|cafe|bank|pharmacy|clinic|hospital|dentist|doctors|veterinary|car_rental|car_wash|fuel|cinema|college|university|childcare|kindergarten|gym|social_facility)$"]${site};` +
+    `nwr(${around})["name"]["amenity"~"^(restaurant|fast_food|cafe|bank|pharmacy|clinic|hospital|dentist|doctors|veterinary|car_rental|car_wash|fuel|cinema|college|university|childcare|kindergarten|gym|social_facility|school|library|townhall|community_centre|nursing_home|theatre|arts_centre|animal_boarding|courthouse|pub|bar|ice_cream)$"]${site};` +
     `nwr(${around})["name"]["tourism"~"^(hotel|motel|attraction|museum|theme_park)$"]${site};` +
     `nwr(${around})["name"]["leisure"~"^(fitness_centre|sports_centre|golf_course)$"]${site};` +
+    // Where most of the jobs that are not in a shop are, and where an
+    // employer is least likely to pay a job board: plants, warehouses,
+    // depots, business parks.
+    `nwr(${around})["name"]["industrial"]${site};` +
+    `nwr(${around})["name"]["man_made"="works"]${site};` +
+    `nwr(${around})["name"]["building"~"^(industrial|warehouse|commercial|office|retail)$"]${site};` +
+    `nwr(${around})["name"]["landuse"~"^(industrial|commercial|retail)$"]${site};` +
     `);out tags 12000;`;
   let elements = null;
   for (const host of ["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter"]) {

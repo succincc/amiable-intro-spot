@@ -69,6 +69,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      # For quiet.mjs, which makes the panel's answers safe to print.
+      - uses: actions/checkout@v4
+        continue-on-error: true
       - name: Look at every job, then hand on
         env:
           GH_TOKEN: ${{ github.token }}
@@ -135,7 +138,7 @@ jobs:
           resolve.yml|6|apply=true,max=500
           indexes.yml|720|apply=true
           crawl.yml|24|apply=true
-          nearby.yml|168|apply=true
+          nearby.yml|72|apply=true
           outreach.yml|6|mode=send
           summary.yml|20|dry=false|12
           "
@@ -225,12 +228,16 @@ jobs:
           # before reading it. The panel now leaves the mailbox for a caller
           # that says it will wait, which is this one. Where the turn has not
           # come round the panel says so and nothing is woken.
+          # Nothing from the panel's answer is printed as it came: this log
+          # is public. It goes through the same nets as everything a script
+          # prints (quiet.mjs), and if they cannot be reached, it is not printed.
+          safe() { node "${GITHUB_WORKSPACE}/quiet.mjs" 2>/dev/null || echo "(an answer that could not be made safe to print)"; }
           ask() {
             code=$(curl -sS -o /tmp/tick.json -w '%{http_code}' --max-time 120 \
               -X POST "${APP_URL}/api/public/cron/tick" \
               -H "Content-Type: application/json" -d "$1" || echo "000")
             # Which things were done and a few counts; never the mail.
-            echo "mail: the panel answered ${code} $(head -c 300 /tmp/tick.json 2>/dev/null || true)"
+            echo "mail: the panel answered ${code} $(head -c 300 /tmp/tick.json 2>/dev/null | safe || true)"
           }
           ask '{"patient":true}'
           # Where it ran out of room before everyone was reached, it is asked

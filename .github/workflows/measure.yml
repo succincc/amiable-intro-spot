@@ -42,6 +42,16 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
+      # Before anything is measured, rated or written for: whatever was found
+      # at an employer the owner has blocked is set aside, for every person.
+      - name: The owner's blocks, carried out
+        env:
+          SUPABASE_URL: https://inqhfkshqndkxyztzita.supabase.co
+          SUPABASE_ANON_KEY: sb_publishable_QK4kidijM8nk46uK6L22Qw_XA0RQu5U
+          APPLYPILOT_EMAIL: ${{ secrets.APPLYPILOT_EMAIL }}
+          APPLYPILOT_PASSWORD: ${{ secrets.APPLYPILOT_PASSWORD }}
+          APPLY: ${{ github.event_name == 'schedule' || github.event.inputs.apply == 'true' }}
+        run: node forusers.mjs block.mjs || echo "the blocks could not be carried out this time; the applier refuses those employers itself"
       - name: Measure
         env:
           SUPABASE_URL: https://inqhfkshqndkxyztzita.supabase.co

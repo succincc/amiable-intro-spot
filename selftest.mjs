@@ -18,6 +18,8 @@
 //
 // Nothing leaves the machine: the pages, the database and the mailbox are all
 // one local server.
+// A check: made-up people only. Its printing goes through the same nets as everything else.
+import "./quiet.mjs";
 import http from "node:http";
 
 const CODE = "48213907";

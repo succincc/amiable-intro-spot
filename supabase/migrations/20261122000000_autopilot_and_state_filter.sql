@@ -18,8 +18,8 @@ alter table profile add column if not exists autopilot boolean default false;
 -- ---------------------------------------------------------------------------
 -- same-state filtering
 -- ---------------------------------------------------------------------------
--- A radius is a circle, and circles cross state lines. 50 miles from Princeton
--- reaches New York and Pennsylvania, which is right for some searches and
+-- A radius is a circle, and circles cross state lines. 50 miles from a town
+-- near a border reaches two more states, which is right for some searches and
 -- wrong for anyone who wants to stay licensed, taxed and commuting inside one
 -- state. This narrows the circle to the home state without changing it.
 alter table search_config add column if not exists same_state_only boolean default false;

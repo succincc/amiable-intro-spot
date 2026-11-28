@@ -7,6 +7,8 @@
  * has received is withdrawn on the employer's own portal, by the person.
  * Counts only; no name is printed. Run for each person by forusers.mjs.
  */
+// Everything printed here goes through the nets in quiet.mjs: this log is public.
+import "./quiet.mjs";
 import { isBlocked, BLOCKED_REASON } from "./blocked.mjs";
 
 const SUPABASE_URL = process.env.SUPABASE_URL, ANON_KEY = process.env.SUPABASE_ANON_KEY;
@@ -38,7 +40,7 @@ const pending = theirs.filter((j) => !SENT.has(j.status) && j.status !== "skippe
 let pulled = 0;
 for (let i = 0; i < pending.length; i += 50) {
   const ids = pending.slice(i, i + 50).map((j) => j.id);
-  const ok = await db(`jobs?id=in.(${ids.join(",")})`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ status: "skipped", skip_reason: BLOCKED_REASON, help_reason: null, tailored_resume: null, updated_at: new Date().toISOString() }) }).then(() => true).catch(() => false);
+  const ok = await db(`jobs?id=in.(${ids.join(",")})`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ status: "skipped", skip_reason: BLOCKED_REASON, tailored_resume: null, updated_at: new Date().toISOString() }) }).then(() => true).catch(() => false);
   if (ok) pulled += ids.length;
 }
 // Resumes written for postings there that were set aside before: taken off those too.

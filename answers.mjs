@@ -24,6 +24,8 @@
 // models/gemini-3.8-flash". GEMINI_MODEL overrides this without a code change.
 // This file runs standalone in GitHub Actions and cannot import the app's
 // TypeScript, so it keeps its own copy of the retry below.
+// Everything printed here goes through the nets in quiet.mjs: this log is public.
+import "./quiet.mjs";
 let MODEL = process.env.GEMINI_MODEL || "gemini-3.8-flash";
 
 /**
