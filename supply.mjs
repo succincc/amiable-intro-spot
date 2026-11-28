@@ -231,6 +231,11 @@ async function main() {
   const remote = recent.filter((j) => j.remote === true);
   console.log(`remote postings, 7 days: found ${remote.length}; qualified ${remote.filter((j) => TAKEN.has(j.status)).length}; sent ${remote.filter((j) => SENT.has(j.status)).length}; set aside ${JSON.stringify(top(count(remote.filter((j) => j.status === "skipped"), (j) => family(j.skip_reason)), 6))}`);
   digest.remote_qualified_7d = remote.filter((j) => TAKEN.has(j.status)).length;
+  {
+    // The remote ones that qualified and did not go: by system and by stop.
+    const held = remote.filter((j) => TAKEN.has(j.status) && !SENT.has(j.status));
+    console.log(`  remote, qualified and not sent (${held.length}): by system ${JSON.stringify(top(count(held, src), 8))}; by what stopped them ${JSON.stringify(top(count(held, stop), 8))}`);
+  }
 
   // 5. How new. A posting answered in its first days is read by someone.
   const q = recent.filter((j) => TAKEN.has(j.status));
