@@ -57,12 +57,7 @@ jobs:
           APPLYPILOT_EMAIL: ${{ secrets.APPLYPILOT_EMAIL }}
           APPLYPILOT_PASSWORD: ${{ secrets.APPLYPILOT_PASSWORD }}
         run: node forusers.mjs gaps.mjs
-      - name: In one line each
-        if: always() && github.event.inputs.only != 'supply'
-        run: |
-          grep -hE "^(DIGEST|WRONG|discovery|engine parts|  by what the upgrade|letters from|==== person)|^  by source|^    [^:]{1,24}: [0-9]+ / [0-9]+ / " "$RUNNER_TEMP/audit.txt" || true
-      # Last, so that the end of the log is the part most worth reading:
-      # which sources and which employers the qualified postings came from.
+      # Which sources and which employers the qualified postings came from.
       - name: Where the qualified postings come from
         if: always()
         env:
@@ -70,4 +65,19 @@ jobs:
           SUPABASE_ANON_KEY: sb_publishable_QK4kidijM8nk46uK6L22Qw_XA0RQu5U
           APPLYPILOT_EMAIL: ${{ secrets.APPLYPILOT_EMAIL }}
           APPLYPILOT_PASSWORD: ${{ secrets.APPLYPILOT_PASSWORD }}
-        run: node forusers.mjs supply.mjs
+        run: |
+          set -o pipefail
+          node forusers.mjs supply.mjs | tee "$RUNNER_TEMP/supply.txt"
+      # Last, so that the end of the log is the part most worth reading: the
+      # owner's lines of each report, one line each. (Both files have been
+      # through the nets already; this prints nothing they did not.)
+      - name: In one line each
+        if: always()
+        run: |
+          for f in audit supply; do
+            [ -f "$RUNNER_TEMP/$f.txt" ] || continue
+            echo "---- $f, the owner's ----"
+            sed '/^==== person 2 /,$d' "$RUNNER_TEMP/$f.txt" | grep -E "^(DIGEST|SUPPLY|WRONG|discovery, last|discovery, set aside|engine parts|  by what the upgrade|letters from|on record as sent|  confidence|sources switched|questions waiting|employers on file|  not placed|employers whose own list|employers by how|postings, 7 days|qualified and not sent|remote postings|  from employers already|  sent [0-9]+ of them)|^    [a-z][a-z ,()0-9-]{1,48}: [0-9]+ / [0-9]+ / |^    [a-z]+: [0-9]+: " | cut -c1-600 || true
+          done
+          echo "---- everyone else, the digests ----"
+          cat "$RUNNER_TEMP/audit.txt" "$RUNNER_TEMP/supply.txt" 2>/dev/null | sed -n '/^==== person 2 /,$p' | grep -E "^(==== person|DIGEST|SUPPLY|WRONG)" | cut -c1-500 || true
