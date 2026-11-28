@@ -330,4 +330,7 @@ jobs:
       - name: In short
         if: always()
         run: |
-          grep -hE "^(what this run spent|parts of the engine reached|why each one did not go|last look at|applied [0-9]+, need you|  - |rehearsed, never sent|review: |note: )" "$RUNNER_TEMP/apply.txt" | cut -c1-600 | tail -40 || true
+          grep -hE "^(what this run spent|parts of the engine reached|why each one did not go|last look at|applied [0-9]+, need you|  - |rehearsed, never sent|review: |note: |verdict: |set out to be applied to by hand|employers whose )" "$RUNNER_TEMP/apply.txt" | cut -c1-600 | tail -40 || true
+          # On the run's own page too: a green tick says the program ran,
+          # this says what it sent.
+          { echo "### ${{ matrix.lane || 'apply' }}"; grep -hE "^verdict: " "$RUNNER_TEMP/apply.txt" | sed 's/^/- /' || echo "- no verdict was written"; } >> "$GITHUB_STEP_SUMMARY"

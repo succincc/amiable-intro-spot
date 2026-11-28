@@ -168,6 +168,52 @@ const BOARD_FORM = `<!doctype html><html><head><title>Account Coordinator</title
 </script>
 </body></html>`;
 
+// Two questions that each stopped real Greenhouse applications, twice, in
+// the live rounds of 27 Nov 2026, with every other field filled: a list of
+// countries to tick, met by a profile that says "US" where the list says
+// "United States"; and a list of metro areas, met by a town and a state.
+// The form is the shape of the real ones, with nothing of theirs in it.
+const REGIONS_FORM = `<!doctype html><html><head><title>Field Coordinator</title></head><body>
+<h1>Field Coordinator</h1>
+<form id="f" novalidate>
+  <div><label for="first_name">First Name *</label><input id="first_name" name="first_name" required></div>
+  <div><label for="last_name">Last Name *</label><input id="last_name" name="last_name" required></div>
+  <div><label for="email">Email *</label><input id="email" name="email" type="email" required></div>
+  <div><label for="phone">Phone *</label><input id="phone" name="phone" type="tel" required></div>
+  <div><label for="resume">Resume/CV *</label><input id="resume" name="resume" type="file"></div>
+  <fieldset id="countries" class="checkbox"><legend>Please select the country or countries you anticipate working in for this role *</legend>
+    <div class="checkbox__wrapper"><input class="checkbox__input" style="position:absolute;opacity:0;width:0;height:0;margin:0" type="checkbox" id="q_ca" name="question_68961687[]" value="ca"><label for="q_ca">Canada</label></div>
+    <div class="checkbox__wrapper"><input class="checkbox__input" style="position:absolute;opacity:0;width:0;height:0;margin:0" type="checkbox" id="q_us" name="question_68961687[]" value="us"><label for="q_us">United States</label></div>
+    <div class="checkbox__wrapper"><input class="checkbox__input" style="position:absolute;opacity:0;width:0;height:0;margin:0" type="checkbox" id="q_uk" name="question_68961687[]" value="uk"><label for="q_uk">United Kingdom</label></div>
+    <div class="checkbox__wrapper"><input class="checkbox__input" style="position:absolute;opacity:0;width:0;height:0;margin:0" type="checkbox" id="q_other" name="question_68961687[]" value="other"><label for="q_other">Other</label></div>
+  </fieldset>
+  <div><label for="question_70491080">Which metro area are you located in? *</label>
+    <select id="question_70491080" name="question_70491080" required>
+      <option value="">Select...</option>
+      <option value="sf">San Francisco Bay Area</option>
+      <option value="nynj">New York / New Jersey Metro</option>
+      <option value="chi">Chicagoland</option>
+      <option value="other">Other</option>
+    </select></div>
+  <p id="err" role="alert" style="display:none"></p>
+  <p><button type="submit">Submit Application</button></p>
+</form>
+<script>
+  document.getElementById("f").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const ticked = Array.from(document.querySelectorAll('input[name="question_68961687[]"]:checked')).map((b) => b.value);
+    const metro = document.getElementById("question_70491080").value;
+    const missing = [];
+    if (!ticked.length) missing.push("Please select the country or countries you anticipate working in for this role");
+    if (!metro) missing.push("Which metro area are you located in?");
+    if (missing.length) { const er = document.getElementById("err"); er.textContent = "Missing entry for required field: " + missing.join("; "); er.style.display = "block"; return; }
+    fetch("/regions/got", { method: "POST", body: JSON.stringify({ ticked, metro }) }).catch(() => {});
+    setTimeout(() => { document.body.innerHTML = "<h2>Application submitted</h2><p>Your application was successfully submitted.</p>"; }, 1200);
+  });
+</script>
+</body></html>`;
+
+let regionsGot = null;
 let codeRequests = 0;
 let plainGot = null;
 let boardGot = null;
@@ -178,6 +224,16 @@ const server = http.createServer((req, res) => {
     req.on("data", (d) => (body += d));
     req.on("end", () => {
       try { plainGot = JSON.parse(body); } catch { plainGot = {}; }
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end("{}");
+    });
+    return;
+  }
+  if (url.pathname === "/regions/got") {
+    let body = "";
+    req.on("data", (d) => (body += d));
+    req.on("end", () => {
+      try { regionsGot = JSON.parse(body); } catch { regionsGot = {}; }
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end("{}");
     });
@@ -201,6 +257,7 @@ const server = http.createServer((req, res) => {
   if (url.pathname === "/gh/form") return send("text/html", GREENHOUSE_FORM);
   if (url.pathname === "/plain/job") return send("text/html", PLAIN_FORM);
   if (url.pathname === "/board/job") return send("text/html", BOARD_FORM);
+  if (url.pathname === "/regions/job") return send("text/html", REGIONS_FORM);
   if (url.pathname === "/api/public/email/verify-code") {
     codeRequests++;
     // A fresh code each time, as a real portal sends: the applier will not
@@ -318,6 +375,26 @@ const cases = [
       : JSON.stringify(boardGot.ticked) !== '["v"]' ? `the list has ${JSON.stringify(boardGot.ticked)} ticked`
       : null,
   },
+  {
+    name: "regions form: a profile that says US against a list that says United States, and a town against a list of metro areas",
+    // The profile as a real one was: the country by its letters.
+    profile: { country: null },
+    job: {
+      id: "selftest-regions",
+      url: `${base}/regions/job`,
+      apply_url: `${base}/regions/job`,
+      title: "Field Coordinator",
+      company: "Regions Co",
+      ats: "greenhouse",
+      location: "Princeton, NJ",
+      description: "Requirements: vendor management and scheduling.",
+    },
+    check: () =>
+      !regionsGot ? "the form never said what it was given"
+      : JSON.stringify(regionsGot.ticked) !== '["us"]' ? `the country list has ${JSON.stringify(regionsGot.ticked)} ticked`
+      : regionsGot.metro !== "nynj" ? `the metro area holds "${regionsGot.metro}"`
+      : null,
+  },
 ];
 
 const browser = await chromium.launch();
@@ -339,7 +416,7 @@ if (Number(process.env.ENDURANCE_ROUNDS) > 0) {
     const cut = cutAfterMs ? setTimeout(() => context.close().catch(() => {}), cutAfterMs) : null;
     try {
       outcome = await Promise.race([
-        applyToJob(context, { ...c.job }, profile, []),
+        applyToJob(context, { ...c.job }, { ...profile, ...(c.profile ?? {}) }, []),
         new Promise((_, no) => setTimeout(() => no(new Error("took longer than 4 minutes")), 240_000)),
       ]);
     } catch (e) {
@@ -355,6 +432,7 @@ if (Number(process.env.ENDURANCE_ROUNDS) > 0) {
     const cutting = r === 2;
     const t0 = Date.now();
     const got = await Promise.all(cases.map((c, i) => one(c, cutting && i === 1 ? 6000 : 0)));
+    const N = cases.length;
     if (cutting) cutOutcome = got[1].status;
     const fails = got.filter((g, i) => !g.ok && !(cutting && i === 1)).length;
     bad += fails;
@@ -365,7 +443,7 @@ if (Number(process.env.ENDURANCE_ROUNDS) > 0) {
   server.close();
   const steady = seen.slice(2);
   const first = steady[0] ?? seen[0], last = seen[seen.length - 1];
-  console.log(`\nendurance: ${rounds} rounds of 3 at once, ${rounds * 3 - 1} applications meant to finish, ${rounds * 3 - 1 - bad} did; the one cut off ended as "${cutOutcome}" and stopped nothing after it`);
+  console.log(`\nendurance: ${rounds} rounds of ${cases.length} at once, ${rounds * cases.length - 1} applications meant to finish, ${rounds * cases.length - 1 - bad} did; the one cut off ended as "${cutOutcome}" and stopped nothing after it`);
   console.log(`  a round took ${first.secs}s at the start and ${last.secs}s at the end; memory ${first.rss} MB then, ${last.rss} MB at the end, most ${Math.max(...seen.map((x) => x.rss))} MB`);
   const leak = last.rss > first.rss * 1.5 + 100;
   const slow = last.secs > first.secs * 1.5 + 10;
@@ -382,7 +460,7 @@ for (const c of cases) {
   let outcome;
   try {
     outcome = await Promise.race([
-      applyToJob(context, c.job, profile, []),
+      applyToJob(context, c.job, { ...profile, ...(c.profile ?? {}) }, []),
       new Promise((_, no) => setTimeout(() => no(new Error("took longer than 4 minutes")), 240_000)),
     ]);
   } catch (e) {

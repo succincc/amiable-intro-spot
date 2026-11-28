@@ -37,6 +37,7 @@ import { fromProfile } from "./fromprofile.mjs";
 import { useOwnKey } from "./ownkey.mjs";
 import { isCoverLetter, writeCoverLetter } from "./coverletter.mjs";
 import { jobKey } from "./samejob.mjs";
+import { sameAnswer, optionMeaning, placeOption } from "./normalize.mjs";
 import { confirmedQualifications, qualificationLines } from "./candidate.mjs";
 import { GONE_RE } from "./gone.mjs";
 import { tidyWriting, unsupportedClaims, documentCheck, requirementReport } from "./quality.mjs";
@@ -2963,6 +2964,12 @@ export function optionFor(options, answer) {
   for (const w of wants) {
     const exact = options.findIndex((o) => flat(o) === w);
     if (exact >= 0) return exact;
+  }
+  // The same answer under another spelling (normalize.mjs): "US" in a list
+  // that says "United States", "Bachelor's" in one that says "BA/BS".
+  {
+    const byMeaning = optionMeaning(options, answer);
+    if (byMeaning >= 0) return byMeaning;
   }
   for (const w of wants) {
     if (w.length < 4) continue;
@@ -6507,6 +6514,13 @@ function lastResort(label, p, job) {
   // "Do you want to work in <the place the posting is in>?" Applying says so.
   if (/^\s*(do|would) you (want|like|wish) to work (in|at|out of|from)\b/i.test(l)) return "Yes";
 
+  // "Which metro area are you located in?" The town and state on the
+  // profile; a list of areas is then read against it (placeOption), and a
+  // plain box takes it as it is. With either missing it is left alone.
+  if (/\bmetro(politan)? area\b|\bwhich (area|region|market) (are|do) you\b|\bwhere are you (currently )?(located|based)\b|\bwhat (city|area) (are|do) you (currently )?(located|based|live|reside)/i.test(l) && !/relocat|willing|open to/i.test(l)) {
+    if (p?.city && p?.state) return `${p.city}, ${p.state}`;
+  }
+
   // "Please select the country or countries you anticipate working in for
   // this role", over a list to tick. Two Greenhouse applications in one
   // live round stopped on it. It asks where the work will be done, not
@@ -6602,6 +6616,16 @@ function bestOption(offered, want, label) {
 
   for (const n of names) {
     const i = texts.indexOf(n);
+    if (i >= 0) return offered[i];
+  }
+  // One answer under its several spellings, on every portal (normalize.mjs).
+  {
+    const i = optionMeaning(offered.map((o) => o.text), want, label);
+    if (i >= 0) return offered[i];
+  }
+  // A place against a list of areas: "Which metro area are you located in?"
+  if (/,\s*[A-Za-z]{2,}\s*$/.test(String(want ?? "")) && /\b(metro|area|region|market|location|located|office|city|cities|hub)\b/i.test(String(label ?? ""))) {
+    const i = placeOption(offered.map((o) => o.text), want);
     if (i >= 0) return offered[i];
   }
   // "Yes, they have been employed…" / "No, they have not…": a yes or a no
@@ -9624,7 +9648,13 @@ async function applyToJobOnce(context, job, profile, answers) {
               (type === "radio" || type === "checkbox") &&
               (await el
                 .evaluate((n) => {
-                  const box = n.closest("label, [data-automation-id], [role=radiogroup]");
+                  // Around it, or beside it: newer Greenhouse boards hide the
+                  // native box and draw a label next to it that points at it
+                  // by id. Four such boxes were skipped as invisible on a
+                  // required list, twice, in live rounds (selftest: regions).
+                  const box =
+                    n.closest("label, [data-automation-id], [role=radiogroup]") ??
+                    (n.id ? document.querySelector(`label[for="${CSS.escape(n.id)}"]`) : null);
                   if (!box) return false;
                   const r = box.getBoundingClientRect();
                   return r.width > 0 && r.height > 0;
@@ -9919,13 +9949,15 @@ async function applyToJobOnce(context, job, profile, answers) {
                   const w = norm(want);
                   const o = norm(opt);
                   const refuses = /^(no|not|none|never|unwilling|unable|n\/a)\b|\b(not|never|unwilling|unable)\b/.test(o);
-                  // One country under its several spellings: a profile that
-                  // says "US" answers a list that offers "United States".
-                  // Two Greenhouse forms stopped on exactly that, twice.
-                  const usa = (t) => /^(us|usa|u s|u s a|united states|united states of america|america)\b/.test(t.replace(/\./g, " ").replace(/\s+/g, " ").trim());
+                  // One answer under its several spellings (normalize.mjs):
+                  // a profile that says "US" answers a list that offers
+                  // "United States". The box's label as read here may carry
+                  // its field name after the words, so the words alone are
+                  // tried too.
+                  const optWords = String(opt).replace(/\s+\S*(question|field|input|checkbox)\S*\s*$/i, "").replace(/\s*\[[^\]]*\]\s*$/, "").trim();
                   const mine =
                     o === w ||
-                    (usa(w) && usa(o) && /\bcountr(y|ies)\b/i.test(q)) ||
+                    sameAnswer(want, opt, q) || sameAnswer(want, optWords, q) ||
                     (w === "no" && refuses) ||
                     (w !== "no" && w !== "yes" && w.length > 3 && (o.includes(w) || w.includes(o)));
                   if (mine && !(await el.isChecked().catch(() => false))) {
@@ -14158,6 +14190,18 @@ const main = async () => {
       const secs = Math.round((Date.now() - COST.started) / 1000);
       const tried = tally.applied + (tally.needs_help ?? 0) + (tally.errors ?? 0);
       console.log(`what this run spent: ${secs}s in all; ${COST.dbCalls} database call(s) taking ${Math.round(COST.dbMs / 1000)}s together (most: ${top}); ${COST.pdfs} PDF(s) written; ${COST.contexts} browser window(s) opened; ${USED["model asked for an answer"] ?? 0} + ${USED["model asked to pick from a list"] ?? 0} question(s) put to the model; ${tried ? `${Math.round(secs / tried)}s per application tried (${tried})` : "no application tried"}`);
+    }
+    {
+      // A run that ends green has only shown that the program ran. This is
+      // what it did: how many went, and if none, why — in the terms that
+      // say whose move it is.
+      const tried = tally.applied + (tally.needs_help ?? 0) + (tally.errors ?? 0);
+      const why = Object.entries(ORIGINS).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${n} ${k}`).join(", ");
+      console.log(
+        `verdict: ${tally.applied} sent of ${tried} tried` +
+          (DRY_RUN ? " (a rehearsal: nothing is ever sent)" : "") +
+          (tried === 0 ? " - nothing was waiting in this lane" : tally.applied === tried ? "" : ` - did not go: ${why || "not recorded"}`),
+      );
     }
     console.log(`parts of the engine reached this run: ${Object.keys(USED).length ? JSON.stringify(USED) : "none of the counted ones"}`);
     if (STOPS.length) console.log(`what stopped them, one line each:\n${STOPS.map((x) => "  - " + x).join("\n")}`);

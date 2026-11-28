@@ -657,5 +657,26 @@ quiet.hideJob({ company: "ZQ" });
   ], [["workday@0of3", "greenhouse@0of2", "greenhouse@1of2", "none"], ["workday@0of3"], 14, ["none", "other", "workday"], 3]);
 }
 
+{
+  // One answer under its several spellings, for every list on every portal.
+  const n = await import("./normalize.mjs");
+  check("normalize: a country, a state, a degree and a yes are each known by their spellings, and nothing near is taken for them", [
+    n.sameAnswer("US", "United States"), n.sameAnswer("usa", "United States of America"), n.sameAnswer("NJ", "New Jersey"),
+    n.sameAnswer("CA", "Canada", "Which country?"), n.sameAnswer("CA", "Canada", "State"), n.sameAnswer("CA", "California"),
+    n.sameAnswer("Bachelor's", "BA/BS"), n.sameAnswer("Yes", "Y"),
+    n.sameAnswer("Male", "Female"), n.sameAnswer("No", "Norway"), n.sameAnswer("Bachelor", "Masters"), n.sameAnswer("Indiana", "India"),
+  ], [true, true, true, true, false, true, true, true, false, false, false, false]);
+  check("normalize: an option is taken by meaning only when exactly one means it; a place finds its area, or the list's own Other, or nothing", [
+    n.optionMeaning(["Canada", "United States", "Other"], "US", "country"),
+    n.optionMeaning(["High School", "BA/BS", "MA/MS/MBA"], "Bachelor's degree"),
+    n.optionMeaning(["Bachelors", "BA/BS"], "Bachelor's degree"),
+    n.placeOption(["San Francisco Bay Area", "New York / New Jersey Metro", "Other"], "Princeton, NJ"),
+    n.placeOption(["Austin", "Dallas"], "Princeton, NJ"),
+    n.placeOption(["Austin", "Dallas", "Other"], "Princeton, NJ"),
+    n.placeOption(["Princeton area", "New Jersey"], "Princeton, NJ"),
+    n.dateForms("2026-12-08").us, n.dateForms("2026-12-08").iso, n.dateForms("nonsense"),
+  ], [1, 1, -1, 1, -1, 2, 0, "12/08/2026", "2026-12-08", null]);
+}
+
 console.log(failed ? `unit: ${failed} failed, ${passed} passed.` : `unit: all ${passed} passed.`);
 process.exit(failed ? 1 : 0);

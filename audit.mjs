@@ -36,6 +36,8 @@ async function db(path) {
   const text = await res.text();
   return text ? JSON.parse(text) : null;
 }
+const count = (list, of) => { const o = {}; for (const x of list) { const k = of(x) ?? "none"; o[k] = (o[k] ?? 0) + 1; } return o; };
+
 async function main() {
   await signIn();
 
@@ -66,6 +68,31 @@ async function main() {
       if (fresh) console.log(`  ${fresh} of those in the last day: by this person's own yes, or something to look into`);
     }
   }
+  // What discovery brought in over the last seven days, by where it was
+  // found: postings, employers, and what became of them.
+  try {
+    const since = new Date(Date.now() - 7 * 86_400_000).toISOString();
+    const found = [];
+    for (let from = 0; from < 20000; from += 1000) {
+      const rows = await db(`jobs?created_at=gte.${encodeURIComponent(since)}&select=source,company,status,skip_reason&order=id.asc&offset=${from}&limit=1000`);
+      found.push(...rows);
+      if (rows.length < 1000) break;
+    }
+    const by = {};
+    for (const j of found) (by[String(j.source ?? "not recorded").toLowerCase().slice(0, 22)] ??= []).push(j);
+    const eligible = (j) => ["queued", "applying", "applied", "interview", "offer", "rejected", "review", "needs_help"].includes(j.status);
+    const same = (j) => /already applied|same role|duplicate/i.test(String(j.skip_reason ?? ""));
+    console.log(`discovery, last 7 days: ${found.length} posting(s) from ${new Set(found.map((j) => String(j.company ?? "").toLowerCase())).size} employer(s); by status ${JSON.stringify(count(found, (j) => j.status))}`);
+    console.log(`  by source (postings / employers / taken forward / set aside as the same job / set aside otherwise):`);
+    for (const [k, list] of Object.entries(by).sort((a, b) => b[1].length - a[1].length).slice(0, 14)) {
+      console.log(`    ${k}: ${list.length} / ${new Set(list.map((j) => String(j.company ?? "").toLowerCase())).size} / ${list.filter(eligible).length} / ${list.filter(same).length} / ${list.filter((j) => j.status === "skipped" && !same(j)).length}`);
+    }
+    digest.discovered7d = found.length;
+    digest.takenForward7d = found.filter(eligible).length;
+  } catch (e) {
+    console.log(`discovery could not be read: ${String(e?.message ?? e).slice(0, 80)}`);
+  }
+
   // One line that says it all, for whoever reads only the end.
   console.log(`DIGEST ${process.env.AP_ACT_AS ? "another person" : "owner"}: ${JSON.stringify(digest)}`);
   if (failures.length) {
