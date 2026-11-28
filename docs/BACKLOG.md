@@ -68,6 +68,23 @@ there is evidence).
 - Oracle's resume wait; lanes for people with autopilot off; the resolver
   looks again at a failure weekly, not daily.
 
+- Fault fixtures in the self-test (a form that refuses after submit; an
+  address that will not open); endurance keeps to the sendable forms.
+- Parked postings retried only when the applying code changes.
+- Audit: unconfirmed submits by page evidence; the record against itself;
+  each lane's evidence added up; one-line summary at the end of the log.
+
+## Seen on the 2:30 AM round of 28 Nov and not yet explained
+
+- **Workday: 12 postings ended "never reached a form"** in one round, all
+  retries of postings that had earlier stopped on a question. Each lane's
+  last lines now print what such a page looked like ("no form here, by
+  shape", "no form; buttons on page"). Read those before touching the
+  Workday path.
+- **Workday "How did you hear about us?"**: the required multi-select
+  (`source--source`) left at "0 items selected", twice. The lane now
+  prints the picker's own trace ("source trace:").
+
 ## Open, in order (each with what it rests on)
 
 1. **Unconfirmed submits (13 in a week).** The note now records what the
