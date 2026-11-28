@@ -89,7 +89,9 @@ async function main() {
     }
     // Why the ones set aside were set aside, in the engine's own reasons
     // with any number or name in them taken out.
-    const reason = (j) => String(j.skip_reason ?? "no reason recorded").toLowerCase().replace(/\d+(\.\d+)?/g, "N").replace(/"[^"]*"/g, '"…"').slice(0, 60);
+    const reason = (j) => String(j.skip_reason ?? "no reason recorded").toLowerCase().replace(/\d+(\.\d+)?/g, "N").replace(/"[^"]*"/g, '"…"')
+      // No place in what is printed: a reason that names the person's state, or a posting's town, says where they live.
+      .replace(/^outside [a-z ]{2,20}:.*$/, "outside the person's own state").replace(/^no state given.*$/, "no state given").replace(/^[a-z]{2} is far beyond/, "a state far beyond").slice(0, 60);
     const aside = found.filter((j) => j.status === "skipped");
     console.log(`discovery, set aside (${aside.length}): ${JSON.stringify(Object.fromEntries(Object.entries(count(aside, reason)).sort((a, b) => b[1] - a[1]).slice(0, 8)))}`);
     console.log(`discovery, still waiting to be rated or held: ${found.filter((j) => j.status === "new").length} new, ${found.filter((j) => j.status === "review").length} held for a yes`);
