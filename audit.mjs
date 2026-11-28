@@ -74,7 +74,7 @@ async function main() {
     const since = new Date(Date.now() - 7 * 86_400_000).toISOString();
     const found = [];
     for (let from = 0; from < 20000; from += 1000) {
-      const rows = await db(`jobs?created_at=gte.${encodeURIComponent(since)}&select=source,company,status,skip_reason&order=id.asc&offset=${from}&limit=1000`);
+      const rows = await db(`jobs?found_at=gte.${encodeURIComponent(since)}&select=source,company,status,skip_reason&order=id.asc&offset=${from}&limit=1000`);
       found.push(...rows);
       if (rows.length < 1000) break;
     }
