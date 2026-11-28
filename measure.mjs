@@ -380,6 +380,13 @@ if (process.env.MEASURE_IMPORT_ONLY !== "1") {
     for (const job of held) {
       const read = readLocation(job.location, { title: job.title, description: job.description, remote: job.remote });
       const here = nearest(read, home);
+      if (!here && read.onlyAbroad && job.remote !== true) {
+        // Every place it names is in another country: not unplaceable, and
+        // not a matter of miles. Said as what it is.
+        again.abroad = (again.abroad ?? 0) + 1;
+        if (APPLY) await db(`jobs?id=eq.${job.id}&status=eq.skipped`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ skip_reason: "outside the United States" }) }).catch(() => {});
+        continue;
+      }
       if (!here) {
         if (!String(job.location ?? "").trim()) again.noLocation++;
         else if (read.states.length) again.stateOnly++;
@@ -400,7 +407,7 @@ if (process.env.MEASURE_IMPORT_ONLY !== "1") {
       }
     }
     console.log(`set aside as unplaceable, tried again: ${JSON.stringify(again)}`);
-    console.log(`  of ${again.held}: ${again.within} are within reach and go back to be rated; ${again.beyond} are placed and too far (now said so); ${again.held - again.within - again.beyond} still cannot be placed and stay held`);
+    console.log(`  of ${again.held}: ${again.within} are within reach and go back to be rated; ${again.beyond} are placed and too far (now said so); ${again.abroad ?? 0} are in another country (now said so); ${again.held - again.within - again.beyond - (again.abroad ?? 0)} still cannot be placed and stay held`);
     const top = [...shapes.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12);
     if (top.length) console.log(`  still unplaced, by shape (a = a word, 9 = a number, ST = a state): ${JSON.stringify(top.map(([sh, n]) => `${sh} x${n}`))}`);
   }

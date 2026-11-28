@@ -67,6 +67,22 @@ const ALSO = {
   "dfw": ["Dallas", "TX"], "dallas fort worth": ["Dallas", "TX"], "kc": ["Kansas City", "MO"], "slc": ["Salt Lake City", "UT"],
 };
 
+// Countries other than this one, and the provinces of the nearest: a posting
+// that names one of these and no American town is abroad, which is a
+// reason of its own — not "unplaceable", and not a distance.
+const ABROAD = new RegExp(`\\b(${[
+  "canada", "mexico", "united kingdom", "uk", "england", "scotland", "wales", "northern ireland", "ireland", "india", "germany", "france", "spain", "italy",
+  "netherlands", "belgium", "switzerland", "austria", "sweden", "norway", "denmark", "finland", "poland", "portugal", "czech republic", "czechia", "romania",
+  "hungary", "greece", "turkey", "israel", "united arab emirates", "uae", "saudi arabia", "qatar", "egypt", "south africa", "nigeria", "kenya",
+  "china", "japan", "south korea", "korea", "taiwan", "hong kong", "singapore", "malaysia", "thailand", "vietnam", "philippines", "indonesia",
+  "australia", "new zealand", "brazil", "argentina", "chile", "colombia", "peru", "costa rica", "pakistan", "bangladesh", "sri lanka", "ukraine",
+  "bulgaria", "serbia", "croatia", "lithuania", "latvia", "estonia", "luxembourg", "slovakia", "slovenia", "morocco",
+  "ontario", "quebec", "british columbia", "alberta", "manitoba", "saskatchewan", "nova scotia", "new brunswick",
+  "emea", "apac", "latam", "europe", "asia",
+].join("|")})\\b`, "i");
+// Great cities abroad that employers write with no country after them.
+const ABROAD_CITY = /\b(london|toronto|vancouver|montreal|dublin|bangalore|bengaluru|hyderabad|mumbai|pune|chennai|gurgaon|gurugram|noida|new delhi|delhi|paris|berlin|munich|amsterdam|madrid|barcelona|sydney|melbourne|tokyo|shanghai|beijing|shenzhen|manila|krakow|warsaw|prague|budapest|bucharest|tel aviv|dubai|sao paulo|são paulo|mexico city|guadalajara|bogota|bogotá|zurich|stockholm|copenhagen|lisbon|cork|edinburgh|manchester|kuala lumpur|bangkok|seoul|taipei|cairo|lagos|nairobi|johannesburg|cape town)\b/i;
+
 const METRO = {
   "boston": "MA", "chicago": "IL", "seattle": "WA", "atlanta": "GA", "denver": "CO", "houston": "TX", "dallas": "TX", "austin": "TX",
   "miami": "FL", "phoenix": "AZ", "philadelphia": "PA", "los angeles": "CA", "san diego": "CA", "detroit": "MI", "minneapolis": "MN",
@@ -132,6 +148,8 @@ function onePlace(piece) {
   // Its parts, whichever way round: "Florham Park, NJ", "NJ - Florham Park - 100 Park Ave", "US-NJ-Princeton".
   // "US-NJ-Florham Park-100 Park Ave": hyphens with no room around them, in a string that opens with a country or a state.
   if (/^(?:usa?-)?[A-Z]{2}-\S/.test(s)) s = s.replace(/-/g, ", ");
+  // "US:NJ:Parsippany:1 Sylvan Way:Corporate/HQ": the same, with colons.
+  if ((s.match(/:/g) ?? []).length >= 2) s = s.replace(/:/g, ", ");
   const bits = s.split(/\s*(?:,|\s[-–—]\s)\s*/).map((b) => b.trim()).filter(Boolean)
     .filter((b) => !/^(us|usa|united states( of america)?)$/i.test(b));
   // The state is the last piece that is one. "New York, NY" and "Washington,
@@ -223,6 +241,7 @@ export function readLocation(location, more = {}) {
   const places = [];
   const states = new Set();
   const unread = [];
+  const abroad = [];
   const take = (text) => {
     // What is in brackets is about the place, not another place: "(must reside in TX or FL)".
     for (const piece of String(text).replace(/\([^)]*\)/g, " ").split(/\s*(?:;|\||\n|\/(?=\s)|\s\/\s|\bor\b|\s&\s|\band\b(?=\s+[A-Z])|•|·)\s*/i)) {
@@ -231,6 +250,7 @@ export function readLocation(location, more = {}) {
       const got = onePlace(p);
       if (got?.lat != null) { if (!places.some((x) => x.name === got.name)) places.push(got); }
       else if (got?.stateOnly) states.add(got.stateOnly);
+      else if (ABROAD.test(p) || ABROAD_CITY.test(p)) abroad.push(p);
       else unread.push(p);
     }
   };
@@ -256,7 +276,7 @@ export function readLocation(location, more = {}) {
   }
 
   const reside = mode === "remote" || mode === "hybrid" || more.remote === true ? residency(raw, String(more.description ?? "").slice(0, 8000)) : [];
-  return { places, states: [...states], mode, reside, unread, fromDescription };
+  return { places, states: [...states], mode, reside, unread, fromDescription, abroad: abroad.length, onlyAbroad: abroad.length > 0 && !places.length && !states.size && !unread.length };
 }
 
 export function milesBetween(aLat, aLon, bLat, bLon) {

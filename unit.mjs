@@ -708,6 +708,11 @@ quiet.hideJob({ company: "ZQ" });
     g.residency("Remote", "Candidates must reside in New Jersey, New York, or Pennsylvania."),
     g.residency("Remote", "This role is only open to residents of the following states: CA, WA, OR."),
   ], ["remote", "hybrid", "onsite", null, ["TX", "FL"], ["CA"], [], [], ["NJ", "NY", "PA"], ["CA", "WA", "OR"]]);
+  check("geo: a posting abroad is said to be abroad — not unplaceable, and never when it also names somewhere here", [
+    g.readLocation("Bengaluru, India").onlyAbroad, g.readLocation("London").onlyAbroad, g.readLocation("Toronto, Ontario").onlyAbroad, g.readLocation("EMEA").onlyAbroad,
+    g.readLocation("London; Princeton, NJ").onlyAbroad, g.readLocation("Princeton, NJ").onlyAbroad, g.readLocation("Narnia Heights").onlyAbroad,
+    names("London, KY"), names("Paris, TX"),
+  ], [true, true, true, true, false, false, false, ["London, KY"], ["Paris, TX"]]);
   const d = g.nearest(g.readLocation("Princeton, NJ; Austin, TX"), { lat: 40.7484, lon: -73.9967 });
   check("geo: a posting open in several places is as near as its nearest", [d.miles > 30 && d.miles < 60, g.nearest(g.readLocation("Austin, TX"), { lat: 40.7484, lon: -73.9967 }).miles > 1400], [true, true]);
 }
