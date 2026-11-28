@@ -80,7 +80,7 @@ const ABROAD = new RegExp(`\\b(${[
   "ontario", "quebec", "british columbia", "alberta", "manitoba", "saskatchewan", "nova scotia", "new brunswick",
   "emea", "apac", "latam", "europe", "asia", "venezuela", "ecuador", "uruguay", "panama", "guatemala", "dominican republic", "jamaica",
   // Countries by their three letters, as Workday writes them at the end of a location.
-  "gbr", "ind", "cri", "can", "mex", "deu", "fra", "irl", "phl", "aus", "bra", "chn", "jpn", "sgp", "esp", "ita", "nld", "pol", "isr", "che", "swe", "arg", "col",
+  "gbr", "ind", "cri", "mex", "deu", "fra", "irl", "phl", "aus", "bra", "chn", "jpn", "sgp", "esp", "ita", "nld", "pol", "isr", "che", "swe", "arg", "col",
 ].join("|")})\\b`, "i");
 // Great cities abroad that employers write with no country after them.
 const ABROAD_CITY = /\b(london|toronto|vancouver|montreal|mississauga|ottawa|calgary|phuket|dublin|bangalore|bengaluru|hyderabad|mumbai|pune|chennai|gurgaon|gurugram|noida|new delhi|delhi|paris|berlin|munich|amsterdam|madrid|barcelona|sydney|melbourne|tokyo|shanghai|beijing|shenzhen|manila|krakow|warsaw|prague|budapest|bucharest|tel aviv|dubai|sao paulo|são paulo|mexico city|guadalajara|bogota|bogotá|zurich|stockholm|copenhagen|lisbon|cork|edinburgh|manchester|kuala lumpur|bangkok|seoul|taipei|cairo|lagos|nairobi|johannesburg|cape town)\b/i;
