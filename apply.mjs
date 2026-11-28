@@ -2387,9 +2387,12 @@ async function ensureAccount(page, profile, job) {
     return { ok: false, reason: "email_verification" };
   }
 
-  if (/password (does not|doesn't) meet|invalid password|password must/.test(after)) {
-    return { ok: false, reason: "password rejected by portal" };
-  }
+  // An account that is already there is looked for first. Two Workday
+  // sign-ups in one live round ended "password rejected by portal" on a
+  // password that meets every rule: the page prints its password rules
+  // ("Password must contain…") beside the box whether or not anything is
+  // wrong, and that standing hint was read as a refusal — which also hid
+  // the real reason, and kept the reset below from ever being tried.
   if (/already (exists|registered)|account with this email/.test(after)) {
     // Someone (or an earlier run) registered already and we lack the password.
     if (!RESET_TRIED.has(host)) {
@@ -2405,6 +2408,17 @@ async function ensureAccount(page, profile, job) {
     await saveAccount(host, email, password, "failed", job.id,
       "an account already exists for this email");
     return { ok: false, reason: "account already exists" };
+  }
+  {
+    // A refusal is what the page says in an error, not what it prints as advice.
+    const errors = ((await page.$$eval(
+      '[role=alert], [aria-live=assertive], [data-automation-id*="error" i], [class*="error" i], [id*="error" i]',
+      (els) => els.filter((e) => { const b = e.getBoundingClientRect(); return b.width > 0 && b.height > 0; }).map((e) => e.innerText || "").join(" "),
+    ).catch(() => "")) || "").toLowerCase();
+    if (/password (does not|doesn't) meet|invalid password/.test(after) || /password (must|should|needs to|is too|cannot|can't)|passwords? (do not|don't) match/.test(errors)) {
+      console.log(`    the portal's own words about the password: ${JSON.stringify(errors.replace(/\s+/g, " ").trim().slice(0, 160))}`);
+      return { ok: false, reason: "password rejected by portal" };
+    }
   }
 
   // Did it actually get past the wall?
@@ -6490,6 +6504,16 @@ function lastResort(label, p, job) {
   }
   // "Do you want to work in <the place the posting is in>?" Applying says so.
   if (/^\s*(do|would) you (want|like|wish) to work (in|at|out of|from)\b/i.test(l)) return "Yes";
+
+  // "Please select the country or countries you anticipate working in for
+  // this role", over a list to tick. Two Greenhouse applications in one
+  // live round stopped on it. It asks where the work will be done, not
+  // what anyone's citizenship is: the country on the profile, which is
+  // where the person lives and searches. With none on the profile it is
+  // left for them.
+  if (/\bcountr(y|ies)\b/i.test(l) && /\b(anticipate|expect|plan|intend)\w* (to (be )?)?work|\bwork(ing)? (from|in)\b|\bbe (based|located|working)\b|\bwhere (will|would) you (be )?work/i.test(l) && !/citizen|authoriz|sponsor|visa|passport|born|nationalit/i.test(l)) {
+    if (p?.country) return String(p.country);
+  }
 
   // "In what cities are you available to work?" over a list of offices. The
   // posting was chosen because it is within reach, so its own city is the
