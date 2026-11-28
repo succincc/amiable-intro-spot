@@ -94,6 +94,11 @@ there is evidence).
   purpose): 39 of 39 went; 52 s a round first and last; memory 107 -> 108
   MB; no browser context left open.
 - Measuring step: 93 s -> 24 s once unplaced postings stopped being re-read.
+- Own-site reader, local employers first (5 AM run): 101 sites read in 6
+  min (45 needed a browser); 2 published postings in the structured form
+  search engines read; 16 postings, 16 for the person's titles, 1 in reach
+  and fresh, 1 saved. Small businesses near home mostly do not publish
+  their openings in a form a program can read: this source is real but thin.
 
 ## Explained since
 
