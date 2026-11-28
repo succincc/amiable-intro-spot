@@ -60,7 +60,7 @@ jobs:
       - name: In one line each
         if: always() && github.event.inputs.only != 'supply'
         run: |
-          grep -hE "^(DIGEST|WRONG|discovery|==== person)|^  by source|^    [^:]{1,24}: [0-9]+ / [0-9]+ / " "$RUNNER_TEMP/audit.txt" || true
+          grep -hE "^(DIGEST|WRONG|discovery|engine parts|  by what the upgrade|letters from|==== person)|^  by source|^    [^:]{1,24}: [0-9]+ / [0-9]+ / " "$RUNNER_TEMP/audit.txt" || true
       # Last, so that the end of the log is the part most worth reading:
       # which sources and which employers the qualified postings came from.
       - name: Where the qualified postings come from

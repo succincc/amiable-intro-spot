@@ -10,6 +10,7 @@
 // before it is sent, and nothing is printed but counts. Free, no key.
 
 // Everything printed here goes through the nets in quiet.mjs: this log is public.
+import { allRows } from "./pages.mjs";
 import "./quiet.mjs";
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const ANON_KEY = process.env.SUPABASE_ANON_KEY;
@@ -142,11 +143,12 @@ if (process.env.NEARBY_IMPORT_ONLY !== "1") {
   }
   const employers = employersFrom(elements);
 
-  const known = (await db("company_candidates?select=name,careers_url&limit=50000")) ?? [];
-  const firms = (await db("companies?select=name,careers_url&limit=20000")) ?? [];
+  // All of them, a thousand at a time: see pages.mjs.
+  const known = await allRows(db, "company_candidates?select=name,careers_url,resolved_url");
+  const firms = await allRows(db, "companies?select=name,careers_url");
   const names = new Set([...known, ...firms].map((r) => flat(r.name)));
   const hostOf = (u) => { try { return new URL(u).hostname.toLowerCase().replace(/^(www|careers?|jobs?)\./, ""); } catch { return ""; } };
-  const hosts = new Set([...known, ...firms].map((r) => hostOf(r.careers_url)).filter(Boolean));
+  const hosts = new Set([...known, ...firms].flatMap((r) => [hostOf(r.careers_url), hostOf(r.resolved_url)]).filter(Boolean));
   const fresh = [];
   let held = 0;
   for (const e of employers) {

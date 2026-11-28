@@ -38,7 +38,7 @@ import { useOwnKey } from "./ownkey.mjs";
 import { isCoverLetter, writeCoverLetter } from "./coverletter.mjs";
 import { jobKey } from "./samejob.mjs";
 import { isBlocked, BLOCKED_REASON } from "./blocked.mjs";
-import { sameAnswer, optionMeaning, placeOption } from "./normalize.mjs";
+import { sameAnswer, optionMeaning, placeOption, ageOption } from "./normalize.mjs";
 import { confirmedQualifications, qualificationLines } from "./candidate.mjs";
 import { GONE_RE } from "./gone.mjs";
 import { tidyWriting, unsupportedClaims, documentCheck, requirementReport } from "./quality.mjs";
@@ -1444,6 +1444,7 @@ async function successFactorsAccount(page, profile, job) {
       if (pc) return { ok: false, reason: "email_verification" };
       await saveAccount(key, email, password, "active", job.id, "signed in on SuccessFactors");
       console.log("    successfactors: signed in with the saved account");
+      used("portal sign-in kept from before, used again");
       return { ok: true };
     }
     // An account that was registered but never confirmed by its passcode
@@ -4271,6 +4272,7 @@ async function oracleRepair(page, form, profile, job, onlyReport = false, lookup
   let fixed = 0;
   let eduDone = false;
   const comboTried = new Set();
+  const gaveUp = new Set();
   const issueWords = [];
   let shapesShown = 0;
   const report = [];
@@ -4344,7 +4346,12 @@ async function oracleRepair(page, form, profile, job, onlyReport = false, lookup
         console.log(`    oracle question "${about.label.slice(0, 50)}": nothing on file, so the least travel on offer`);
       }
       if (!chosen) {
-        console.log(`    oracle question "${about.label.slice(0, 70)}" has no answer on file; offered ${JSON.stringify(picks.map((x) => x.text).slice(0, 5))}`);
+        // The same question met again: the list has been walked once round
+        // and nothing here can answer it. Fourteen turns said so fourteen times.
+        const sig = `${about.role}:${about.label}`;
+        if (gaveUp.has(sig)) break;
+        gaveUp.add(sig);
+        console.log(`    oracle question "${about.label.slice(0, 70)}" ${want === null || want === undefined || want === "" ? "has no answer on file" : `wanted ${JSON.stringify(String(want).slice(0, 20))}, which none of its options says`}; offered ${JSON.stringify(picks.map((x) => x.text).slice(0, 5))}`);
         continue;
       }
       await chosen.el.click({ timeout: 3000 }).catch(() => chosen.el.click({ timeout: 3000, force: true }).catch(() => {}));
@@ -6634,12 +6641,12 @@ function bestOption(offered, want, label) {
   // One answer under its several spellings, on every portal (normalize.mjs).
   {
     const i = optionMeaning(offered.map((o) => o.text), want, label);
-    if (i >= 0) return offered[i];
+    if (i >= 0) { used("answer recognised under another spelling"); return offered[i]; }
   }
   // A place against a list of areas: "Which metro area are you located in?"
   if (/,\s*[A-Za-z]{2,}\s*$/.test(String(want ?? "")) && /\b(metro|area|region|market|location|located|office|city|cities|hub)\b/i.test(String(label ?? ""))) {
     const i = placeOption(offered.map((o) => o.text), want);
-    if (i >= 0) return offered[i];
+    if (i >= 0) { used("answer recognised under another spelling"); return offered[i]; }
   }
   // "Yes, they have been employed…" / "No, they have not…": a yes or a no
   // with the question repeated after it. Taken only when exactly one option
@@ -6648,6 +6655,13 @@ function bestOption(offered, want, label) {
   if (/^(yes|no)$/.test(target)) {
     const opens = offered.filter((o) => new RegExp(`^${target}\\b`, "i").test(String(o.text).trim()));
     if (opens.length === 1) return opens[0];
+  }
+  // "I am…" over "16 years old", "17 years old", "18 years old or older",
+  // answered yes to being eighteen: the one line that is eighteen or over.
+  // An Oracle application stopped on exactly this, every other field filled.
+  if (/^(yes|true)$/.test(target) && /\b(18|eighteen)\b/i.test(String(label ?? ""))) {
+    const i = ageOption(offered.map((o) => o.text), true);
+    if (i >= 0) { used("answer recognised under another spelling"); return offered[i]; }
   }
   // "BA/BS/BSN", "MA/MS/MBA": the level by its letters.
   if (/^(bachelor|master|associate)/.test(target)) {
@@ -8436,6 +8450,7 @@ async function attachResumeOnly(context, page, form, profile, job) {
   // a gap rather than written in.
   const aligned = alignToPosting(resumeText, job.description ?? "", job.company ?? "", CONFIRMED_QUALS);
   if (aligned.after !== undefined) ATS_REPORT.set(job.id, { match: aligned.after, gaps: (aligned.gaps ?? []).slice(0, 12) });
+  if (aligned.added?.length) used("resume put in the posting's own wording");
   if (aligned.added.length || aligned.before !== undefined) {
     console.log(
       `    ATS match ${aligned.before}% -> ${aligned.after}%` +
@@ -8456,7 +8471,7 @@ async function attachResumeOnly(context, page, form, profile, job) {
   try {
     const tidy = tidyWriting(finalText);
     LAST_LOOK.resumes++;
-    if (tidy.changes) { finalText = tidy.text; LAST_LOOK.tidied++; }
+    if (tidy.changes) { finalText = tidy.text; LAST_LOOK.tidied++; used("resume wording tidied"); }
     const claims = unsupportedClaims(finalText, ownMaterial);
     if (claims.length) {
       const own = standardResume(profile?.resume_text, profile) || String(profile?.resume_text ?? "");
@@ -9195,7 +9210,7 @@ async function applyToJobOnce(context, job, profile, answers) {
   const lookupSaved = (label) => {
     const l = String(label ?? "").trim();
     if (!l) return null;
-    if (answerMap.has(l)) return answerMap.get(l);
+    if (answerMap.has(l)) { used("answer kept from before, used again"); return answerMap.get(l); }
 
     // A saved answer may stand in only for very nearly the same question.
     //
@@ -10086,6 +10101,33 @@ async function applyToJobOnce(context, job, profile, answers) {
               if (g) {
                 groupId = g.id;
                 question = g.text || question;
+              }
+            }
+
+            // A list of ages to pick one's own from: each button is an age,
+            // the question is "I am…", and what is on file answers the same
+            // thing asked another way — whether the person is eighteen. The
+            // one button that is eighteen or over is that answer.
+            if (/(^|\D)(1[4-9]|2[01])\b.{0,14}\b(years?|yrs?)\b|\b(under|over)\s+(1[4-9]|2[01])\b/i.test(String(label ?? ""))) {
+              const opts = await el
+                .evaluate((n) => {
+                  const name = n.getAttribute("name");
+                  if (!name) return [];
+                  return Array.from(document.querySelectorAll(`input[type=radio][name="${CSS.escape(name)}"]`)).map((r) =>
+                    (r.labels?.[0]?.innerText ?? r.closest("label")?.innerText ?? r.getAttribute("aria-label") ?? "").replace(/\s+/g, " ").trim(),
+                  );
+                })
+                .catch(() => []);
+              const adult = /^(y|true)/i.test(String(answerQuestion("are you at least 18 years of age", profile) ?? ""));
+              const k = ageOption(opts, adult);
+              if (k >= 0) {
+                const mine = String(label || "").replace(/\s+/g, " ").trim().toLowerCase();
+                const pick = String(opts[k]).toLowerCase();
+                if (mine === pick || mine.startsWith(pick + " ")) {
+                  console.log(`    pick-one of ages: the one that is eighteen or over, as the answer on file says`);
+                  if (await checkBox(el, label)) filled++;
+                }
+                continue;
               }
             }
 
@@ -13388,6 +13430,27 @@ const main = async () => {
   // older than the freshness rule is ever picked up, so these sat there
   // being counted as ready: a hundred and seven "ready" on one system of
   // which five could be applied to.
+  // A posting a run had in hand when the run stopped — killed at its time
+  // limit, or by the runner — stays "being applied to" for ever: no later
+  // run takes it, the person never sees it, and the same role at that
+  // employer is passed over as "in another run's hands". Four of one week's
+  // qualified postings were sitting like that. Whether the form was sent
+  // before the run died is not known, so it is not sent again from here: it
+  // is put in front of the person, said as what it is.
+  try {
+    const stale = new Date(Date.now() - 90 * 60_000).toISOString();
+    const left = await db(`jobs?status=eq.applying&updated_at=lt.${encodeURIComponent(stale)}`, {
+      method: "PATCH",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify({
+        status: "needs_help",
+        help_reason: "interrupted",
+        last_error: "The run working on this stopped before it finished, and whether the application was sent is not known. Look for a receipt in the mailbox or on the employer's portal before applying again.",
+        updated_at: new Date().toISOString(),
+      }),
+    });
+    if (left?.length) { console.log(`left in hand by a run that stopped, now set out for a look by hand: ${left.length}`); used("posting left in hand by a stopped run, set out", left.length); }
+  } catch { /* the queue is as it was */ }
   // SmartRecruiters puts that check in front of every application opened
   // from here: four employers out of four, an empty page and the check's
   // frame. Its postings are still found — they are real openings, a press
@@ -13606,7 +13669,7 @@ const main = async () => {
         headers: { Prefer: "return=representation" },
         body: JSON.stringify({ status: "queued", help_reason: null, attempts: 0, updated_at: new Date().toISOString() }),
       }).catch(() => null)) ?? [];
-    if (again.length) console.log(`set to be tried again now that passwords are long enough: ${again.length} posting(s).`);
+    if (again.length) { console.log(`set to be tried again now that passwords are long enough: ${again.length} posting(s).`); used("stops put back in the queue", again.length); }
   }
   // A rehearsal sends nothing, so what an old one left marked as stopped
   // was never tried for real. The audit found ten such on one account,
@@ -13618,7 +13681,7 @@ const main = async () => {
         headers: { Prefer: "return=representation" },
         body: JSON.stringify({ status: "queued", help_reason: null, attempts: 0, updated_at: new Date().toISOString() }),
       }).catch(() => null)) ?? [];
-    if (back.length) console.log(`rehearsed, never sent: ${back.length} posting(s) put back in the queue.`);
+    if (back.length) { console.log(`rehearsed, never sent: ${back.length} posting(s) put back in the queue.`); used("stops put back in the queue", back.length); }
   }
   const everyAnswer = await db("answers?confirmed=eq.true&select=q_key,answer") ?? [];
   CONFIRMED_QUALS = confirmedQualifications(everyAnswer);
@@ -14211,11 +14274,15 @@ const main = async () => {
     const message =
       `applied ${tally.applied}, need you ${tally.needs_help ?? 0}, skipped ${tally.skipped ?? 0}` +
       (ranOut ? " (stopped on time budget)" : "");
+    // What the other lanes of this round have already written about
+    // themselves stays: each lane used to write the whole of this over.
+    let lanesSoFar = {};
+    try { const [cur] = (await db(`runs?id=eq.${run.id}&select=detail`)) ?? []; if (cur?.detail?.lanes && typeof cur.detail.lanes === "object") lanesSoFar = cur.detail.lanes; } catch { /* none read, none kept */ }
     await db(`runs?id=eq.${run.id}`, {
       method: "PATCH", headers: { Prefer: "return=minimal" },
       body: JSON.stringify({
         status: "done", processed: tally.applied, errors: tally.errors,
-        detail: tally, message, ended_at: new Date().toISOString(),
+        detail: { ...tally, lanes: lanesSoFar }, message, ended_at: new Date().toISOString(),
       }),
     }).catch(() => {});
     if (recap.length) console.log("recap:\n" + recap.map((r) => "  " + r).join("\n"));
@@ -14245,7 +14312,25 @@ const main = async () => {
           (tried === 0 ? " - nothing was waiting in this lane" : tally.applied === tried ? "" : ` - did not go: ${why || "not recorded"}`),
       );
     }
+    if (LAST_LOOK.resumes) used("resume writing and claims checked before sending", LAST_LOOK.resumes);
     console.log(`parts of the engine reached this run: ${Object.keys(USED).length ? JSON.stringify(USED) : "none of the counted ones"}`);
+    // Kept, lane by lane, on the round's own record: what each lane did and
+    // which parts of the engine it reached. One line in a log is gone with
+    // the log; this is what the daily audit adds up, so that "this part
+    // exists" and "this part ran" are two different statements.
+    try {
+      const lane = `${process.env.ATS_ONLY || "all"}`.replace(/[^a-z0-9@_-]/gi, "").slice(0, 24) || "all";
+      const who = process.env.AP_ACT_AS ? "other" : "owner";
+      const [cur] = (await db(`runs?id=eq.${run.id}&select=detail`).catch(() => [])) ?? [];
+      const detail = cur?.detail && typeof cur.detail === "object" ? cur.detail : {};
+      const lanes = detail.lanes && typeof detail.lanes === "object" ? detail.lanes : {};
+      lanes[`${who}:${lane}`] = {
+        sent: tally.applied, tried: tally.applied + (tally.needs_help ?? 0) + (tally.errors ?? 0), rehearsal: DRY_RUN,
+        secs: Math.round((Date.now() - COST.started) / 1000), parts: { ...USED },
+        local_model: Boolean(process.env.LOCAL_AI_URL), stops: { ...ORIGINS },
+      };
+      await db(`runs?id=eq.${run.id}`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ detail: { ...detail, lanes } }) });
+    } catch { /* the log above still says it */ }
     if (STOPS.length) console.log(`what stopped them, one line each:\n${STOPS.map((x) => "  - " + x).join("\n")}`);
 
     // Where things stand, at the end where it is read: what is still waiting

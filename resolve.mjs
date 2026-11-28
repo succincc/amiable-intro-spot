@@ -21,6 +21,7 @@
 //
 // Free: a GitHub runner, a browser, and public pages. Nothing is logged in to.
 
+import { allRows } from "./pages.mjs";
 import { guardLogs, hideNames } from "./quiet.mjs";
 // Nothing this prints names an employer, a posting or a place: see quiet.mjs.
 guardLogs();
@@ -767,7 +768,7 @@ if (process.env.RESOLVE_IMPORT_ONLY !== "1") {
     // Where every employer stands, by kind and count: what the panel's
     // "resolved" and "failed" are made of.
     try {
-      const all = (await db("company_candidates?select=status,ats,note&limit=5000")) ?? [];
+      const all = await allRows(db, "company_candidates?select=status,ats,note");
       console.log(`census: ${JSON.stringify(census(all))}`);
     } catch (e) {
       console.log(`census: could not be read (${String(e.message).slice(0, 60)})`);

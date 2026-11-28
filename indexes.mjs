@@ -11,6 +11,7 @@
 // but counts.
 
 // Everything printed here goes through the nets in quiet.mjs: this log is public.
+import { allRows } from "./pages.mjs";
 import "./quiet.mjs";
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const ANON_KEY = process.env.SUPABASE_ANON_KEY;
@@ -168,8 +169,8 @@ if (process.env.INDEXES_IMPORT_ONLY !== "1") {
   console.log(`entries found for ${item.size} name(s), ${ids.length} distinct; web addresses for ${site.size}${errors.length ? `; errors ${JSON.stringify([...new Set(errors)].slice(0, 4))}` : ""}`);
 
   // 4. The ones not already held.
-  const known = (await db("company_candidates?select=name,careers_url&limit=10000")) ?? [];
-  const firms = (await db("companies?select=name&limit=10000")) ?? [];
+  const known = await allRows(db, "company_candidates?select=name,careers_url");
+  const firms = await allRows(db, "companies?select=name");
   const names = new Set([...known, ...firms].map((r) => flat(employerName(r.name))));
   const urls = new Set(known.map((r) => String(r.careers_url ?? "").replace(/\/+$/, "").toLowerCase()));
   const fresh = [];

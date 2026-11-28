@@ -15,6 +15,7 @@
 // request at a time, as the archive asks. Nothing is printed but counts.
 
 // Everything printed here goes through the nets in quiet.mjs: this log is public.
+import { allRows } from "./pages.mjs";
 import "./quiet.mjs";
 process.env.FEEDS_IMPORT_ONLY = "1";
 const { wanted } = await import("./feeds.mjs");
@@ -212,8 +213,8 @@ if (process.env.CRAWL_IMPORT_ONLY !== "1") {
   console.log(`archive addresses read: ${JSON.stringify(read)}; distinct boards among them: ${boards.size}`);
 
   // 3. The ones not looked at before.
-  const known = (await db("company_candidates?select=careers_url&limit=50000")) ?? [];
-  const firms = (await db("companies?select=ats,token,site&limit=20000")) ?? [];
+  const known = await allRows(db, "company_candidates?select=careers_url");
+  const firms = await allRows(db, "companies?select=ats,token,site");
   const seenUrl = new Set(known.map((r) => String(r.careers_url ?? "").replace(/\/+$/, "").toLowerCase()));
   const seenBoard = new Set(firms.map((r) => `${r.ats}|${String(r.token ?? "").toLowerCase()}|${String(r.site ?? "").toLowerCase()}`));
   const fresh = [...boards.values()].filter((b) => !seenUrl.has(b.url.toLowerCase()) && !seenBoard.has(`${b.ats}|${b.token.toLowerCase()}|${String(b.site ?? "").toLowerCase()}`));

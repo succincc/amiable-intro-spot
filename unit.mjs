@@ -728,6 +728,44 @@ quiet.hideJob({ company: "ZQ" });
   ], [true, true, true, true, false, false, false, false]);
 }
 
+{
+  // Being eighteen, against a list of ages: the one line that says it, and
+  // never a choice between two, a guess at an age, or anything for a no.
+  const { ageOption } = await import("./normalize.mjs");
+  check("ages: a yes to being eighteen is the one line that is eighteen or over; anything else is left alone", [
+    ageOption(["16 years old", "17 years old", "18 years old or older"], true), ageOption(["Under 18", "18 or over"], true), ageOption(["18+", "Under 18"], true),
+    ageOption(["I am a minor", "I am an adult"], true),
+    ageOption(["Under 18", "18-24", "25-34", "35+"], true), ageOption(["Yes", "No"], true), ageOption(["16 years old", "17 years old", "18 years old or older"], false),
+    ageOption(["Less than 18 years old", "At least 18 years old", "At least 21 years old"], true), ageOption(["16 years old", "17 years old", "18 years old or older"], null),
+  ], [2, 1, 0, 1, -1, -1, -1, -1, -1]);
+}
+
+{
+  // A posting whose place could not be worked out is marked with the reading
+  // of the map that failed on it, and that mark changes only with the map.
+  process.env.MEASURE_IMPORT_ONLY = "1";
+  process.env.SUPPLY_IMPORT_ONLY = "1";
+  const m = await import("./measure.mjs");
+  const { family } = await import("./supply.mjs");
+  const { allRows } = await import("./pages.mjs");
+  check("unplaced: the mark of a map reading is eight letters, and the reason that carries it is still read as 'not placed'", [
+    /^[0-9a-f]{8}$/.test(m.MAP_READING), family(`location not placed yet: kept, and tried again when the map is read better [map ${m.MAP_READING}]`), family("location could not be placed, after trying every way"),
+  ], [true, "location not placed", "location not placed"]);
+  // The database answers a thousand rows at most: a list longer than that is asked for in turns.
+  const table = Array.from({ length: 2746 }, (_, i) => ({ id: i }));
+  const asked = [];
+  const fake = async (path) => { asked.push(path); const off = Number((path.match(/offset=(\d+)/) ?? [])[1]); return table.slice(off, off + 1000); };
+  check("pages: every row of a long list is read, a thousand at a time, in a stated order", [
+    (await allRows(fake, "company_candidates?select=name")).length, asked.length, asked[0], (await allRows(fake, "emails?select=a&order=received_at.desc", 1500)).length, asked[3],
+  ], [2746, 3, "company_candidates?select=name&order=id.asc&offset=0&limit=1000", 1500, "emails?select=a&order=received_at.desc&offset=0&limit=1000"]);
+  // Where an employer came from stays on its record through the resolver.
+  process.env.RESOLVE_IMPORT_ONLY = "1";
+  const r = await import("./resolve.mjs");
+  check("origin: where an employer was found is read from its record, wherever in the note it stands", [
+    r.originOf("map: 3 place(s) in reach"), r.originOf("browser: runs on adp at x; way in y; map: 12 place(s) in reach"), r.originOf("asked workday by name (4 openings)"), r.originOf("feed: near home; list not read"), r.originOf(null),
+  ], ["map: 3 place(s) in reach", "map: 12 place(s) in reach", null, "feed: near home", null]);
+}
+
 // ---------------------------------------------------------------------------
 // Nothing of anybody's reaches a public log. These try to make it.
 {

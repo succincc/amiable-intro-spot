@@ -9,6 +9,7 @@
  *
  * Run for each person by forusers.mjs, as crumbs.mjs is.
  */
+import { allRows } from "./pages.mjs";
 import { guardLogs } from "./quiet.mjs";
 import { evidence } from "./evidence.mjs";
 import { outcomes, outcomeLines } from "./outcomes.mjs";
@@ -41,12 +42,14 @@ const count = (list, of) => { const o = {}; for (const x of list) { const k = of
 async function main() {
   await signIn();
 
-  const sent = await db("jobs?status=in.(applied,interview,offer,rejected)&select=id,status,ats,company,title,location,url,score,posted_at,applied_at,confirm_state,ats_match,tailored_resume,source&limit=3000");
+  // Every one, a thousand at a time (pages.mjs): the record is not right if it stops at the first thousand.
+  const sent = await allRows(db, "jobs?status=in.(applied,interview,offer,rejected)&select=id,status,ats,company,title,location,url,score,posted_at,applied_at,confirm_state,ats_match,tailored_resume,source");
   for (const j of sent) { j.has_tailored = Boolean(j.tailored_resume); delete j.tailored_resume; }
-  const tried = (await db("jobs?status=in.(needs_help,failed)&select=ats,status,help_reason&limit=5000").catch(() => [])) ?? [];
+  const tried = await allRows(db, "jobs?status=in.(needs_help,failed)&select=ats,status,help_reason").catch(() => []);
   // The finer kind is a newer column; without it the subject stands in.
-  let mail = await db("emails?direction=eq.in&select=category,kind,subject,job_id,from_addr,received_at&order=received_at.desc&limit=3000").catch(() => null);
-  if (!mail) mail = await db("emails?direction=eq.in&select=category,subject,job_id,from_addr,received_at&order=received_at.desc&limit=3000");
+  let mail = await allRows(db, "emails?direction=eq.in&select=category,kind,subject,job_id,from_addr,received_at&order=received_at.desc", 20000).catch(() => null);
+  if (!mail) mail = await allRows(db, "emails?direction=eq.in&select=category,subject,job_id,from_addr,received_at&order=received_at.desc", 20000);
+  console.log(`letters from employers and boards read for this: ${mail.length}`);
 
   const { digest, lines, failures, corrected } = evidence(sent, mail, tried);
   // What came back first, the evidence last: the end of the log is what is read.
@@ -110,6 +113,47 @@ async function main() {
     digest.takenForward7d = found.filter(eligible).length;
   } catch (e) {
     console.log(`discovery could not be read: ${String(e?.message ?? e).slice(0, 80)}`);
+  }
+
+  // Which parts of the engine ran in ordinary rounds. Each lane of each
+  // round writes down what it reached (apply.mjs); this adds seven days of
+  // that up, and sets it against the things the upgrade work named. A part
+  // with nothing against it exists in the code and did not run.
+  try {
+    const since = new Date(Date.now() - 7 * 86_400_000).toISOString();
+    const runs = await allRows(db, `runs?kind=eq.apply&started_at=gte.${encodeURIComponent(since)}&select=detail,started_at&order=started_at.desc`, 4000);
+    const parts = {};
+    let rounds = 0, lanes = 0, withLocal = 0, sent = 0, tried = 0;
+    for (const r of runs) {
+      const L = r.detail?.lanes;
+      if (!L || typeof L !== "object") continue;
+      rounds++;
+      for (const [who, v] of Object.entries(L)) {
+        if ((process.env.AP_ACT_AS ? "other" : "owner") !== who.split(":")[0]) continue;
+        lanes++;
+        if (v?.local_model) withLocal++;
+        sent += Number(v?.sent) || 0;
+        tried += Number(v?.tried) || 0;
+        for (const [k, n] of Object.entries(v?.parts ?? {})) parts[k] = (parts[k] ?? 0) + (Number(n) || 0);
+      }
+    }
+    if (!rounds) console.log("engine parts reached in ordinary rounds: no round has written its record yet (it is kept from 28 Nov on)");
+    else {
+      console.log(`engine parts reached in ordinary rounds, 7 days (${rounds} round(s), ${lanes} lane run(s), ${sent} sent of ${tried} tried): ${JSON.stringify(Object.fromEntries(Object.entries(parts).sort((a, b) => b[1] - a[1])))}`);
+      const NAMED = {
+        "workflow memory": ["answer kept from before, used again", "portal sign-in kept from before, used again", "written answer kept for next time", "list pick kept for next time"],
+        "form handling": ["answer recognised under another spelling", "emailed code asked for", "emailed code read", "model asked to pick from a list"],
+        "resume against the posting": ["requirements report kept", "resume put in the posting's own wording", "qualification the person confirmed beyond the resume"],
+        "matching by meaning": ["answer recognised under another spelling", "same job under another address set aside"],
+        "writing refinement": ["resume wording tidied", "resume writing and claims checked before sending"],
+        "the queue kept between rounds": ["stops put back in the queue"],
+      };
+      const said = Object.entries(NAMED).map(([name, keys]) => `${name} ${keys.reduce((t, k) => t + (parts[k] ?? 0), 0)}`);
+      console.log(`  by what the upgrade work named (times reached): ${said.join("; ")}; a model on the runner itself ${withLocal} of ${lanes} lane run(s)${withLocal ? "" : " (none is set up: that part has not run)"}; what came back from employers: counted by this audit, above`);
+      digest.engineRounds7d = rounds;
+    }
+  } catch (e) {
+    console.log(`engine parts could not be read: ${String(e?.message ?? e).slice(0, 80)}`);
   }
 
   // One line that says it all, for whoever reads only the end.

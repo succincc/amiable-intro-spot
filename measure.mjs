@@ -16,8 +16,32 @@
 //
 // Nothing here costs anything, and nothing leaves but place names.
 
+import { allRows } from "./pages.mjs";
 import { guardLogs, hideNames } from "./quiet.mjs";
 import { readLocation, nearest, placesKnown, residency } from "./geo.mjs";
+import crypto from "node:crypto";
+import fs from "node:fs";
+
+/**
+ * Which reading of the map this is: a few letters that change when the list
+ * of towns or the way a location is read changes, and at no other time.
+ *
+ * A posting whose place could not be worked out is tried again — but only
+ * when there is something new to try it with. It was being tried on every
+ * run: some four hundred postings, each with its whole text fetched, every
+ * hour or three, to reach the same answer. Each is now marked with the
+ * reading that failed on it and left alone until the reading is a
+ * different one. A posting's own words do not change once it is saved, so a
+ * better map is the only new information there can be.
+ */
+export const MAP_READING = (() => {
+  try {
+    return crypto.createHash("sha256").update(fs.readFileSync(new URL("./geo.mjs", import.meta.url))).update(fs.readFileSync(new URL("./data/us-cities.tsv", import.meta.url))).digest("hex").slice(0, 8);
+  } catch {
+    return "unread";
+  }
+})();
+const TRIED = `[map ${MAP_READING}]`;
 // Nothing this prints names an employer, a posting or a place: see quiet.mjs.
 guardLogs();
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -247,13 +271,13 @@ if (process.env.MEASURE_IMPORT_ONLY !== "1") {
     if (back?.length) console.log(`${back.length} posting(s) set aside as unplaceable after one plain look are put back for a fuller try.`);
   }
 
-  const jobs =
-    (await db(
-      "jobs?status=in.(queued,review,new)&distance_miles=is.null&select=id,status,ats,location,remote,title&limit=5000",
-    )) ?? [];
+  const jobs = await allRows(db, "jobs?status=in.(queued,review,new)&distance_miles=is.null&select=id,status,ats,location,remote,title", 5000);
   console.log(`${jobs.length} waiting job(s) have no measured distance; radius is ${radius} mi; ${APPLY ? "writing results" : "report only"}.`);
 
-  const UNPLACED = "location not placed yet: kept, and tried again each time";
+  // What a first look could not place. The fuller look below adds the mark
+  // of the reading that failed on it, so that it is not looked at again
+  // until the reading changes.
+  const UNPLACED = "location not placed yet: kept, and tried again when the map is read better";
   console.log(`towns this machine can place without asking anyone: ${placesKnown()}`);
   const tally = { within: 0, beyond: 0, remote: 0, noPlace: 0, notFound: 0, deferred: 0 };
   const byAts = {};
@@ -371,12 +395,13 @@ if (process.env.MEASURE_IMPORT_ONLY !== "1") {
     const since = new Date(Date.now() - 30 * 86_400_000).toISOString();
     const held = [];
     for (let from = 0; from < 10000; from += 500) {
-      const rows = (await db(`jobs?status=eq.skipped&or=(skip_reason.like.location%20could%20not%20be%20placed*,skip_reason.like.location%20not%20placed%20yet*)&found_at=gte.${encodeURIComponent(since)}&select=id,location,title,description,remote&order=id.asc&offset=${from}&limit=500`).catch(() => null)) ?? [];
+      const rows = (await db(`jobs?status=eq.skipped&or=(skip_reason.like.location%20could%20not%20be%20placed*,skip_reason.like.location%20not%20placed%20yet*)&skip_reason=not.like.*${encodeURIComponent(TRIED)}*&found_at=gte.${encodeURIComponent(since)}&select=id,location,title,description,remote&order=id.asc&offset=${from}&limit=500`).catch(() => null)) ?? [];
       held.push(...rows);
       if (rows.length < 500) break;
     }
     const again = { held: held.length, placedByField: 0, placedByText: 0, within: 0, beyond: 0, stateOnly: 0, noLocation: 0, unread: 0 };
     const shapes = new Map();
+    const stillUnplaced = [];
     for (const job of held) {
       const read = readLocation(job.location, { title: job.title, description: job.description, remote: job.remote });
       const here = nearest(read, home);
@@ -393,6 +418,7 @@ if (process.env.MEASURE_IMPORT_ONLY !== "1") {
         else again.unread++;
         const shape = shapeOfPlace(job.location);
         shapes.set(shape, (shapes.get(shape) ?? 0) + 1);
+        stillUnplaced.push(job.id);
         continue;
       }
       if (read.fromDescription) again.placedByText++; else again.placedByField++;
@@ -406,6 +432,17 @@ if (process.env.MEASURE_IMPORT_ONLY !== "1") {
         await db(`jobs?id=eq.${job.id}&status=eq.skipped`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify(patch) }).catch(() => {});
       }
     }
+    // Marked with this reading of the map: not fetched or read again until
+    // the list of towns or the reading of locations changes.
+    if (APPLY) {
+      for (let i = 0; i < stillUnplaced.length; i += 50) {
+        await db(`jobs?id=in.(${stillUnplaced.slice(i, i + 50).join(",")})&status=eq.skipped`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ skip_reason: `${UNPLACED} ${TRIED}` }) }).catch(() => {});
+      }
+    }
+    try {
+      const waiting = await db(`jobs?status=eq.skipped&or=(skip_reason.like.location%20could%20not%20be%20placed*,skip_reason.like.location%20not%20placed%20yet*)&skip_reason=like.*${encodeURIComponent(TRIED)}*&found_at=gte.${encodeURIComponent(since)}&select=id&limit=1000`);
+      console.log(`unplaced postings already tried with this reading of the map and left alone until it changes: ${waiting?.length ?? 0}${(waiting?.length ?? 0) >= 1000 ? " or more" : ""}; new to this reading and tried now: ${held.length}`);
+    } catch { /* a count only */ }
     console.log(`set aside as unplaceable, tried again: ${JSON.stringify(again)}`);
     console.log(`  of ${again.held}: ${again.within} are within reach and go back to be rated; ${again.beyond} are placed and too far (now said so); ${again.abroad ?? 0} are in another country (now said so); ${again.held - again.within - again.beyond - (again.abroad ?? 0)} still cannot be placed and stay held`);
     const top = [...shapes.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12);
@@ -418,10 +455,15 @@ if (process.env.MEASURE_IMPORT_ONLY !== "1") {
   // them. Within reach they go back to be rated; beyond it they are set
   // aside for the distance. Should the rule be switched on again, the
   // panel's own check sets aside whatever it covers, as before.
-  if (cfg?.same_state_only !== true) {
-    // Counted on every run; written only when asked for by name. The rule
-    // was switched off for a time, and whether what it set aside comes back
-    // is the owner's to say, not this program's.
+  if (cfg?.same_state_only !== true && process.env.REVISIT_STATE_RULE !== "1" && process.env.COUNT_STATE_RULE !== "1") {
+    // Nothing is written here unless asked for by name, and counting them
+    // meant fetching several hundred postings' whole text on every run to
+    // reach the same count. The daily audit says how many there are.
+    console.log("set aside by the same-state rule, which is switched off: not read again (it is done when asked for by name)");
+  } else if (cfg?.same_state_only !== true) {
+    // Written only when asked for by name. The rule was switched off for a
+    // time, and whether what it set aside comes back is the owner's to say,
+    // not this program's.
     const APPLY = process.env.APPLY === "true" && process.env.REVISIT_STATE_RULE === "1";
     const since = new Date(Date.now() - 30 * 86_400_000).toISOString();
     const rows = [];
@@ -459,7 +501,7 @@ if (process.env.MEASURE_IMPORT_ONLY !== "1") {
   // of them the person's: remote, and still not open to them.
   if (profile?.state) {
     const mine = String(profile.state).trim().toUpperCase();
-    const rows = (await db("jobs?status=in.(queued,review,new)&remote=is.true&select=id,location,description&limit=2000").catch(() => null)) ?? [];
+    const rows = await allRows(db, "jobs?status=in.(queued,review,new)&remote=is.true&select=id,location,description", 6000).catch(() => []);
     let shut = 0, open = 0, silent = 0;
     for (const job of rows) {
       const only = residency(job.location, String(job.description ?? "").replace(/<[^>]+>/g, " ").slice(0, 8000));

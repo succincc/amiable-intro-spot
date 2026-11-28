@@ -33,6 +33,15 @@ The owner sets direction. Lovable hosts the app and owns the interface. The engi
 
 **What the interface can rely on:** the `jobs` table's `status` (`new`, `review`, `queued`, `applying`, `applied`, `needs_help`, `interview`, `offer`, `rejected`, `skipped`, `failed`), `help_reason`, `skip_reason`, `last_error`, `ats`, `score`, `distance_miles`, `applied_at`; `runs` for discovery and scoring rounds; `email_sync` for the mailbox; `profile`, `search_config`, `answers`, `user_keys` for settings. Every person-owned table is scoped by `user_id` under row-level security; a page reads only its own person's rows.
 
-**`help_reason` values a page may show:** `captcha` (the portal asks for a human check), `login` (the portal takes applications only signed in), `incomplete` (a required question has no answer on file), `email_verification`, `assessment`, `unconfirmed` (sent, no confirmation seen), `error`, `no_form`, `dry_run`, `private_detail`.
+**`help_reason` values a page may show:** `captcha` (the portal asks for a human check), `login` (the portal takes applications only signed in), `incomplete` (a required question has no answer on file), `email_verification`, `assessment`, `unconfirmed` (sent, no confirmation seen), `error`, `no_form`, `dry_run`, `private_detail`; `interrupted` (the run working on it stopped before it finished — whether the application was sent is not known, so it is shown to the person and never sent again from here).
 
 **Publishing:** a migration is applied only when the owner's publish request names it.
+
+## This repository is public
+Its files, and the log of every run, can be read by anybody.
+
+- Nothing that says who the owner is or where they live goes in a file: no town in a comment or an example list, no list of employers near somebody. Places a script needs come from the person's own profile at run time.
+- Every script that prints imports `quiet.mjs`, and `forusers.mjs` starts each job with it already in place. What is printed is reduced to words this program's own source uses; anything else — a name, an employer, a town, a code, a key — is struck out before it is written. A value that must never be printed is handed to `secret()`.
+- A workflow never prints an answer from outside as it came (`cat` or `head` of a response file): it is piped through `safe`, which is `node quiet.mjs`.
+- `unit.mjs` fails the build when a script or a workflow goes round any of this, and its checks try to leak a made-up person by every way of printing.
+- The database answers a thousand rows at most per request, whatever `limit` asks for: a list that can be longer is read with `allRows()` from `pages.mjs`.

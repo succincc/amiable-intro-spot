@@ -31,6 +31,7 @@
 //
 // Free: a public-repo runner, public pages, the free Gemini tier.
 
+import { allRows } from "./pages.mjs";
 import { useOwnKey } from "./ownkey.mjs";
 import { geminiForTitles } from "./answers.mjs";
 import { alignToPosting } from "./ats.mjs";
@@ -392,8 +393,8 @@ if (process.env.OUTREACH_IMPORT_ONLY !== "1") {
   const doneJobs = new Set(earlier.filter((e) => e.state !== "dry").map((e) => e.job_id));
   const doneFirms = new Set(earlier.filter((e) => e.state === "sent").map((e) => flat(e.company)));
 
-  const firms = (await db("companies?select=name,careers_url&limit=5000").catch(() => [])) ?? [];
-  const cands = (await db("company_candidates?select=name,careers_url,resolved_url&limit=5000").catch(() => [])) ?? [];
+  const firms = await allRows(db, "companies?select=name,careers_url").catch(() => []);
+  const cands = await allRows(db, "company_candidates?select=name,careers_url,resolved_url").catch(() => []);
   const hintsFor = (company) => {
     const k = flat(company);
     return [...firms, ...cands]

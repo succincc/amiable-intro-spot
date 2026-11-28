@@ -120,6 +120,32 @@ export function placeOption(options, place) {
   return other.length === 1 ? other[0] : -1;
 }
 
+/**
+ * Being eighteen, against a list of ages: "16 years old", "17 years old",
+ * "18 years old or older". The answer on file is a yes to "are you at least
+ * 18"; the list asks the same thing and wants it said as one of its own
+ * lines. The index of the one line that is eighteen or over, or -1: a list
+ * that is not all ages, a list with two such lines ("18-24", "25-34" asks
+ * how old, which nothing on file says), and any answer but a yes, are left
+ * alone. Which age under eighteen is never chosen.
+ */
+export function ageOption(options, adult) {
+  if (adult !== true) return -1;
+  const texts = (options ?? []).map((o) => flat(o));
+  if (texts.length < 2 || texts.length > 8) return -1;
+  const age = (t) => { const m = t.match(/(?:^| )(1[0-9]|[2-9][0-9])(?: |\+|$)/); return m ? Number(m[1]) : null; };
+  const reads = (t) => age(t) != null || /\b(adult|minor)\b/.test(t);
+  if (!texts.every(reads)) return -1;
+  const isAdult = (t) => {
+    const n = age(t);
+    if (/\b(under|younger|less than|below|minor)\b/.test(t)) return false;
+    if (n == null) return /\badult\b/.test(t);
+    return n >= 18;
+  };
+  const hits = texts.map((t, i) => (isAdult(t) ? i : -1)).filter((i) => i >= 0);
+  return hits.length === 1 ? hits[0] : -1;
+}
+
 /** A date, in the forms a form may want it: what was meant is one day. */
 export function dateForms(value) {
   const d = value instanceof Date ? value : new Date(String(value ?? ""));

@@ -174,6 +174,8 @@ const BOARD_FORM = `<!doctype html><html><head><title>Account Coordinator</title
 // the live rounds of 27 Nov 2026, with every other field filled: a list of
 // countries to tick, met by a profile that says "US" where the list says
 // "United States"; and a list of metro areas, met by a town and a state.
+// And one from the round of 28 Nov: "I am…" over a list of ages, met by a
+// yes to being eighteen.
 // The form is the shape of the real ones, with nothing of theirs in it.
 const REGIONS_FORM = `<!doctype html><html><head><title>Field Coordinator</title></head><body>
 <h1>Field Coordinator</h1>
@@ -197,6 +199,11 @@ const REGIONS_FORM = `<!doctype html><html><head><title>Field Coordinator</title
       <option value="chi">Chicagoland</option>
       <option value="other">Other</option>
     </select></div>
+  <fieldset id="age"><legend>Please select one, I am… *</legend>
+    <label><input type="radio" name="question_71000001" value="a16"> 16 years old</label>
+    <label><input type="radio" name="question_71000001" value="a17"> 17 years old</label>
+    <label><input type="radio" name="question_71000001" value="a18"> 18 years old or older</label>
+  </fieldset>
   <p id="err" role="alert" style="display:none"></p>
   <p><button type="submit">Submit Application</button></p>
 </form>
@@ -205,11 +212,13 @@ const REGIONS_FORM = `<!doctype html><html><head><title>Field Coordinator</title
     e.preventDefault();
     const ticked = Array.from(document.querySelectorAll('input[name="question_68961687[]"]:checked')).map((b) => b.value);
     const metro = document.getElementById("question_70491080").value;
+    const age = document.querySelector('input[name="question_71000001"]:checked')?.value ?? "";
     const missing = [];
+    if (!age) missing.push("Please select one, I am…");
     if (!ticked.length) missing.push("Please select the country or countries you anticipate working in for this role");
     if (!metro) missing.push("Which metro area are you located in?");
     if (missing.length) { const er = document.getElementById("err"); er.textContent = "Missing entry for required field: " + missing.join("; "); er.style.display = "block"; return; }
-    fetch("/regions/got", { method: "POST", body: JSON.stringify({ ticked, metro }) }).catch(() => {});
+    fetch("/regions/got", { method: "POST", body: JSON.stringify({ ticked, metro, age }) }).catch(() => {});
     setTimeout(() => { document.body.innerHTML = "<h2>Application submitted</h2><p>Your application was successfully submitted.</p>"; }, 1200);
   });
 </script>
@@ -378,7 +387,7 @@ const cases = [
       : null,
   },
   {
-    name: "regions form: a profile that says US against a list that says United States, and a town against a list of metro areas",
+    name: "regions form: a profile that says US against a list that says United States, a town against a list of metro areas, and a yes to being eighteen against a list of ages",
     // The profile as a real one was: the country by its letters.
     profile: { country: null },
     job: {
@@ -395,6 +404,7 @@ const cases = [
       !regionsGot ? "the form never said what it was given"
       : JSON.stringify(regionsGot.ticked) !== '["us"]' ? `the country list has ${JSON.stringify(regionsGot.ticked)} ticked`
       : regionsGot.metro !== "nynj" ? `the metro area holds "${regionsGot.metro}"`
+      : regionsGot.age !== "a18" ? `the list of ages holds "${regionsGot.age}"`
       : null,
   },
 ];

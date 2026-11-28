@@ -22,6 +22,7 @@
 //
 // Free: a public-repo runner and public feeds.
 
+import { allRows } from "./pages.mjs";
 import { guardLogs, hideNames, shape } from "./quiet.mjs";
 import { FRESH_DAYS, FRESH_MS } from "./fresh.mjs";
 // Nothing this prints names an employer, a posting or a place: see quiet.mjs.
@@ -527,8 +528,8 @@ if (process.env.FEEDS_IMPORT_ONLY !== "1") {
   }
   const ranked = [...count.values()].sort((a, b) => b.n - a.n);
 
-  const known = (await db("company_candidates?select=name,careers_url&limit=5000")) ?? [];
-  const firms = (await db("companies?select=name&limit=5000")) ?? [];
+  const known = await allRows(db, "company_candidates?select=name,careers_url");
+  const firms = await allRows(db, "companies?select=name");
   const names = new Set([...known, ...firms].map((r) => flat(r.name)));
   const urls = new Set(known.map((r) => String(r.careers_url ?? "").replace(/\/+$/, "").toLowerCase()));
 

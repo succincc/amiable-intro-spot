@@ -89,7 +89,7 @@ console.log(`employers by system: ${JSON.stringify(by)}`);
 // the first words of each note, with numbers evened out, most common first.
 // Employers' names are taken out before anything is printed.
 {
-  const rows = (await db("jobs?status=eq.needs_help&help_reason=in.(error,no_form,incomplete,login)&select=ats,company,last_error&order=updated_at.desc&limit=400&ats=neq.smartrecruiters").catch(() => [])) ?? [];
+  const rows = (await db("jobs?status=eq.needs_help&help_reason=in.(error,no_form,incomplete,login,captcha,unconfirmed,email_verification)&select=ats,company,last_error,help_reason&order=updated_at.desc&limit=500&ats=neq.smartrecruiters").catch(() => [])) ?? [];
   hideNames(rows.map((r) => r.company).filter(Boolean));
   // And the person's own details, should a note have quoted a form back.
   const [whose] = (await db("profile?id=eq.1&select=*").catch(() => [])) ?? [];
@@ -100,7 +100,7 @@ console.log(`employers by system: ${JSON.stringify(by)}`);
     const whole = String(r.last_error ?? "");
     const named = whole.split(/Stopped before clicking:|refused to move past this screen over:/)[1];
     const note = String(named ? `stopped on: ${named}` : whole).replace(/[\w.+-]+@[\w.-]+/g, "[address]").replace(/\d+/g, "N").replace(/\s+/g, " ").trim().slice(0, 170);
-    const k = `${r.ats ?? "none"} | ${note}`;
+    const k = `${r.ats ?? "none"} / ${r.help_reason ?? "?"} | ${note}`;
     said[k] = (said[k] ?? 0) + 1;
   }
   // What postings ask for that the resumes sent could not honestly show,
@@ -144,7 +144,7 @@ console.log(`employers by system: ${JSON.stringify(by)}`);
     console.log(`applications and what came back: could not be read (${String(e?.message ?? e).slice(0, 60)})`);
   }
   console.log("what was written on the ones not finished:");
-  for (const [k, n] of Object.entries(said).sort((x, y) => y[1] - x[1]).slice(0, 34)) console.log(`  ${n} x ${k}`);
+  for (const [k, n] of Object.entries(said).sort((x, y) => y[1] - x[1]).slice(0, 60)) console.log(`  ${n} x ${k}`);
 }
 // The mailbox: when it was last read and what the last reading said, with
 // anything that looks like an address taken out.
