@@ -2415,8 +2415,10 @@ async function ensureAccount(page, profile, job) {
       '[role=alert], [aria-live=assertive], [data-automation-id*="error" i], [class*="error" i], [id*="error" i]',
       (els) => els.filter((e) => { const b = e.getBoundingClientRect(); return b.width > 0 && b.height > 0; }).map((e) => e.innerText || "").join(" "),
     ).catch(() => "")) || "").toLowerCase();
+    const inPage = (after.match(/.{0,60}(password (does not|doesn't) meet|invalid password).{0,60}/) ?? [])[0];
+    if (inPage) console.log(`note: the page's own words about the password: ${JSON.stringify(inPage.replace(/\s+/g, " ").trim())}`);
     if (/password (does not|doesn't) meet|invalid password/.test(after) || /password (must|should|needs to|is too|cannot|can't)|passwords? (do not|don't) match/.test(errors)) {
-      console.log(`    the portal's own words about the password: ${JSON.stringify(errors.replace(/\s+/g, " ").trim().slice(0, 160))}`);
+      console.log(`note: the portal's own words about the password: ${JSON.stringify(errors.replace(/\s+/g, " ").trim().slice(0, 160))}`);
       return { ok: false, reason: "password rejected by portal" };
     }
   }
@@ -8488,7 +8490,14 @@ async function attachResumeOnly(context, page, form, profile, job) {
       const useNamed = nm && nm.total >= 3;
       ATS_REPORT.set(job.id, { ...had, match: (useNamed ? nm.percent : check.requirements.required.percent) ?? had.match, gaps: [...new Set([...(nm?.missing ?? []), ...(useNamed ? [] : check.requirements.required.missing), ...(useNamed ? [] : (had.gaps ?? []))])].slice(0, 12) });
     }
-    if (check.pdf.checked) { LAST_LOOK.pdfRead++; if (!check.pdf.ok) LAST_LOOK.pdfBad++; }
+    if (check.pdf.checked) {
+      LAST_LOOK.pdfRead++;
+      if (!check.pdf.ok) {
+        LAST_LOOK.pdfBad++;
+        // Why, in the reader's own terms; none of them holds any of the text.
+        console.log(`note: the resume PDF did not read back cleanly: ${check.pdf.problems.join("; ")}`);
+      }
+    }
     if (check.requirements?.required?.total) LAST_LOOK.required.push(check.requirements.required.percent ?? 0);
     if (check.requirements?.named?.total >= 3) (LAST_LOOK.named ??= []).push(check.requirements.named.percent ?? 0);
     if (check.pdf.checked && !check.pdf.ok) console.log(`    the PDF does not read back cleanly: ${check.pdf.problems.join("; ")}`);
@@ -8959,6 +8968,7 @@ function shownWant(want) {
   const w = String(want ?? "").trim();
   return /^(yes|no|n\/a|none|other|not listed|\d{1,4}|(i )?(do not|don't|decline|prefer not)\b.{0,40})$/i.test(w) ? `"${w.slice(0, 24)}"` : `a ${w.length}-letter answer`;
 }
+const TICK_SAID = new Set();
 const ONE_AT_A_TIME = { adp: null, ukg: null };
 async function applyToJob(context, job, profile, answers) {
   const lane = job.ats === "adp" || job.ats === "ukg" ? job.ats : null;
@@ -9909,13 +9919,25 @@ async function applyToJobOnce(context, job, profile, answers) {
                   const w = norm(want);
                   const o = norm(opt);
                   const refuses = /^(no|not|none|never|unwilling|unable|n\/a)\b|\b(not|never|unwilling|unable)\b/.test(o);
+                  // One country under its several spellings: a profile that
+                  // says "US" answers a list that offers "United States".
+                  // Two Greenhouse forms stopped on exactly that, twice.
+                  const usa = (t) => /^(us|usa|u s|u s a|united states|united states of america|america)\b/.test(t.replace(/\./g, " ").replace(/\s+/g, " ").trim());
                   const mine =
                     o === w ||
+                    (usa(w) && usa(o) && /\bcountr(y|ies)\b/i.test(q)) ||
                     (w === "no" && refuses) ||
                     (w !== "no" && w !== "yes" && w.length > 3 && (o.includes(w) || w.includes(o)));
                   if (mine && !(await el.isChecked().catch(() => false))) {
                     console.log(`    assumed "${opt.slice(0, 30)}" for "${q.slice(0, 50)}"`);
                     if (await checkBox(el, label)) filled++;
+                  }
+                  // Said once for each list: what was on file and how the
+                  // list's first box read, so a list that ends with nothing
+                  // ticked can be told from one that was never answered.
+                  if (!TICK_SAID.has(q)) {
+                    TICK_SAID.add(q);
+                    console.log(`note: a list to tick, "${q.slice(0, 60)}": on file ${shownWant(want)}; its first box reads "${opt.slice(0, 40)}"${mine ? " and was ticked" : ""}`);
                   }
                   continue;
                 }
@@ -13356,6 +13378,52 @@ const main = async () => {
     }
     const walled = [...CHECKED.values()].filter((n) => n >= 3).length;
     if (walled) console.log(`employers whose portal asked for a human check three times in three days, resting until one of those days has passed: ${walled}`);
+  }
+
+  // Two more walls that say the same thing every time, each learned from
+  // what really happened and never from a guess. One live round spent six
+  // of its nine attempts in one lane, about a minute each, finding them out
+  // again.
+  //
+  // A board that takes applications only from a signed-in account: the
+  // board is the employer's, so two such answers from one employer in three
+  // days rest that employer the same way, for the same three days. Its
+  // postings stay queued; nothing is thrown away.
+  {
+    const since = new Date(Date.now() - 3 * 24 * 3600_000).toISOString().slice(0, 19) + "Z";
+    const rows = (await db(`jobs?help_reason=eq.login&last_error=ilike.*only%20from%20a%20signed-in%20account*&updated_at=gte.%22${since}%22&select=company&limit=1000`).catch(() => null)) ?? [];
+    const seen = new Map();
+    for (const r of rows) {
+      const k = String(r.company ?? "").toLowerCase().trim();
+      if (k) seen.set(k, (seen.get(k) ?? 0) + 1);
+    }
+    let resting = 0;
+    for (const [k, n] of seen) if (n >= 2) { CHECKED.set(k, Math.max(CHECKED.get(k) ?? 0, 3)); resting++; }
+    if (resting) console.log(`employers whose board twice took applications only from a signed-in account, resting for three days: ${resting}`);
+  }
+  // ADP knows a person by one email across every employer. Once it has said,
+  // three times, that an account exists under that email and applications
+  // go through it only signed in, every ADP posting ends the same way — and
+  // the sign-in itself is one this system does not get through. They go
+  // straight to the by-hand list with that reason, without a browser being
+  // opened on each. A person who signs in and applies clears them as usual.
+  if (process.env.ADP_SIGNIN !== "1") {
+    try {
+      const said = (await db("jobs?ats=eq.adp&help_reason=eq.login&last_error=ilike.*account%20already%20exists*&select=id&limit=3").catch(() => null)) ?? [];
+      if (said.length >= 3) {
+        const moved = (await db("jobs?status=eq.queued&ats=eq.adp", {
+          method: "PATCH",
+          headers: { Prefer: "return=representation" },
+          body: JSON.stringify({
+            status: "needs_help",
+            help_reason: "login",
+            last_error: "ADP says an account already exists under this email, and takes applications from it only signed in. Open the posting, sign in to ADP, and apply.",
+            updated_at: new Date().toISOString(),
+          }),
+        }).catch(() => null)) ?? [];
+        if (moved.length) console.log(`set out to be applied to by hand (ADP wants its own sign-in): ${moved.length}`);
+      }
+    } catch { /* the queue is as it was */ }
   }
 
   // Every job already applied to, as role + employer + place: see

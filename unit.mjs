@@ -648,5 +648,14 @@ quiet.hideJob({ company: "ZQ" });
   check("benchmark method: the rules have not changed without being named", [a.BENCHMARK_METHOD, a.methodFingerprint()], ["named-v1 (27 Nov 2026)", "5ec1a89f"]);
 }
 
+{
+  // Which lanes of a round start: those with work, the leader always, and all of them when unsure.
+  const l = await import("./lanes.mjs");
+  check("lanes: a lane with nothing waiting is not started, the leading lane always is, and doubt starts every lane", [
+    l.lanesFor(["greenhouse", "none"]), l.lanesFor([]), l.lanesFor(["greenhouse"], false).length,
+    [l.laneOf(null), l.laneOf("icims"), l.laneOf("workday")], l.lanesFor(["workday"]).length,
+  ], [["workday@0of3", "greenhouse@0of2", "greenhouse@1of2", "none"], ["workday@0of3"], 14, ["none", "other", "workday"], 3]);
+}
+
 console.log(failed ? `unit: ${failed} failed, ${passed} passed.` : `unit: all ${passed} passed.`);
 process.exit(failed ? 1 : 0);
