@@ -45,7 +45,7 @@ async function main() {
   // Every one, a thousand at a time (pages.mjs): the record is not right if it stops at the first thousand.
   const sent = await allRows(db, "jobs?status=in.(applied,interview,offer,rejected)&select=id,status,ats,company,title,location,url,score,posted_at,applied_at,confirm_state,ats_match,tailored_resume,source");
   for (const j of sent) { j.has_tailored = Boolean(j.tailored_resume); delete j.tailored_resume; }
-  const tried = await allRows(db, "jobs?status=in.(needs_help,failed)&select=ats,status,help_reason").catch(() => []);
+  const tried = await allRows(db, "jobs?status=in.(needs_help,failed)&select=ats,status,help_reason,last_error").catch(() => []);
   // The finer kind is a newer column; without it the subject stands in.
   let mail = await allRows(db, "emails?direction=eq.in&select=category,kind,subject,job_id,from_addr,received_at&order=received_at.desc", 20000).catch(() => null);
   if (!mail) mail = await allRows(db, "emails?direction=eq.in&select=category,subject,job_id,from_addr,received_at&order=received_at.desc", 20000);
@@ -55,6 +55,21 @@ async function main() {
   // What came back first, the evidence last: the end of the log is what is read.
   if (sent.length >= 20) for (const line of outcomeLines(outcomes(corrected))) console.log(line);
   for (const l of lines) console.log(l);
+  // Submits nothing confirmed, by what the page itself showed at the time
+  // (kept on the record from 28 Nov). This is what a decision about them
+  // would rest on; none is made here, and none is sent again from here.
+  {
+    const unc = tried.filter((j) => j.help_reason === "unconfirmed");
+    const showed = (j) => {
+      const n = String(j.last_error ?? "");
+      if (/own check fails on \d+ field\(s\), [1-9]\d* of them required and empty/.test(n)) return "the form's own check failing on a required empty field";
+      if (/own check fails/.test(n)) return "the form's own check failing";
+      if (/own check passes/.test(n)) return /says something is required|shows an error/.test(n) ? "check passing, the page showing an error or a requirement" : "check passing, nothing shown";
+      if (/no receipt in/.test(n)) return "no receipt after days in the mailbox";
+      return "nothing kept about the page (before 28 Nov)";
+    };
+    if (unc.length) console.log(`submits nothing confirmed (${unc.length}), by what the page showed: ${JSON.stringify(count(unc, showed))}; by system ${JSON.stringify(count(unc, (j) => j.ats ?? "own site"))}`);
+  }
   // Sent against the person's own bar for sending without being asked.
   const [cfg] = (await db("search_config?select=auto_apply_score,review_score&limit=1").catch(() => [])) ?? [];
   if (cfg?.auto_apply_score != null) {
@@ -113,6 +128,24 @@ async function main() {
     digest.takenForward7d = found.filter(eligible).length;
   } catch (e) {
     console.log(`discovery could not be read: ${String(e?.message ?? e).slice(0, 80)}`);
+  }
+
+  // The record against itself: rows whose own fields disagree. Each of
+  // these is a posting somebody would otherwise never see again.
+  try {
+    const n = async (q) => ((await db(`jobs?${q}&select=id&limit=1000`).catch(() => null)) ?? []).length;
+    const stale = new Date(Date.now() - 90 * 60_000).toISOString();
+    const odd = {
+      "sent, with no time of sending": await n("status=in.(applied,interview,offer,rejected)&applied_at=is.null"),
+      "stopped for a person, with no reason": await n("status=eq.needs_help&help_reason=is.null"),
+      "set aside, with no reason": await n("status=eq.skipped&skip_reason=is.null"),
+      "in hand for over 90 minutes": await n(`status=eq.applying&updated_at=lt.${encodeURIComponent(stale)}`),
+      "waiting, yet marked as sent to": await n("status=in.(queued,new,review)&applied_at=not.is.null"),
+    };
+    console.log(`the record against itself: ${JSON.stringify(odd)}`);
+    digest.inconsistent = Object.values(odd).reduce((t, x) => t + x, 0);
+  } catch (e) {
+    console.log(`the record could not be checked against itself: ${String(e?.message ?? e).slice(0, 60)}`);
   }
 
   // Which parts of the engine ran in ordinary rounds. Each lane of each
