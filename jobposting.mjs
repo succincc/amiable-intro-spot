@@ -18,6 +18,8 @@
 //
 // Free: a public-repo runner and public pages.
 
+import { allRows } from "./pages.mjs";
+import { originOf } from "./origin.mjs";
 import { guardLogs, hideNames } from "./quiet.mjs";
 import { FRESH_MS } from "./fresh.mjs";
 import { nearPattern } from "./near.mjs";
@@ -443,11 +445,18 @@ if (process.env.JOBPOSTING_IMPORT_ONLY !== "1") {
   } else {
     // The ones no taught portal covers — and the ones whose portal has a
     // reader that could not read their list — longest-unread first.
-    const rows =
-      (await db(`company_candidates?or=(status.eq.failed,note.ilike.*list%20not%20read*)&select=name,careers_url,resolved_url,note&order=checked_at.asc.nullsfirst&limit=1000`)) ?? [];
+    // All of them (the database gives a thousand at a time: pages.mjs).
+    const rows = await allRows(db, "company_candidates?or=(status.eq.failed,note.ilike.*list%20not%20read*)&select=name,careers_url,resolved_url,note&order=checked_at.asc.nullsfirst", 20000);
+    // The employers found near the person — on the map, or by a feed asked
+    // about their town — first: a small business's own website is where its
+    // jobs are, and most of them run no hiring system at all (318 of 500
+    // the map named on 28 Nov). Then the rest, a different part each turn.
+    const near = (r) => /^(map: |feed: near home)/.test(String(originOf(r.note) ?? ""));
+    const rotate = (list, k) => { const at = list.length ? (k * MAX_EMPLOYERS) % list.length : 0; return [...list.slice(at), ...list.slice(0, at)]; };
     const turn = Math.floor(Date.now() / (6 * 3_600_000));
-    const startAt = rows.length ? (turn * MAX_EMPLOYERS) % rows.length : 0;
-    employers = [...rows.slice(startAt), ...rows.slice(0, startAt)]
+    const local = rows.filter(near);
+    console.log(`employers to read from their own sites: ${rows.length}, of them found near the person ${local.length}`);
+    employers = [...rotate(local, turn), ...rotate(rows.filter((r) => !near(r)), turn)]
       .slice(0, MAX_EMPLOYERS)
       .map((r) => ({ name: r.name, url: r.resolved_url || r.careers_url }))
       .filter((x) => /^https?:\/\//.test(String(x.url ?? "")));
