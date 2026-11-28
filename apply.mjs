@@ -37,6 +37,7 @@ import { fromProfile } from "./fromprofile.mjs";
 import { useOwnKey } from "./ownkey.mjs";
 import { isCoverLetter, writeCoverLetter } from "./coverletter.mjs";
 import { jobKey } from "./samejob.mjs";
+import { isBlocked, BLOCKED_REASON } from "./blocked.mjs";
 import { sameAnswer, optionMeaning, placeOption } from "./normalize.mjs";
 import { confirmedQualifications, qualificationLines } from "./candidate.mjs";
 import { GONE_RE } from "./gone.mjs";
@@ -9172,6 +9173,8 @@ async function readPosting(page, job) {
 }
 
 async function applyToJobOnce(context, job, profile, answers) {
+  // An employer the owner has blocked: the form is never opened (blocked.mjs).
+  if (isBlocked(job)) return { status: "skipped", skip_reason: BLOCKED_REASON, note: BLOCKED_REASON };
   let page = await context.newPage();
   // The latest job, read once before any box is filled: from the resume
   // written for this posting, the resume on file, the roles entered by
@@ -13895,6 +13898,12 @@ const main = async () => {
               // Carvana this afternoon; a recruiter who sees one name on
               // eight requisitions reads it as noise, not interest.
               if ((SENT_TO.get(companyOf(row)) ?? 0) >= PER_EMPLOYER_DAILY) continue;
+              // An employer the owner has blocked, for everybody: set aside
+              // where it is found, and never claimed.
+              if (isBlocked(row)) {
+                await patchJob(row.id, { status: "skipped", skip_reason: BLOCKED_REASON, updated_at: new Date().toISOString() }).catch(() => {});
+                continue;
+              }
               // The same job under another address: set aside, and said so
               // on its own record.
               {

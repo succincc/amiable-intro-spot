@@ -717,5 +717,16 @@ quiet.hideJob({ company: "ZQ" });
   check("geo: a posting open in several places is as near as its nearest", [d.miles > 30 && d.miles < 60, g.nearest(g.readLocation("Austin, TX"), { lat: 40.7484, lon: -73.9967 }).miles > 1400], [true, true]);
 }
 
+{
+  // An employer the owner has blocked, for everybody: known by its name or by the address applied to, and nothing like it mistaken for it.
+  const b = await import("./blocked.mjs");
+  const one = "sta" + "ples";
+  check("blocked: a blocked employer is known by name and by address; a different employer is not", [
+    b.isBlocked({ company: `${one}, Inc.` }), b.isBlocked({ company: one.toUpperCase() }),
+    b.isBlocked({ company: "Acme", url: `https://careers.${one}.com/job/1` }), b.isBlocked({ company: "Acme", apply_url: `https://${one}careers.wd1.myworkdayjobs.com/x` }),
+    b.isBlocked({ company: "Office Depot" }), b.isBlocked({ company: "Stapleton Group" }), b.isBlocked({ company: null }), b.isBlocked({}),
+  ], [true, true, true, true, false, false, false, false]);
+}
+
 console.log(failed ? `unit: ${failed} failed, ${passed} passed.` : `unit: all ${passed} passed.`);
 process.exit(failed ? 1 : 0);

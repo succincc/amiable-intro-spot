@@ -36,6 +36,7 @@ import { geminiForTitles } from "./answers.mjs";
 import { alignToPosting } from "./ats.mjs";
 import { tailorResume, rolesText, standardResume, arrangedResume, structureResume } from "./tailor.mjs";
 import { guardLogs, hideJob } from "./quiet.mjs";
+import { isBlocked } from "./blocked.mjs";
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const ANON_KEY = process.env.SUPABASE_ANON_KEY;
@@ -375,10 +376,10 @@ if (process.env.OUTREACH_IMPORT_ONLY !== "1") {
 
   const since = new Date(Date.now() - DAYS * 86_400_000).toISOString().slice(0, 19) + "Z";
   const jobs =
-    (await db(
+    ((await db(
       `jobs?status=eq.applied&applied_at=gte.${encodeURIComponent(since)}` +
         `&select=id,title,company,url,apply_url,description,tailored_resume,applied_at&order=applied_at.desc&limit=200`,
-    )) ?? [];
+    )) ?? []).filter((j) => !isBlocked(j)); // an employer the owner has blocked is never written to (blocked.mjs)
 
   // Who has been written to, or looked at, already.
   let earlier = [];
