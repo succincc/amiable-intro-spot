@@ -48,5 +48,8 @@ jobs:
           APPLYPILOT_PASSWORD: ${{ secrets.APPLYPILOT_PASSWORD }}
           APPLY: ${{ github.event.inputs.apply == 'true' }}
           MAX_EMPLOYERS: ${{ github.event.inputs.max || '40' }}
-          SF_URLS: ${{ github.event.inputs.urls }}
-        run: node forusers.mjs successfactors.mjs
+        # Read from the request itself, so that it is not printed at the top
+        # of this step: an address names an employer.
+        run: |
+          export SF_URLS="$(jq -r '.inputs.urls // ""' "$GITHUB_EVENT_PATH" 2>/dev/null || true)"
+          node forusers.mjs successfactors.mjs

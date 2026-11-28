@@ -89,6 +89,10 @@ jobs:
           APPLYPILOT_PASSWORD: ${{ secrets.APPLYPILOT_PASSWORD }}
           APPLY: ${{ github.event_name == 'schedule' || github.event.inputs.apply == 'true' }}
           MAX_CANDIDATES: ${{ github.event.inputs.max || '150' }}
-          RESOLVE_URLS: ${{ github.event.inputs.urls }}
           ONLY_SYSTEM: ${{ github.event.inputs.system }}
-        run: node forusers.mjs resolve.mjs
+        # The addresses asked for by hand are read here, from the request
+        # itself: given above as a setting they would be printed at the top
+        # of this step, and an address names an employer.
+        run: |
+          export RESOLVE_URLS="$(jq -r '.inputs.urls // ""' "$GITHUB_EVENT_PATH" 2>/dev/null || true)"
+          node forusers.mjs resolve.mjs
