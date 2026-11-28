@@ -91,7 +91,7 @@ async function main() {
     // with any number or name in them taken out.
     const reason = (j) => String(j.skip_reason ?? "no reason recorded").toLowerCase().replace(/\d+(\.\d+)?/g, "N").replace(/"[^"]*"/g, '"…"')
       // No place in what is printed: a reason that names the person's state, or a posting's town, says where they live.
-      .replace(/^outside [a-z ]{2,20}:.*$/, "outside the person's own state").replace(/^no state given.*$/, "no state given").replace(/^[a-z]{2} is far beyond/, "a state far beyond").slice(0, 60);
+      .replace(/^outside the us\b.*$/, "outside the United States").replace(/^outside [a-z ]{2,20}:.*$/, "outside the person's own state").replace(/^no state given.*$/, "no state given").replace(/^[a-z]{2} is far beyond/, "a state far beyond").slice(0, 60);
     const aside = found.filter((j) => j.status === "skipped");
     console.log(`discovery, set aside (${aside.length}): ${JSON.stringify(Object.fromEntries(Object.entries(count(aside, reason)).sort((a, b) => b[1] - a[1]).slice(0, 8)))}`);
     // The largest source on its own, and whether the same-state rule is still at work.
@@ -100,9 +100,10 @@ async function main() {
     try {
       const [sc] = (await db("search_config?select=same_state_only,include_unknown_location,radius_miles&limit=1")) ?? [];
       const day = new Date(Date.now() - 86_400_000).toISOString();
-      const stateRule = (j) => /^outside [a-z ]{2,20}:/i.test(String(j.skip_reason ?? ""));
-      const recent = await db(`jobs?status=eq.skipped&skip_reason=like.outside*&found_at=gte.${encodeURIComponent(day)}&select=id&limit=1000`).catch(() => []);
-      console.log(`discovery, the same-state rule: switched ${sc?.same_state_only === true ? "ON" : "off"}; postings it set aside in seven days ${found.filter(stateRule).length}, of those found in the last day ${recent.length}; postings with no placeable location are ${sc?.include_unknown_location === false ? "held back" : "let through"}`);
+      // The state rule's own two reasons, and not "outside the US", which is a different rule.
+      const stateRule = (j) => { const r = String(j.skip_reason ?? ""); return (/^outside [a-z ]{2,20}:/i.test(r) && !/^outside the us\b/i.test(r)) || /^no state given/i.test(r); };
+      const recent = (await db(`jobs?status=eq.skipped&or=(skip_reason.like.outside*,skip_reason.like.no%20state%20given*)&updated_at=gte.${encodeURIComponent(day)}&select=skip_reason&limit=2000`).catch(() => [])).filter(stateRule);
+      console.log(`discovery, the same-state rule: switched ${sc?.same_state_only === true ? "ON" : "off"}; postings it set aside in seven days ${found.filter(stateRule).length}, of those set aside in the last day ${recent.length}; postings with no placeable location are ${sc?.include_unknown_location === false ? "held back" : "let through"}`);
     } catch { /* said nothing rather than something wrong */ }
     console.log(`discovery, still waiting to be rated or held: ${found.filter((j) => j.status === "new").length} new, ${found.filter((j) => j.status === "review").length} held for a yes`);
     digest.discovered7d = found.length;

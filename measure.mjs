@@ -222,7 +222,7 @@ if (process.env.MEASURE_IMPORT_ONLY !== "1") {
   await auth({ email: AP_EMAIL, password: AP_PASSWORD }, "password");
 
   const [profile] = (await db("profile?id=eq.1&select=home_lat,home_lon,city,state")) ?? [];
-  const [cfg] = (await db("search_config?id=eq.1&select=radius_miles,include_unknown_location")) ?? [];
+  const [cfg] = (await db("search_config?id=eq.1&select=radius_miles,include_unknown_location,same_state_only")) ?? [];
   const radius = Number(cfg?.radius_miles ?? 0);
 
   let home = profile?.home_lat != null && profile?.home_lon != null ? { lat: profile.home_lat, lon: profile.home_lon } : null;
@@ -418,6 +418,45 @@ if (process.env.MEASURE_IMPORT_ONLY !== "1") {
     const ends = [...lastWords.entries()].filter(([, n]) => n >= 4).sort((a, b) => b[1] - a[1]).slice(0, 16);
     if (ends.length) console.log(`  still unplaced, how the commonest end: ${JSON.stringify(ends.map(([w, n]) => `${w} x${n}`))}`);
     if (top.length) console.log(`  still unplaced, by shape (a = a word, 9 = a number, ST = a state): ${JSON.stringify(top.map(([sh, n]) => `${sh} x${n}`))}`);
+  }
+
+  // Postings set aside by the same-state rule, read again while that rule
+  // is switched off. The rule set them aside without measuring anything; with
+  // it off, the radius is the only question, and it has not been asked of
+  // them. Within reach they go back to be rated; beyond it they are set
+  // aside for the distance. Should the rule be switched on again, the
+  // panel's own check sets aside whatever it covers, as before.
+  if (cfg?.same_state_only !== true) {
+    const since = new Date(Date.now() - 30 * 86_400_000).toISOString();
+    const rows = [];
+    for (let from = 0; from < 10000; from += 500) {
+      const page = (await db(`jobs?status=eq.skipped&or=(skip_reason.like.outside*,skip_reason.like.no%20state%20given*)&found_at=gte.${encodeURIComponent(since)}&select=id,location,title,description,remote,skip_reason&order=id.asc&offset=${from}&limit=500`).catch(() => null)) ?? [];
+      rows.push(...page);
+      if (page.length < 500) break;
+    }
+    const mine = rows.filter((j) => !/^outside the us\b/i.test(String(j.skip_reason ?? "")));
+    const st = { held: mine.length, within: 0, beyond: 0, abroad: 0, unplaced: 0 };
+    for (const job of mine) {
+      const read = readLocation(job.location, { title: job.title, description: job.description, remote: job.remote });
+      const here = nearest(read, home);
+      if (!here) {
+        if (read.onlyAbroad) { st.abroad++; if (APPLY) await db(`jobs?id=eq.${job.id}&status=eq.skipped`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ skip_reason: "outside the United States" }) }).catch(() => {}); }
+        else { st.unplaced++; if (APPLY) await db(`jobs?id=eq.${job.id}&status=eq.skipped`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ skip_reason: UNPLACED }) }).catch(() => {}); }
+        continue;
+      }
+      const inside = here.miles <= radius;
+      if (inside) st.within++; else st.beyond++;
+      if (APPLY) {
+        const patch = inside
+          ? { status: "new", score: null, score_reason: null, skip_reason: null, lat: here.lat, lon: here.lon, distance_miles: here.miles }
+          : { skip_reason: `${here.miles} mi away (limit ${radius})`, lat: here.lat, lon: here.lon, distance_miles: here.miles };
+        await db(`jobs?id=eq.${job.id}&status=eq.skipped`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify(patch) }).catch(() => {});
+      }
+    }
+    console.log(`set aside by the same-state rule, which is switched off, read again: ${JSON.stringify(st)}`);
+    console.log(`  of ${st.held}: ${st.within} are within the radius and go back to be rated; ${st.beyond} are too far (now said so); ${st.abroad} are in another country; ${st.unplaced} cannot be placed yet and stay held`);
+  } else {
+    console.log("the same-state rule is switched on: what it set aside stays set aside");
   }
 
   // A remote posting that keeps itself to residents of named states, none
