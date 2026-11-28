@@ -9,6 +9,13 @@ name: audit
 
 on:
   workflow_dispatch:
+    inputs:
+      only:
+        description: "all, or only the supply report"
+        type: choice
+        required: false
+        default: "all"
+        options: ["all", "supply"]
   schedule:
     - cron: "17 11 * * *"
 
@@ -25,6 +32,7 @@ jobs:
         with:
           node-version: "20"
       - name: Hold the record against the evidence
+        if: github.event.inputs.only != 'supply'
         env:
           SUPABASE_URL: https://inqhfkshqndkxyztzita.supabase.co
           SUPABASE_ANON_KEY: sb_publishable_QK4kidijM8nk46uK6L22Qw_XA0RQu5U
@@ -34,7 +42,7 @@ jobs:
           set -o pipefail
           node forusers.mjs audit.mjs | tee "$RUNNER_TEMP/audit.txt"
       - name: The resume as it is against the resume as written, same postings
-        if: always()
+        if: always() && github.event.inputs.only != 'supply'
         env:
           SUPABASE_URL: https://inqhfkshqndkxyztzita.supabase.co
           SUPABASE_ANON_KEY: sb_publishable_QK4kidijM8nk46uK6L22Qw_XA0RQu5U
@@ -42,7 +50,7 @@ jobs:
           APPLYPILOT_PASSWORD: ${{ secrets.APPLYPILOT_PASSWORD }}
         run: node forusers.mjs benchmark.mjs
       - name: What postings ask for that the profile does not show, put to the person
-        if: always()
+        if: always() && github.event.inputs.only != 'supply'
         env:
           SUPABASE_URL: https://inqhfkshqndkxyztzita.supabase.co
           SUPABASE_ANON_KEY: sb_publishable_QK4kidijM8nk46uK6L22Qw_XA0RQu5U
@@ -50,6 +58,16 @@ jobs:
           APPLYPILOT_PASSWORD: ${{ secrets.APPLYPILOT_PASSWORD }}
         run: node forusers.mjs gaps.mjs
       - name: In one line each
-        if: always()
+        if: always() && github.event.inputs.only != 'supply'
         run: |
           grep -hE "^(DIGEST|WRONG|discovery|==== person)|^  by source|^    [^:]{1,24}: [0-9]+ / [0-9]+ / " "$RUNNER_TEMP/audit.txt" || true
+      # Last, so that the end of the log is the part most worth reading:
+      # which sources and which employers the qualified postings came from.
+      - name: Where the qualified postings come from
+        if: always()
+        env:
+          SUPABASE_URL: https://inqhfkshqndkxyztzita.supabase.co
+          SUPABASE_ANON_KEY: sb_publishable_QK4kidijM8nk46uK6L22Qw_XA0RQu5U
+          APPLYPILOT_EMAIL: ${{ secrets.APPLYPILOT_EMAIL }}
+          APPLYPILOT_PASSWORD: ${{ secrets.APPLYPILOT_PASSWORD }}
+        run: node forusers.mjs supply.mjs
