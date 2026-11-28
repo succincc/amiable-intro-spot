@@ -560,6 +560,14 @@ function answerQuestion(label, p) {
   if (/\b(were|was|are|have) you (been )?referred\b|referred by (a|an) (current|existing)|encouraged? or refer(red)? you|refer(red)? you to apply/i.test(String(label))) {
     return "No";
   }
+  // "If applicable, please provide the name of the person you are referred
+  // by / related to": a box for a name, marked required whether or not it
+  // applies. This program answers "were you referred" and "do you have
+  // relatives here" with no; the name that goes with a no is "N/A". Two
+  // Workday applications stopped on the box with everything else filled.
+  if (/^\s*if (applicable|any|so|yes)\b[^.?]{0,90}\bname of the (person|employee|relative|individual|team member)\b/i.test(String(label))) {
+    return "N/A";
+  }
   // Asked a dozen ways, each naming the employer: "have you ever worked for
   // Airbnb", "have you ever been employed full-time at Block or its
   // subsidiaries", "have you ever provided any contract work for". All the
@@ -13078,6 +13086,11 @@ async function applyToJobOnce(context, job, profile, answers) {
         `Clicked submit after filling ${filled} fields, but nothing confirmed it. ` +
         `${stillOnForm ? "The form is still on screen" : "The form is gone"}; ` +
         `${page.url() === urlBefore ? "the page did not navigate" : "the page navigated"}. ` +
+        // What the page itself showed at that moment, as counts and yes/no:
+        // it is on the record so that the next reading of these stops says
+        // whether they went or were refused, without a log being found.
+        `The form's own check ${why?.formValid === false ? `fails on ${why.invalid?.length ?? 0} field(s), ${(why.invalid ?? []).filter((x) => x.required && x.empty).length} of them required and empty` : why?.formValid === true ? "passes" : "could not be asked"}; ` +
+        `the page ${shows?.requiredWord ? "says something is required" : "does not say anything is required"}, ${shows?.errorWord ? "shows an error" : "shows no error"}${shows?.securityCode ? ", and asks for a code" : ""}; ${shows?.inputsLeft ?? "?"} field(s) left on it. ` +
         `Open it and finish by hand if it did not go through.`,
     };
   } finally {

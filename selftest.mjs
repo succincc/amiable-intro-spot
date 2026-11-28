@@ -199,6 +199,7 @@ const REGIONS_FORM = `<!doctype html><html><head><title>Field Coordinator</title
       <option value="chi">Chicagoland</option>
       <option value="other">Other</option>
     </select></div>
+  <div><label for="refname">If applicable, please provide the name of the person you are referred by *</label><input id="refname" name="refname" required></div>
   <fieldset id="age"><legend>Please select one, I am… *</legend>
     <label><input type="radio" name="question_71000001" value="a16"> 16 years old</label>
     <label><input type="radio" name="question_71000001" value="a17"> 17 years old</label>
@@ -213,12 +214,14 @@ const REGIONS_FORM = `<!doctype html><html><head><title>Field Coordinator</title
     const ticked = Array.from(document.querySelectorAll('input[name="question_68961687[]"]:checked')).map((b) => b.value);
     const metro = document.getElementById("question_70491080").value;
     const age = document.querySelector('input[name="question_71000001"]:checked')?.value ?? "";
+    const ref = document.getElementById("refname").value;
     const missing = [];
+    if (!ref.trim()) missing.push("If applicable, please provide the name of the person you are referred by");
     if (!age) missing.push("Please select one, I am…");
     if (!ticked.length) missing.push("Please select the country or countries you anticipate working in for this role");
     if (!metro) missing.push("Which metro area are you located in?");
     if (missing.length) { const er = document.getElementById("err"); er.textContent = "Missing entry for required field: " + missing.join("; "); er.style.display = "block"; return; }
-    fetch("/regions/got", { method: "POST", body: JSON.stringify({ ticked, metro, age }) }).catch(() => {});
+    fetch("/regions/got", { method: "POST", body: JSON.stringify({ ticked, metro, age, ref }) }).catch(() => {});
     setTimeout(() => { document.body.innerHTML = "<h2>Application submitted</h2><p>Your application was successfully submitted.</p>"; }, 1200);
   });
 </script>
@@ -405,6 +408,7 @@ const cases = [
       : JSON.stringify(regionsGot.ticked) !== '["us"]' ? `the country list has ${JSON.stringify(regionsGot.ticked)} ticked`
       : regionsGot.metro !== "nynj" ? `the metro area holds "${regionsGot.metro}"`
       : regionsGot.age !== "a18" ? `the list of ages holds "${regionsGot.age}"`
+      : regionsGot.ref !== "N/A" ? `the box for a referrer's name holds ${JSON.stringify(regionsGot.ref)}`
       : null,
   },
 ];
