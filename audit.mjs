@@ -87,6 +87,12 @@ async function main() {
     for (const [k, list] of Object.entries(by).sort((a, b) => b[1].length - a[1].length).slice(0, 14)) {
       console.log(`    ${k}: ${list.length} / ${new Set(list.map((j) => String(j.company ?? "").toLowerCase())).size} / ${list.filter(eligible).length} / ${list.filter(same).length} / ${list.filter((j) => j.status === "skipped" && !same(j)).length}`);
     }
+    // Why the ones set aside were set aside, in the engine's own reasons
+    // with any number or name in them taken out.
+    const reason = (j) => String(j.skip_reason ?? "no reason recorded").toLowerCase().replace(/\d+(\.\d+)?/g, "N").replace(/"[^"]*"/g, '"…"').slice(0, 60);
+    const aside = found.filter((j) => j.status === "skipped");
+    console.log(`discovery, set aside (${aside.length}): ${JSON.stringify(Object.fromEntries(Object.entries(count(aside, reason)).sort((a, b) => b[1] - a[1]).slice(0, 8)))}`);
+    console.log(`discovery, still waiting to be rated or held: ${found.filter((j) => j.status === "new").length} new, ${found.filter((j) => j.status === "review").length} held for a yes`);
     digest.discovered7d = found.length;
     digest.takenForward7d = found.filter(eligible).length;
   } catch (e) {
