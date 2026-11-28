@@ -13441,9 +13441,13 @@ const main = async () => {
   // opened on each. A person who signs in and applies clears them as usual.
   if (process.env.ADP_SIGNIN !== "1") {
     try {
-      const said = (await db("jobs?ats=eq.adp&help_reason=eq.login&last_error=ilike.*account%20already%20exists*&select=id&limit=3").catch(() => null)) ?? [];
-      if (said.length >= 3) {
-        const moved = (await db("jobs?status=eq.queued&ats=eq.adp", {
+      // By what ADP said, whatever has become of the posting since: one put
+      // back in the queue keeps the words but not the reason beside them.
+      const said = (await db("jobs?last_error=ilike.*ADP%20says%20an%20account%20already%20exists*&select=id,ats&limit=3").catch(() => null)) ?? [];
+      const waiting = (await db("jobs?status=eq.queued&or=(ats.eq.adp,url.ilike.*adp.com*,apply_url.ilike.*adp.com*)&select=id&limit=200").catch(() => null)) ?? [];
+      if (said.length || waiting.length) console.log(`note: ADP has said an account exists ${said.length >= 3 ? "three times or more" : `${said.length} time(s)`} on record (their portal is recorded as ${JSON.stringify([...new Set(said.map((r) => r.ats ?? "none"))])}); ${waiting.length} ADP posting(s) are queued`);
+      if (said.length >= 3 && waiting.length) {
+        const moved = (await db(`jobs?status=eq.queued&id=in.(${waiting.map((r) => r.id).join(",")})`, {
           method: "PATCH",
           headers: { Prefer: "return=representation" },
           body: JSON.stringify({
