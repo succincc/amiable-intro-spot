@@ -59,7 +59,49 @@ there is evidence).
 - A posting left in hand by a stopped run is set out for the person.
 - Each lane's evidence on the round's record; weekly roll-up in the audit.
 
-## Open, in order
+## Also done, night of 28 Nov
 
-See the end of this file: it is rewritten as work proceeds.
+- Outside words fenced and stripped of sentences addressed to a program;
+  answers checked before use (`untrusted.mjs`).
+- A dropped or busy read asked again, three times at most (`pages.mjs`).
+- A saved answer reused for the same question written another way.
+- Oracle's resume wait; lanes for people with autopilot off; the resolver
+  looks again at a failure weekly, not daily.
 
+## Open, in order (each with what it rests on)
+
+1. **Unconfirmed submits (13 in a week).** The note now records what the
+   page showed. After a few days: count how many showed a failed check or a
+   required word. Only then decide whether "form still on screen, its own
+   check failing on a required empty field" may be called not sent. It is
+   never sent again from here without the owner's yes.
+2. **Workday: "Are you 18 or older?" left empty (2), "How did you hear
+   about us?" (2).** Seen in the stops; the cause is not. Read a Workday
+   lane's log where one is retried before changing anything.
+3. **Human checks: 94 of 185 stalls.** Not to be worked round. The one
+   system that walls every application (67 a week) is set straight out for
+   the person. Worth asking the owner: stop collecting from it?
+4. **Sign-in walls: ADP 6, UKG 5.** An account exists and the password is
+   not on file; a reset through the person's own mailbox is possible in
+   principle and has not been built or approved.
+5. **Local employers.** After the resolver has been through the map's
+   employers: read `employers by how they were found` in the supply report.
+   If "the map" places few on a system, the next reader to write is for
+   whichever system holds most of the unplaced (ADP and UKG are read; Taleo
+   21, Dayforce 14, Avature 9, Brassring 9, Jobvite 9, Paylocity 5 are not).
+6. **Parked postings are retried after every commit**, whatever the commit
+   changed (`requeueStaleParked`). With a deeper checkout the commit time
+   of the applying code alone could be used.
+7. **A model on the runner** (`LOCAL_AI_URL`) is wired and has never run:
+   no model is set up there. The free model is at its limit for part of
+   most rounds (resumes then "arranged without the model"). A small open
+   model on the runner is free and slow; it changes what is written, so it
+   waits for the owner's yes.
+8. **Readers come round every 12 hours** by the owner's rule. A posting at
+   an employer already being read was 48h old (median) when found. Reading
+   the 40 employers with jobs in reach more often would cut that; it is a
+   change to a schedule the owner set.
+9. **Bare postcodes** in locations are not placed (no free offline table
+   reachable from where this was built).
+10. **Dependency branch** `deps-audit-fix`: rebuilt by `deps.yml`; merge
+    waits for the owner.
