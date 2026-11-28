@@ -13228,6 +13228,12 @@ async function refreshAnswers(profile) {
     return;
   }
   const NEVER = /social security|\bssn\b|date of birth|birth ?date|birthday|\bdob\b|^pass(code|word)\b|^(prefix|suffix|title|salutation)\b/i;
+  // What is already answered, by the question however it is written: a
+  // question waiting here that is one of those in another writing has its
+  // answer already (normalize.mjs), and does not wait for the person again.
+  const onFile = answerIndex(
+    (await allRows(db, "answers?confirmed=eq.true&select=question,answer&order=id.asc", 8000).catch(() => [])).map((r) => ({ q_key: r.question, answer: r.answer })),
+  );
   let answered = 0;
   let removed = 0;
   let modelAsked = 0;
@@ -13263,6 +13269,10 @@ async function refreshAnswers(profile) {
       };
       let assumed = false;
       let want = fit(fromProfile(plain, profile) ?? answerQuestion(plain, profile) ?? livesInListedState(plain, profile));
+      if (!want) {
+        const same = fit(onFile.find(plain));
+        if (same) { want = same; tallyHow.sameQuestionAlreadyAnswered = (tallyHow.sameQuestionAlreadyAnswered ?? 0) + 1; used("answer kept from before, used for the same question written another way"); }
+      }
       // Nothing on file says. The owner's instruction is that no question
       // waits for them, so the same ladder a live form climbs is climbed
       // here: who the applicant is, is declined in the list's own words and

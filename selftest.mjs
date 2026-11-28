@@ -227,6 +227,30 @@ const REGIONS_FORM = `<!doctype html><html><head><title>Field Coordinator</title
 </script>
 </body></html>`;
 
+// A form that takes everything and then refuses: "something went wrong",
+// with the form still on the screen. Nothing was sent, and the one thing
+// that must never happen is for it to be written down as sent.
+const REFUSING_FORM = `<!doctype html><html><head><title>Shift Lead</title></head><body>
+<h1>Shift Lead</h1>
+<form id="f" novalidate>
+  <div><label for="first_name">First Name *</label><input id="first_name" name="first_name" required></div>
+  <div><label for="last_name">Last Name *</label><input id="last_name" name="last_name" required></div>
+  <div><label for="email">Email *</label><input id="email" name="email" type="email" required></div>
+  <div><label for="phone">Phone *</label><input id="phone" name="phone" type="tel" required></div>
+  <div><label for="resume">Resume/CV *</label><input id="resume" name="resume" type="file"></div>
+  <p id="err" role="alert" style="display:none"></p>
+  <p><button type="submit">Submit Application</button></p>
+</form>
+<script>
+  document.getElementById("f").addEventListener("submit", (e) => {
+    e.preventDefault();
+    fetch("/refusing/pressed", { method: "POST", body: "{}" }).catch(() => {});
+    setTimeout(() => { const er = document.getElementById("err"); er.textContent = "Something went wrong and your application was not submitted. Please try again later."; er.style.display = "block"; }, 600);
+  });
+</script>
+</body></html>`;
+let refusingPressed = 0;
+
 let regionsGot = null;
 let codeRequests = 0;
 let plainGot = null;
@@ -243,6 +267,7 @@ const server = http.createServer((req, res) => {
     });
     return;
   }
+  if (url.pathname === "/refusing/pressed") { refusingPressed++; res.writeHead(200, { "Content-Type": "application/json" }); return res.end("{}"); }
   if (url.pathname === "/regions/got") {
     let body = "";
     req.on("data", (d) => (body += d));
@@ -272,6 +297,7 @@ const server = http.createServer((req, res) => {
   if (url.pathname === "/plain/job") return send("text/html", PLAIN_FORM);
   if (url.pathname === "/board/job") return send("text/html", BOARD_FORM);
   if (url.pathname === "/regions/job") return send("text/html", REGIONS_FORM);
+  if (url.pathname === "/refusing/job") return send("text/html", REFUSING_FORM);
   if (url.pathname === "/api/public/email/verify-code") {
     codeRequests++;
     // A fresh code each time, as a real portal sends: the applier will not
@@ -411,6 +437,31 @@ const cases = [
       : regionsGot.ref !== "N/A" ? `the box for a referrer's name holds ${JSON.stringify(regionsGot.ref)}`
       : null,
   },
+  // Faults, put there on purpose. These pass when the application is NOT
+  // written down as sent, and when the failure is an answer and not a crash.
+  {
+    name: "fault: a form that takes everything and then says it was not submitted is never recorded as sent",
+    job: { id: "selftest-refusing", url: `${base}/refusing/job`, apply_url: `${base}/refusing/job`, title: "Shift Lead", company: "Refusing Co", ats: null, location: "Princeton, NJ", description: "Requirements: scheduling." },
+    expect: (o) =>
+      o.status === "applied" ? "it was recorded as sent"
+      : o.status === "threw" ? `it threw instead of answering: ${o.note}`
+      : o.status !== "needs_help" ? `it ended as ${o.status}`
+      : !refusingPressed ? "the submit button was never pressed, so the refusal was never met"
+      : null,
+  },
+  {
+    // The worker that calls this turns a failure to open the page into a
+    // stop with the browser's own words and goes on to the next posting
+    // (apply.mjs, the catch round applyToJob). What is checked here is that
+    // the failure is that one — the page not opening — and nothing else,
+    // and that it is never a posting written down as sent.
+    name: "fault: an address nothing answers at fails as a page that would not open, never as a posting sent, and the next one still goes",
+    job: { id: "selftest-dead", url: "http://127.0.0.1:59999/none", apply_url: "http://127.0.0.1:59999/none", title: "Shift Lead", company: "Nowhere Co", ats: null, location: "Princeton, NJ", description: "Requirements: scheduling." },
+    expect: (o) =>
+      o.status === "applied" ? "it was recorded as sent"
+      : o.status === "threw" && !/net::ERR_|ERR_CONNECTION|goto/i.test(String(o.note)) ? `it failed some other way: ${o.note}`
+      : null,
+  },
 ];
 
 const browser = await chromium.launch();
@@ -423,6 +474,8 @@ const browser = await chromium.launch();
 // Only when asked for (ENDURANCE_ROUNDS); the gate below is unchanged.
 // ---------------------------------------------------------------------------
 if (Number(process.env.ENDURANCE_ROUNDS) > 0) {
+  // The forms meant to be sent; the faults have their own run, below.
+  const sending = cases.filter((c) => !c.expect);
   const rounds = Number(process.env.ENDURANCE_ROUNDS);
   const mb = () => Math.round(process.memoryUsage().rss / 1048576);
   const one = async (c, cutAfterMs = 0) => {
@@ -447,8 +500,8 @@ if (Number(process.env.ENDURANCE_ROUNDS) > 0) {
   for (let r = 1; r <= rounds; r++) {
     const cutting = r === 2;
     const t0 = Date.now();
-    const got = await Promise.all(cases.map((c, i) => one(c, cutting && i === 1 ? 6000 : 0)));
-    const N = cases.length;
+    const got = await Promise.all(sending.map((c, i) => one(c, cutting && i === 1 ? 6000 : 0)));
+    const N = sending.length;
     if (cutting) cutOutcome = got[1].status;
     const fails = got.filter((g, i) => !g.ok && !(cutting && i === 1)).length;
     bad += fails;
@@ -459,7 +512,7 @@ if (Number(process.env.ENDURANCE_ROUNDS) > 0) {
   server.close();
   const steady = seen.slice(2);
   const first = steady[0] ?? seen[0], last = seen[seen.length - 1];
-  console.log(`\nendurance: ${rounds} rounds of ${cases.length} at once, ${rounds * cases.length - 1} applications meant to finish, ${rounds * cases.length - 1 - bad} did; the one cut off ended as "${cutOutcome}" and stopped nothing after it`);
+  console.log(`\nendurance: ${rounds} rounds of ${sending.length} at once, ${rounds * sending.length - 1} applications meant to finish, ${rounds * sending.length - 1 - bad} did; the one cut off ended as "${cutOutcome}" and stopped nothing after it`);
   console.log(`  a round took ${first.secs}s at the start and ${last.secs}s at the end; memory ${first.rss} MB then, ${last.rss} MB at the end, most ${Math.max(...seen.map((x) => x.rss))} MB`);
   const leak = last.rss > first.rss * 1.5 + 100;
   const slow = last.secs > first.secs * 1.5 + 10;
@@ -484,8 +537,10 @@ for (const c of cases) {
   }
   await context.close().catch(() => {});
 
-  const extra = outcome.status === "applied" ? c.check() : null;
-  const ok = outcome.status === "applied" && !extra;
+  // A fault says for itself what a right ending is; everything else is
+  // right only when it was sent and the form got what it should have.
+  const extra = c.expect ? c.expect(outcome) : outcome.status === "applied" ? c.check() : null;
+  const ok = c.expect ? !extra : outcome.status === "applied" && !extra;
   if (!ok) failed++;
   console.log(
     `${ok ? "PASS" : "FAIL"}  ${c.name}  (${Math.round((Date.now() - started) / 1000)}s)` +
