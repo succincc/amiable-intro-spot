@@ -202,6 +202,8 @@ const patchJob = (id, patch) =>
 // portal's own password reset. One attempt per portal per run, so a wall that
 // still will not open costs one visit, not one per posting.
 const RETRYABLE_PARKED = ["incomplete", "error", "no_form", "login"];
+// The mark on a posting that showed no form after being offered again.
+const NO_FORM_AGAIN = "[the same again after a retry: not retried again]";
 // The files whose change is a reason to offer a parked posting again.
 const APPLYING_CODE = ["apply.mjs", "answers.mjs", "normalize.mjs", "tailor.mjs", "ats.mjs", "quality.mjs", "candidate.mjs", "fromprofile.mjs", "untrusted.mjs", "geo.mjs", "gone.mjs", "samejob.mjs", "school.mjs", "coverletter.mjs", "major-boards-engine.mjs", "major-boards-selectors.mjs"];
 
@@ -257,6 +259,7 @@ async function requeueStaleParked() {
 
   const stale = await db(
     `jobs?status=eq.needs_help&help_reason=in.(${RETRYABLE_PARKED.join(",")})` +
+      `&or=(help_reason.neq.no_form,last_error.not.like.*${encodeURIComponent("the same again after a retry")}*)` +
       `&updated_at=lt.${encodeURIComponent(since)}&select=id&order=score.desc.nullslast&limit=200`,
   ).catch((e) => {
     console.log(`Looking for parked jobs failed: ${String(e?.message ?? e).slice(0, 120)}`);
@@ -14225,6 +14228,15 @@ const main = async () => {
       // The note is kept either way: on a dry run it is the only record of
       // what the applier saw on that form.
       if (outcome.note) patch.last_error = outcome.note;
+      // A posting that showed no form a second time, after being offered
+      // again: said so on its record, and it is not offered again by a
+      // change to the code (requeueStaleParked). Four of one employer's
+      // postings opened the same careers page with no form on it, round
+      // after round, two minutes each.
+      if (!DRY_RUN && outcome.help_reason === "no_form" && /^(Never reached an application form|The page has a form with only)/.test(String(job.last_error ?? ""))) {
+        patch.last_error = `${String(outcome.note ?? "").slice(0, 300)} ${NO_FORM_AGAIN}`;
+        used("posting that showed no form twice, not offered again");
+      }
       await patchJob(job.id, patch);
       // How the resume sent matched the posting, and the posting's terms it
       // could not honestly show. On its own, so that a panel without these

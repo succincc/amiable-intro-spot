@@ -212,7 +212,12 @@ function swap(line) {
   for (const [from, to] of [...SWAPS.entries()].sort((a, b) => b[0].length - a[0].length)) {
     // A short name only as a whole word: "Coty" is not the middle of another.
     const body = esc(from).replace(/\\? /g, "\\s+").replace(/['’]/g, "['’]");
-    s = s.replace(new RegExp(from.length < 8 ? `(^|[^A-Za-z0-9])${body}(?![A-Za-z0-9])` : body, "gi"), (m, lead) => (from.length < 8 ? `${lead ?? ""}${to}` : to));
+    // A name that is also one of this program's own words ("Nothing", an
+    // employer; "nothing recognised", a count the resolver prints) is
+    // struck out as the name is written, with its capital, and not as
+    // the word. 318 lines of one count read "employer-f642d" for that.
+    const ownWord = from.length < 8 && /^[A-Za-z]+$/.test(from) && /^[A-Z]/.test(from) && vocabulary(false).lower.has(from.toLowerCase());
+    s = s.replace(new RegExp(from.length < 8 ? `(^|[^A-Za-z0-9])${body}(?![A-Za-z0-9])` : body, ownWord ? "g" : "gi"), (m, lead) => (from.length < 8 ? `${lead ?? ""}${to}` : to));
   }
   // Whose other companies a question names is the employer's business.
   s = s.replace(/(employer-[0-9a-f]{5}) or any of [^"|;\]]*/g, "$1 or any of [its companies]");

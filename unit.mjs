@@ -897,6 +897,13 @@ quiet.hideJob({ company: "ZQ" });
     }
     check("leaks: the scripts' own fixed messages pass whole (several hundred of them)", [read > 400, holed], [true, []]);
   }
+  // Last, because a name once learned is struck out from then on: a sentence
+  // that begins "Nothing to …" would read as that employer after it.
+  // An employer whose name is one of the program's own words is struck out as the name, not as the word.
+  quiet.hideJob({ company: "Nothing" });
+  check("leaks: an employer called by an ordinary word is struck out where it is the name, and the word is left where it is the word", [
+    /^\?  employer-[0-9a-f]{5} — nothing recognised on 8 page\(s\)$/.test(quiet.asPublic("?  Nothing — nothing recognised on 8 page(s)", false)),
+  ], [true]);
   // The same nets, under a whole process, as a public runner has them: what
   // console prints, what is written straight to a stream, an object, a
   // buffer, and the error nobody caught.
