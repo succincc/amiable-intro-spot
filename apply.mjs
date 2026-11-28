@@ -1218,7 +1218,10 @@ async function buildResumePdf(context, text, profile, jobId) {
  */
 function portalPassword() {
   const own = String(AP_PASSWORD ?? "");
-  const fits = own.length >= 8 && own.length <= 64 && /[a-z]/.test(own) && /[A-Z]/.test(own) && /\d/.test(own) && /[^A-Za-z0-9]/.test(own);
+  // Sixteen at least: a Workday portal refused a shorter one in its own
+  // words, "password must include a minimum of 16 characters", twice a
+  // round for three rounds. One made here is twenty.
+  const fits = own.length >= 16 && own.length <= 64 && /[a-z]/.test(own) && /[A-Z]/.test(own) && /\d/.test(own) && /[^A-Za-z0-9]/.test(own);
   return fits ? own : generatePassword();
 }
 
@@ -9954,7 +9957,11 @@ async function applyToJobOnce(context, job, profile, answers) {
                   // "United States". The box's label as read here may carry
                   // its field name after the words, so the words alone are
                   // tried too.
-                  const optWords = String(opt).replace(/\s+\S*(question|field|input|checkbox)\S*\s*$/i, "").replace(/\s*\[[^\]]*\]\s*$/, "").trim();
+                  // The words are what comes before the first thing that
+                  // is plainly a field's name or id: "usa question_6896[]
+                  // question_6896_1" is the option "usa". (Seen live: a list
+                  // offering "USA" to an answer of "United States".)
+                  const optWords = String(opt).split(/\s+/).reduce((acc, w) => (acc.done || /[_\[\]]|^[a-z]+-?\d{2,}|^\d{5,}$/i.test(w) ? { ...acc, done: true } : { words: [...acc.words, w], done: false }), { words: [], done: false }).words.join(" ").trim();
                   const mine =
                     o === w ||
                     sameAnswer(want, opt, q) || sameAnswer(want, optWords, q) ||
@@ -13575,6 +13582,19 @@ const main = async () => {
         body: JSON.stringify({ status: "queued", updated_at: new Date().toISOString() }),
       }).catch(() => null)) ?? [];
     if (moved.length) console.log(`review: ${moved.length} posting(s) that were held for a yes are now in the queue.`);
+  }
+  // Sign-ups a portal refused for a password shorter than it wanted, from
+  // before one of sixteen characters or more was always used (28 Nov 2026,
+  // 02:00 UTC). The condition that stopped them has changed, so they are
+  // offered once more; one refused after that date is not touched by this.
+  if (!DRY_RUN && LEADS_THE_ROUND) {
+    const again =
+      (await db("jobs?status=eq.needs_help&help_reason=eq.login&last_error=ilike.*password%20rejected%20by%20portal*&updated_at=lt.2026-11-28T02:00:00Z", {
+        method: "PATCH",
+        headers: { Prefer: "return=representation" },
+        body: JSON.stringify({ status: "queued", help_reason: null, attempts: 0, updated_at: new Date().toISOString() }),
+      }).catch(() => null)) ?? [];
+    if (again.length) console.log(`set to be tried again now that passwords are long enough: ${again.length} posting(s).`);
   }
   // A rehearsal sends nothing, so what an old one left marked as stopped
   // was never tried for real. The audit found ten such on one account,

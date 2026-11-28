@@ -183,7 +183,7 @@ const REGIONS_FORM = `<!doctype html><html><head><title>Field Coordinator</title
   <div><label for="resume">Resume/CV *</label><input id="resume" name="resume" type="file"></div>
   <fieldset id="countries" class="checkbox"><legend>Please select the country or countries you anticipate working in for this role *</legend>
     <div class="checkbox__wrapper"><input class="checkbox__input" style="position:absolute;opacity:0;width:0;height:0;margin:0" type="checkbox" id="q_ca" name="question_68961687[]" value="ca"><label for="q_ca">Canada</label></div>
-    <div class="checkbox__wrapper"><input class="checkbox__input" style="position:absolute;opacity:0;width:0;height:0;margin:0" type="checkbox" id="q_us" name="question_68961687[]" value="us"><label for="q_us">United States</label></div>
+    <div class="checkbox__wrapper"><input class="checkbox__input" style="position:absolute;opacity:0;width:0;height:0;margin:0" type="checkbox" id="q_us" name="question_68961687[]" value="us"><label for="q_us">USA</label></div>
     <div class="checkbox__wrapper"><input class="checkbox__input" style="position:absolute;opacity:0;width:0;height:0;margin:0" type="checkbox" id="q_uk" name="question_68961687[]" value="uk"><label for="q_uk">United Kingdom</label></div>
     <div class="checkbox__wrapper"><input class="checkbox__input" style="position:absolute;opacity:0;width:0;height:0;margin:0" type="checkbox" id="q_other" name="question_68961687[]" value="other"><label for="q_other">Other</label></div>
   </fieldset>

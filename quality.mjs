@@ -213,7 +213,10 @@ export function tidyWriting(text) {
 // Whether every claim in the document is the candidate's own
 // ---------------------------------------------------------------------------
 
-const squash = (t) => String(t ?? "").toLowerCase().replace(/&/g, "and").replace(/[^a-z0-9]+/g, "");
+// Compared letter for letter, after the letters are made the same kind: a
+// PDF's reader gives back "ﬁ" as one sign where the text had "f" and "i",
+// and a line that holds one then reads as a different line.
+const squash = (t) => String(t ?? "").normalize("NFKC").toLowerCase().replace(/&/g, "and").replace(/[^a-z0-9]+/g, "");
 
 /**
  * Figures and named things in the document that the candidate's own material
