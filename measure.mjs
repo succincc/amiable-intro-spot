@@ -377,6 +377,7 @@ if (process.env.MEASURE_IMPORT_ONLY !== "1") {
     }
     const again = { held: held.length, placedByField: 0, placedByText: 0, within: 0, beyond: 0, stateOnly: 0, noLocation: 0, unread: 0 };
     const shapes = new Map();
+    const lastWords = new Map();
     for (const job of held) {
       const read = readLocation(job.location, { title: job.title, description: job.description, remote: job.remote });
       const here = nearest(read, home);
@@ -393,6 +394,11 @@ if (process.env.MEASURE_IMPORT_ONLY !== "1") {
         else again.unread++;
         const shape = shapeOfPlace(job.location);
         shapes.set(shape, (shapes.get(shape) ?? 0) + 1);
+        // The last word of a location this could not place, where many
+        // postings end the same way: a country or a region not yet known
+        // here. A posting's place, far from anyone's home by definition.
+        const last = String(job.location ?? "").replace(/\(.*?\)/g, " ").split(/[,\-–—:|/]/).map((x) => x.trim()).filter(Boolean).pop();
+        if (last && /^[A-Za-z .']{3,24}$/.test(last)) lastWords.set(last.toLowerCase(), (lastWords.get(last.toLowerCase()) ?? 0) + 1);
         continue;
       }
       if (read.fromDescription) again.placedByText++; else again.placedByField++;
@@ -409,6 +415,8 @@ if (process.env.MEASURE_IMPORT_ONLY !== "1") {
     console.log(`set aside as unplaceable, tried again: ${JSON.stringify(again)}`);
     console.log(`  of ${again.held}: ${again.within} are within reach and go back to be rated; ${again.beyond} are placed and too far (now said so); ${again.abroad ?? 0} are in another country (now said so); ${again.held - again.within - again.beyond - (again.abroad ?? 0)} still cannot be placed and stay held`);
     const top = [...shapes.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12);
+    const ends = [...lastWords.entries()].filter(([, n]) => n >= 4).sort((a, b) => b[1] - a[1]).slice(0, 16);
+    if (ends.length) console.log(`  still unplaced, how the commonest end: ${JSON.stringify(ends.map(([w, n]) => `${w} x${n}`))}`);
     if (top.length) console.log(`  still unplaced, by shape (a = a word, 9 = a number, ST = a state): ${JSON.stringify(top.map(([sh, n]) => `${sh} x${n}`))}`);
   }
 
