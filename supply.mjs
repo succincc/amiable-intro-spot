@@ -115,6 +115,12 @@ async function main() {
     const failed = cands.filter((c) => c.status === "failed");
     const whyNot = (c) => { const n = String(c.note ?? ""); return /refused the visit/i.test(n) ? "site refused the visit" : /no application system recognised/i.test(n) ? "site read, no system recognised" : /did not finish loading/i.test(n) ? "site too slow" : /returned nothing/i.test(n) ? "board seen, list empty" : /does not look like/i.test(n) ? "board seen, not this employer's" : /runs on/i.test(n) ? "on a system with no reader" : n ? "another note" : "no note"; };
     console.log(`  not placed (${failed.length}): ${JSON.stringify(top(count(failed, whyNot)))}`);
+    // How the visit was refused, and which systems nothing here reads: the
+    // two lists a next piece of work would be chosen from.
+    const refusal = (c) => { const n = String(c.note ?? ""); return (n.match(/HTTP (\d{3})/) ?? [])[1] ? `HTTP ${(n.match(/HTTP (\d{3})/) ?? [])[1]}` : (n.match(/ERR_[A-Z0-9_]+/) ?? [])[0] ?? (/timeout/i.test(n) ? "timeout" : "another way"); };
+    console.log(`    refused, by how: ${JSON.stringify(top(count(failed.filter((c) => whyNot(c) === "site refused the visit"), refusal), 8))}`);
+    const system = (c) => String((String(c.note ?? "").match(/runs on ([a-z0-9]+)/i) ?? [])[1] ?? "unnamed").toLowerCase().slice(0, 18);
+    console.log(`    on a system with no reader, by system: ${JSON.stringify(top(count(failed.filter((c) => whyNot(c) === "on a system with no reader"), system), 14))}`);
     // The map's employers still carrying the map's note: how many places each has in reach.
     const mapped = cands.filter((c) => /^map:/.test(String(c.note ?? "")));
     console.log(`  from the map and not yet looked at: ${mapped.length}; with three or more places in reach ${mapped.filter((c) => Number((String(c.note).match(/(\d+) place/) ?? [])[1]) >= 3).length}`);
@@ -138,7 +144,7 @@ async function main() {
 
   // 3. Postings, thirty days of them, and the seven most recent apart.
   const since30 = new Date(Date.now() - 30 * 86_400_000).toISOString();
-  const jobs = (await all(`jobs?found_at=gte.${encodeURIComponent(since30)}&select=id,source,ats,company,url,status,skip_reason,distance_miles,remote,posted_at,found_at,applied_at`)).filter((j) => !isBlocked(j));
+  const jobs = (await all(`jobs?found_at=gte.${encodeURIComponent(since30)}&select=id,source,ats,company,url,status,skip_reason,help_reason,attempts,distance_miles,remote,posted_at,found_at,applied_at`)).filter((j) => !isBlocked(j));
   const week = Date.now() - 7 * 86_400_000;
   const recent = jobs.filter((j) => new Date(j.found_at ?? 0).getTime() > week);
   const src = (j) => String(j.source ?? j.ats ?? "not recorded").toLowerCase().replace(/[^a-z0-9_ -]/g, "").slice(0, 20) || "not recorded";
@@ -182,6 +188,19 @@ async function main() {
   const far = aside.filter((j) => ["too far", "outside the country", "the same-state rule"].includes(family(j.skip_reason)));
   console.log(`  set aside for where it is: ${far.length} = ${pct(far.length, recent.length)} of everything found; qualified came from ${new Set(recent.filter((j) => TAKEN.has(j.status)).map((j) => employerKey(j.company))).size} employer(s)`);
 
+  // Qualified and not sent: what found a job worth applying to and then
+  // did not apply. Each stop is this system's own code for it.
+  const stuck = recent.filter((j) => TAKEN.has(j.status) && !SENT.has(j.status));
+  const stop = (j) => (j.status === "needs_help" ? String(j.help_reason ?? "no reason").replace(/[^a-z_]/gi, "").slice(0, 24) || "no reason" : j.status === "review" ? "held for a yes" : j.status === "queued" ? "waiting its turn" : j.status);
+  console.log(`qualified and not sent, 7 days: ${stuck.length} of ${recent.filter((j) => TAKEN.has(j.status)).length}; by what stopped them ${JSON.stringify(top(count(stuck, stop), 14))}`);
+  console.log(`  by source (not sent: stops, most frequent first):`);
+  const stuckBy = {};
+  for (const j of stuck) (stuckBy[src(j)] ??= []).push(j);
+  for (const [k, list] of Object.entries(stuckBy).sort((a, b) => b[1].length - a[1].length).slice(0, 16)) {
+    console.log(`    ${k}: ${list.length}: ${JSON.stringify(top(count(list, stop), 5))}`);
+  }
+  digest.qualified_not_sent_7d = stuck.length;
+
   // 4. Remote.
   const remote = recent.filter((j) => j.remote === true);
   console.log(`remote postings, 7 days: found ${remote.length}; qualified ${remote.filter((j) => TAKEN.has(j.status)).length}; sent ${remote.filter((j) => SENT.has(j.status)).length}; set aside ${JSON.stringify(top(count(remote.filter((j) => j.status === "skipped"), (j) => family(j.skip_reason)), 6))}`);
@@ -191,6 +210,14 @@ async function main() {
   const q = recent.filter((j) => TAKEN.has(j.status));
   const ageBand = (j) => { const h = hours(j.posted_at, j.found_at); return !Number.isFinite(h) ? "no posting date" : h < 24 ? "under a day" : h < 72 ? "one to three days" : h < 168 ? "three to seven days" : "over a week"; };
   console.log(`qualified postings by age when found, 7 days: ${JSON.stringify(count(q, ageBand))}`);
+  // The first reading of a new employer brings a month of postings at
+  // once, which says nothing about how quickly a new one is noticed. So:
+  // only employers already known more than a week before.
+  const first = new Map();
+  for (const j of jobs) { const k = employerKey(j.company); const t = new Date(j.found_at ?? 0).getTime(); if (k && (!first.has(k) || t < first.get(k))) first.set(k, t); }
+  const steady = recent.filter((j) => (first.get(employerKey(j.company)) ?? Infinity) < week && Number.isFinite(hours(j.posted_at, j.found_at)));
+  const lag = median(steady.map((j) => hours(j.posted_at, j.found_at)));
+  console.log(`  from employers already being read a week before (${steady.length} posting(s)): ${lag == null ? "-" : `${Math.round(lag)}h`} old when found (median); found within a day of posting ${pct(steady.filter((j) => hours(j.posted_at, j.found_at) < 24).length, steady.length)}`);
   const sentNow = q.filter((j) => SENT.has(j.status) && j.applied_at);
   const wait = median(sentNow.map((j) => hours(j.found_at, j.applied_at)));
   const whole = median(sentNow.map((j) => hours(j.posted_at, j.applied_at)));
