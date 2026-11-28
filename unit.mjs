@@ -759,11 +759,24 @@ quiet.hideJob({ company: "ZQ" });
     (await allRows(fake, "company_candidates?select=name")).length, asked.length, asked[0], (await allRows(fake, "emails?select=a&order=received_at.desc", 1500)).length, asked[3],
   ], [2746, 3, "company_candidates?select=name&order=id.asc&offset=0&limit=1000", 1500, "emails?select=a&order=received_at.desc&offset=0&limit=1000"]);
   // Where an employer came from stays on its record through the resolver.
-  process.env.RESOLVE_IMPORT_ONLY = "1";
-  const r = await import("./resolve.mjs");
+  const r = await import("./origin.mjs");
   check("origin: where an employer was found is read from its record, wherever in the note it stands", [
     r.originOf("map: 3 place(s) in reach"), r.originOf("browser: runs on adp at x; way in y; map: 12 place(s) in reach"), r.originOf("asked workday by name (4 openings)"), r.originOf("feed: near home; list not read"), r.originOf(null),
   ], ["map: 3 place(s) in reach", "map: 12 place(s) in reach", null, "feed: near home", null]);
+}
+
+{
+  // These checks run before a browser is installed (the round's gate runs
+  // them first). A check that pulled in a script needing one stopped a whole
+  // round on 28 Nov: so, nothing these checks import may need it to load.
+  const fs = await import("node:fs");
+  const HERE = new URL(".", import.meta.url);
+  const direct = (f) => [...fs.readFileSync(new URL(f, HERE), "utf8").matchAll(/(?:from\s+|import\(\s*)"\.\/([a-z-]+\.mjs)"/g)].map((m) => m[1]);
+  const statics = (f) => [...fs.readFileSync(new URL(f, HERE), "utf8").matchAll(/^import[^\n]*from\s+"\.\/([a-z-]+\.mjs)"/gm)].map((m) => m[1]);
+  const seen = new Set(direct("unit.mjs"));
+  for (const f of [...seen]) for (const g of statics(f)) if (!seen.has(g)) { seen.add(g); for (const h of statics(g)) seen.add(h); }
+  const needBrowser = [...seen].filter((f) => /^import[^\n]*from\s+"playwright"/m.test(fs.readFileSync(new URL(f, HERE), "utf8")));
+  check("checks: nothing these checks load needs a browser to be installed", needBrowser, []);
 }
 
 // ---------------------------------------------------------------------------

@@ -21,6 +21,7 @@
 //
 // Free: a GitHub runner, a browser, and public pages. Nothing is logged in to.
 
+import { originOf } from "./origin.mjs";
 import { allRows } from "./pages.mjs";
 import { guardLogs, hideNames } from "./quiet.mjs";
 // Nothing this prints names an employer, a posting or a place: see quiet.mjs.
@@ -515,11 +516,6 @@ export function census(rows) {
     else add(out.not_found, note ? "older note" : "no note");
   }
   return out;
-}
-
-/** Where an employer came from, as its record says: "map: 3 place(s) in reach", "feed: near home". */
-export function originOf(note) {
-  return (String(note ?? "").match(/(?:^|; )((?:map|feed|index|crawl|seed): [^;]{0,60})/) ?? [])[1]?.trim() ?? null;
 }
 
 export function otherAddresses(careersUrl) {
