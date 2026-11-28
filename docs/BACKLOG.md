@@ -74,6 +74,35 @@ there is evidence).
 - Audit: unconfirmed submits by page evidence; the record against itself;
   each lane's evidence added up; one-line summary at the end of the log.
 
+## Measured at 4:50 AM, 28 Nov (owner's account)
+
+- On record as sent 174 (was 157 at the start of the 27-28 Nov work):
+  confirmed 122, probable 52; unverified 17 (held, never resent). Duplicates
+  on record 3, all from before the guard was repaired; none since.
+- The record against itself: 0 inconsistent rows of the 5 kinds checked.
+- Ordinary rounds since lane evidence began (12 rounds, 24 lane runs):
+  3 sent of 69 tried. The queue that remains is mostly what stops.
+- The map's employers: 705 named, 494 looked at, 16 placed on a hiring
+  system, 0 with a qualified posting yet. 318 of 500 looked at in one run
+  showed no hiring system: they are small businesses with their own site,
+  and are now read first by the own-site reader (jobposting.mjs).
+- Qualified, not sent, 7 days: 178 of 347. Human checks 94 (one system
+  67), sign-in 12, unconfirmed 13, error 9, no form 7, incomplete 3.
+- Remote and open to the person: 108 qualified, 7 sent; 71 of the 101 not
+  sent stopped at a human check.
+- Endurance (fixtures, 10 rounds x 4 forms at once, one cut off on
+  purpose): 39 of 39 went; 52 s a round first and last; memory 107 -> 108
+  MB; no browser context left open.
+- Measuring step: 93 s -> 24 s once unplaced postings stopped being re-read.
+
+## Explained since
+
+- The Workday "never reached a form" stops: four postings of one employer
+  open that employer's own careers page, 444 characters, no form, no human
+  check. Retried with each change to the code; now left for the person
+  after the second time (`NO_FORM_AGAIN`). Why their address leads there
+  (a closed posting the page does not call closed?) is not known.
+
 ## Seen on the 2:30 AM round of 28 Nov and not yet explained
 
 - **Workday: 12 postings ended "never reached a form"** in one round, all
@@ -87,7 +116,12 @@ there is evidence).
 
 ## Open, in order (each with what it rests on)
 
-1. **Unconfirmed submits (13 in a week).** The note now records what the
+0. **Workday "Desired hours (per week)"**, required, nothing on file: a
+   question for the owner (it is on the Answers page), not to be guessed.
+   **The resume PDF read back at 82% on one posting** (threshold not
+   lowered; cause not known).
+1. **Unconfirmed submits (17 on record; 13 from before the page's own
+   evidence was kept).** The note now records what the
    page showed. After a few days: count how many showed a failed check or a
    required word. Only then decide whether "form still on screen, its own
    check failing on a required empty field" may be called not sent. It is
