@@ -18,6 +18,7 @@
 // person "First Name".
 // ============================================================================
 
+import { readAgain, allRows } from "./pages.mjs";
 import fs from "node:fs";
 import os from "node:os";
 import nodePath from "node:path";
@@ -38,7 +39,7 @@ import { useOwnKey } from "./ownkey.mjs";
 import { isCoverLetter, writeCoverLetter } from "./coverletter.mjs";
 import { jobKey } from "./samejob.mjs";
 import { isBlocked, BLOCKED_REASON } from "./blocked.mjs";
-import { sameAnswer, optionMeaning, placeOption, ageOption } from "./normalize.mjs";
+import { sameAnswer, optionMeaning, placeOption, ageOption, answerIndex } from "./normalize.mjs";
 import { confirmedQualifications, qualificationLines } from "./candidate.mjs";
 import { GONE_RE } from "./gone.mjs";
 import { tidyWriting, unsupportedClaims, documentCheck, requirementReport } from "./quality.mjs";
@@ -140,7 +141,10 @@ async function db(path, init = {}) {
   const t0 = Date.now();
   COST.dbCalls++;
   { const table = String(path).split("?")[0]; const k = `${init.method ?? "GET"} ${table}`; COST.dbByTable[k] = (COST.dbByTable[k] ?? 0) + 1; }
-  try { return await dbOnce(path, init); } finally { COST.dbMs += Date.now() - t0; }
+  // A read is asked again when the line dropped or the database was busy;
+  // a write is not (pages.mjs says why).
+  const isRead = !init.method || init.method === "GET";
+  try { return isRead ? await readAgain(() => dbOnce(path, init)) : await dbOnce(path, init); } finally { COST.dbMs += Date.now() - t0; }
 }
 async function dbOnce(path, init = {}) {
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
@@ -9215,10 +9219,18 @@ async function applyToJobOnce(context, job, profile, answers) {
   // the readers that need dates in a set shape had been asked.
   await workHistory(profile, job).catch(() => null);
   const answerMap = new Map((answers || []).map((a) => [a.q_key, a.answer]));
+  // The same answers, by the question however a form writes it (normalize.mjs).
+  const answersByMeaning = answerIndex(answers || [], job?.company ?? "");
   const lookupSaved = (label) => {
     const l = String(label ?? "").trim();
     if (!l) return null;
     if (answerMap.has(l)) { used("answer kept from before, used again"); return answerMap.get(l); }
+    // The same question in another writing: capitals, punctuation, a star,
+    // the employer's name, "authorised". The same words otherwise, or no match.
+    {
+      const same = answersByMeaning.find(l);
+      if (same !== null) { used("answer kept from before, used for the same question written another way"); return same; }
+    }
 
     // A saved answer may stand in only for very nearly the same question.
     //
@@ -9650,13 +9662,28 @@ async function applyToJobOnce(context, job, profile, answers) {
             while (Date.now() - t0 < 75_000) {
               const body = ((await form.evaluate(() => document.body.innerText || "").catch(() => "")) || "").toLowerCase();
               if (/couldn'?t import your profile|could not import your profile|unable to import/.test(body)) { ended = "the portal says it could not read the resume"; break; }
-              const busy = (await form.$$('[class*="spinner" i], [class*="loading" i], [aria-busy="true"]').catch(() => [])).length;
+              // Busy means something a person could see turning. A mark of
+              // "loading" left in the page and drawn nowhere kept this wait
+              // going for its whole 75 seconds on a form that had nothing
+              // more to read in.
+              const busy = await form
+                .evaluate(() =>
+                  Array.from(document.querySelectorAll('[class*="spinner" i], [class*="loading" i], [aria-busy="true"]')).filter((n) => {
+                    const r = n.getBoundingClientRect();
+                    const st = getComputedStyle(n);
+                    return r.width > 0 && r.height > 0 && st.visibility !== "hidden" && st.display !== "none" && Number(st.opacity || 1) > 0;
+                  }).length,
+                )
+                .catch(() => 0);
               const now = await tiles();
               if (now !== seenTiles) { seenTiles = now; lastChange = Date.now(); }
               // Entries drawn, and nothing has changed for eight seconds.
               if (now > before && Date.now() - lastChange > 8000) { ended = `${now - before} entr${now - before === 1 ? "y" : "ies"} read in`; break; }
               // Nothing at all happening for twenty seconds: it is not coming.
               if (!busy && now === before && Date.now() - t0 > 20_000) { ended = "nothing was read in"; break; }
+              // Said to be busy, and nothing drawn in forty seconds: the
+              // busy mark is the page's furniture, not the reading.
+              if (busy && now === before && Date.now() - t0 > 40_000) { ended = "nothing was read in, though the page still showed a busy mark"; break; }
               await page.waitForTimeout(1500);
             }
             await page.waitForTimeout(3000);
@@ -13696,7 +13723,8 @@ const main = async () => {
       }).catch(() => null)) ?? [];
     if (back.length) { console.log(`rehearsed, never sent: ${back.length} posting(s) put back in the queue.`); used("stops put back in the queue", back.length); }
   }
-  const everyAnswer = await db("answers?confirmed=eq.true&select=q_key,answer") ?? [];
+  // All of them: the database gives a thousand at a time (pages.mjs).
+  const everyAnswer = await allRows(db, "answers?confirmed=eq.true&select=q_key,answer&order=q_key.asc", 8000).catch(() => db("answers?confirmed=eq.true&select=q_key,answer")) ?? [];
   CONFIRMED_QUALS = confirmedQualifications(everyAnswer);
   // Those are about the person, not answers to a form's question: kept out
   // of what is matched against forms, so a line of theirs is never typed

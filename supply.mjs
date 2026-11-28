@@ -98,8 +98,10 @@ async function main() {
     return out;
   };
 
-  const [cfg] = (await db("search_config?select=radius_miles&limit=1").catch(() => [])) ?? [];
+  const [cfg] = (await db("search_config?select=radius_miles,sources&limit=1").catch(() => [])) ?? [];
   const radius = Number(cfg?.radius_miles) || 25;
+  // The person's own switches, said and never changed here.
+  console.log(`sources switched on in this person's settings: ${JSON.stringify((cfg?.sources ?? []).map((x) => String(x).replace(/[^a-z0-9_-]/gi, "").slice(0, 20)))}`);
   const who = process.env.AP_ACT_AS ? "another person" : "owner";
   const digest = {};
 
@@ -247,6 +249,15 @@ async function main() {
   const whole = median(sentNow.map((j) => hours(j.posted_at, j.applied_at)));
   console.log(`  sent ${sentNow.length} of them: ${wait == null ? "-" : `${Math.round(wait)}h`} from found to sent, ${whole == null ? "-" : `${Math.round(whole)}h`} from posted to sent (medians)`);
   Object.assign(digest, { found_to_sent_h: wait == null ? null : Math.round(wait) });
+
+  // What is waiting on the person: questions a form asked that nothing on
+  // file answers, and the ones about themselves the engine put to them.
+  try {
+    const open = await all("answers?confirmed=eq.false&select=id,q_key");
+    const about = open.filter((r) => /^about you:/i.test(String(r.q_key ?? ""))).length;
+    console.log(`questions waiting for this person's answer: ${open.length} (${about} about their own background, ${open.length - about} asked by forms)`);
+    digest.questions_waiting = open.length;
+  } catch { /* a count only */ }
 
   console.log(`SUPPLY ${who}: ${JSON.stringify(digest)}`);
 }

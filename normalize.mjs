@@ -146,6 +146,61 @@ export function ageOption(options, adult) {
   return hits.length === 1 ? hits[0] : -1;
 }
 
+/**
+ * One question under its several writings.
+ *
+ * "Are you legally authorized to work in the United States?*" and "are you
+ * legally authorised to work in the US (required)" are one question, and an
+ * answer the person gave to the first is their answer to the second. Two
+ * questions are the same here only when they come to the same words once
+ * the marks a form adds are taken off: capitals, punctuation, the star and
+ * "(required)", the employer's own name, and three spellings that differ
+ * between forms and never between meanings. Nothing is matched by being
+ * near: one word more or less is another question.
+ */
+export function questionKey(question, company = "") {
+  let t = String(question ?? "").toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "");
+  t = t.replace(/\((required|optional|if applicable)\)/g, " ").replace(/\*+/g, " ");
+  const firm = String(company ?? "").toLowerCase().replace(/[^a-z0-9 ]+/g, " ").replace(/\b(inc|llc|ltd|corp|corporation|company|co|group|holdings|the)\b/g, " ").replace(/\s+/g, " ").trim();
+  t = t.replace(/['\u2019]/g, "").replace(/[^a-z0-9+ ]+/g, " ").replace(/\s+/g, " ").trim();
+  if (firm.length >= 3) t = t.split(firm).join("this employer").replace(/this employer( (inc|llc|ltd|corp|corporation|co|company|group|holdings))+\b/g, "this employer");
+  t = t
+    .replace(/\bauthorised\b/g, "authorized").replace(/\borganisation\b/g, "organization").replace(/\blicence\b/g, "license")
+    .replace(/\b(the )?(united states of america|united states|u s a|u s|usa)\b/g, "us")
+    .replace(/\s+/g, " ").trim();
+  return t;
+}
+
+/**
+ * Answers already given, by question as written and by question however
+ * written. Where two saved questions come to the same words and hold
+ * different answers, that writing answers nothing: the person said two
+ * things, and which applies here is not this program's to choose.
+ */
+export function answerIndex(rows, company = "") {
+  const exact = new Map();
+  const byKey = new Map();
+  const clash = new Set();
+  for (const r of rows ?? []) {
+    const q = String(r?.q_key ?? "");
+    const a = r?.answer;
+    if (!q || a === null || a === undefined || String(a).trim() === "") continue;
+    exact.set(q, a);
+    const k = questionKey(q, company);
+    if (k.length < 12) continue;
+    if (byKey.has(k) && String(byKey.get(k)).trim().toLowerCase() !== String(a).trim().toLowerCase()) clash.add(k);
+    else byKey.set(k, a);
+  }
+  for (const k of clash) byKey.delete(k);
+  return {
+    exact,
+    find(question) {
+      const k = questionKey(question, company);
+      return k.length >= 12 && byKey.has(k) ? byKey.get(k) : null;
+    },
+  };
+}
+
 /** A date, in the forms a form may want it: what was meant is one day. */
 export function dateForms(value) {
   const d = value instanceof Date ? value : new Date(String(value ?? ""));

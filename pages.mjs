@@ -27,3 +27,34 @@ export async function allRows(db, path, max = 60000) {
   }
   return out.length > max ? out.slice(0, max) : out;
 }
+
+/**
+ * A question put again when the failure was the line's and not the answer's.
+ *
+ * A read that fails because the network dropped, or because the database
+ * said "busy" or "try later", is asked again: twice more, a moment apart.
+ * Only reads. A write that may have arrived is not sent twice from here —
+ * whoever wrote it decides what a lost answer means.
+ *
+ * @param ask    () => Promise: the read
+ * @param opts   tries (3), waits in ms ([400, 1500]), sleep (for the checks)
+ */
+export async function readAgain(ask, { tries = 3, waits = [400, 1500], sleep = (ms) => new Promise((r) => setTimeout(r, ms)) } = {}) {
+  let last;
+  for (let k = 0; k < tries; k++) {
+    try {
+      return await ask();
+    } catch (e) {
+      last = e;
+      if (!passing(e) || k === tries - 1) throw e;
+      await sleep(waits[Math.min(k, waits.length - 1)]);
+    }
+  }
+  throw last;
+}
+
+/** Whether a failure is one that passes: the line, or the far end being busy. Not a refusal, not a bad question. */
+export function passing(e) {
+  const m = String(e?.message ?? e);
+  return /fetch failed|network|socket|ECONNRESET|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|terminated|aborted|timeout/i.test(m) || /\bDB (429|500|502|503|504|520|521|522|524)\b/.test(m);
+}

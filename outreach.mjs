@@ -31,6 +31,7 @@
 //
 // Free: a public-repo runner, public pages, the free Gemini tier.
 
+import { fenced, asInformation, ordersIn, soundAnswer, FENCE_RULE } from "./untrusted.mjs";
 import { allRows } from "./pages.mjs";
 import { useOwnKey } from "./ownkey.mjs";
 import { geminiForTitles } from "./answers.mjs";
@@ -313,7 +314,7 @@ async function writeNote(job, profile, resume) {
       (await geminiForTitles(
         PROMPT.replaceAll("{TITLE}", job.title)
           .replaceAll("{COMPANY}", job.company)
-          .replace("{POSTING}", String(job.description ?? "No posting text available.").slice(0, 3500))
+          .replace("{POSTING}", () => `${FENCE_RULE}\n${fenced("POSTING", job.description ?? "No posting text available.", 3500)}`)
           .replace("{RESUME}", resume.slice(0, 4500)),
         key,
         // Room to think and still finish: 700 came back as twenty words.

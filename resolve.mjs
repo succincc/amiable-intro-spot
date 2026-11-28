@@ -769,13 +769,24 @@ if (process.env.RESOLVE_IMPORT_ONLY !== "1") {
     } catch (e) {
       console.log(`census: could not be read (${String(e.message).slice(0, 60)})`);
     }
-    // Longest-unchecked first, so successive runs work through the whole list.
+    // Never looked at first; then what failed, longest ago first — but not
+    // what failed within the week. A site that refused the visit yesterday
+    // refuses it today: a thousand failed employers were each being opened
+    // again every day or so, which is most of what this job can do in a
+    // day, spent on reaching the same answer. Once a week is often enough
+    // for a site to have changed. The one exception is made once: employers
+    // written off as "no such page" before the front page was tried (28 Nov)
+    // are looked at again now, whenever they were last looked at.
+    const weekAgo = new Date(Date.now() - 7 * 86_400_000).toISOString();
+    const FRONT_PAGE_TRIED_FROM = "2026-11-28T07:40:00Z";
     list =
       (await db(
-        `company_candidates?status=in.(failed,pending)` +
-          (process.env.ONLY_SYSTEM ? `&note=ilike.*runs%20on%20${encodeURIComponent(process.env.ONLY_SYSTEM)}*` : "") +
+        (process.env.ONLY_SYSTEM
+          ? `company_candidates?status=in.(failed,pending)&note=ilike.*runs%20on%20${encodeURIComponent(process.env.ONLY_SYSTEM)}*`
+          : `company_candidates?or=(status.eq.pending,and(status.eq.failed,checked_at.lt.${weekAgo}),and(status.eq.failed,note.ilike.*HTTP%2040*,checked_at.lt.${FRONT_PAGE_TRIED_FROM}))`) +
           `&select=id,name,careers_url,note&order=checked_at.asc.nullsfirst&limit=${MAX}`,
-      )) ?? [];
+      // Should the database not take the question as put, the plain one is asked: everything not yet placed.
+      ).catch(() => db(`company_candidates?status=in.(failed,pending)&select=id,name,careers_url,note&order=checked_at.asc.nullsfirst&limit=${MAX}`))) ?? [];
   }
   hideNames(list.map((c) => c.name));
   console.log(`${list.length} employer(s) to look at; ${APPLY && !LOCAL ? "saving what is found" : "report only"}.`);

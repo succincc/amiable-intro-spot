@@ -46,6 +46,23 @@ async function main() {
     const headers = { apikey: ANON_KEY, ...ACT_AS, Authorization: `Bearer ${(await sign.json()).access_token}` };
     const kinds = new Set();
     let seen = 0;
+    // Somebody whose autopilot is switched off is not applied for, whatever
+    // waits in their queue: the applier says so and ends. Their queue was
+    // starting lanes all the same — two of twelve in one measured round ran
+    // six seconds of nothing after half a minute of setting up. Anyone but
+    // the owner is always held to the switch; the owner is where the round
+    // says it is (a round started by hand may be a rehearsal that is not).
+    if (process.env.AP_ACT_AS || process.env.RESPECT_AUTOPILOT === "true") {
+      const who = await fetch(`${SUPABASE_URL}/rest/v1/profile?select=autopilot&limit=1`, { headers });
+      if (who.ok) {
+        const [row] = await who.json();
+        if (row && row.autopilot !== true) {
+          console.log("lanes with work for this person: none counted (autopilot is switched off)");
+          if (out) fs.appendFileSync(out, "ok\n");
+          return;
+        }
+      }
+    }
     for (const filter of ["status=in.(queued,applying,review)", "status=eq.needs_help&help_reason=in.(dry_run,incomplete,email_verification,registered)"]) {
       for (let from = 0; from < 20000; from += 1000) {
         const res = await fetch(`${SUPABASE_URL}/rest/v1/jobs?${filter}&select=ats&order=id.asc&offset=${from}&limit=1000`, { headers });

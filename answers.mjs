@@ -25,6 +25,7 @@
 // This file runs standalone in GitHub Actions and cannot import the app's
 // TypeScript, so it keeps its own copy of the retry below.
 // Everything printed here goes through the nets in quiet.mjs: this log is public.
+import { fenced, asInformation, ordersIn, soundAnswer, FENCE_RULE } from "./untrusted.mjs";
 import "./quiet.mjs";
 let MODEL = process.env.GEMINI_MODEL || "gemini-3.8-flash";
 
@@ -339,6 +340,7 @@ RULES
 - No throat-clearing. Do not open with "I am excited" or "I am passionate".
   Start with substance.
 - {LENGTH}
+- {FENCE}
 
 Return ONLY the answer text. Nothing before or after it.
 
@@ -378,11 +380,15 @@ export async function generateAnswer({
 
   const prompt = PROMPT
     .replace("{LENGTH}", lengthRule(maxLength))
-    .replace("{COMPANY}", job?.company || "the company")
-    .replace("{TITLE}", job?.title || "this role")
-    .replace("{POSTING}", (job?.description || "No posting text available.").slice(0, 3000))
-    .replace("{RESUME}", (resume || "").slice(0, 4000))
-    .replace("{QUESTION}", question);
+    .replace("{FENCE}", FENCE_RULE)
+    .replace("{COMPANY}", () => asInformation(job?.company || "the company", 80))
+    .replace("{TITLE}", () => asInformation(job?.title || "this role", 120))
+    // The posting and the question are somebody else's words: fenced, and
+    // with anything addressed to a program taken out (untrusted.mjs).
+    .replace("{POSTING}", () => fenced("POSTING", job?.description || "No posting text available.", 3000))
+    .replace("{RESUME}", () => (resume || "").slice(0, 4000))
+    .replace("{QUESTION}", () => fenced("QUESTION", question, 600));
+  if (ordersIn(job?.description) || ordersIn(question)) console.warn("[answers] the posting or the question carries words addressed to a program; they were left out of what the model reads.");
 
   let text;
   try {
@@ -435,6 +441,9 @@ export async function generateAnswer({
     return /\b(Inc|LLC|Corp|Technologies|Solutions|Systems|Group)\b/.test(n);
   });
   if (suspicious.length) return null;   // let a human handle it rather than risk it
+  // An address, a link or a number that is not the candidate's own, or an
+  // answer about prompts and instructions: not used.
+  if (!soundAnswer(answer, `${resume || ""} ${JSON.stringify(profile ?? {})}`)) return null;
 
   return { answer, cacheable: !specific };
 }
@@ -461,7 +470,8 @@ export async function chooseOption({ question, options, resume, apiKey }) {
     `You are filling in a job application form on behalf of the candidate ` +
     `whose resume appears below. Choose the answer the candidate would ` +
     `truthfully give.\n\n` +
-    `Question: ${question}\n\n` +
+    `${FENCE_RULE}\n\n` +
+    `Question:\n${fenced("QUESTION", question, 600)}\n\n` +
     `Allowed answers:\n${list}\n\n` +
     `Rules, in order:\n` +
     `1. If the resume states the answer, use it.\n` +

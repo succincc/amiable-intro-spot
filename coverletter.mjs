@@ -8,6 +8,7 @@
 // could sign: nothing invented, no placeholder left in, no figure that is
 // not theirs.
 
+import { fenced, asInformation, ordersIn, soundAnswer, FENCE_RULE } from "./untrusted.mjs";
 import { geminiForTitles } from "./answers.mjs";
 
 /** Is this box, or this upload, asking for a cover letter? */
@@ -122,7 +123,7 @@ export async function writeCoverLetter({ job, profile, resume, apiKey }) {
           .replace("{TITLE}", job?.title || "the open position")
           .replace("{COMPANY}", job?.company || "the company")
           .replace("{START}", String(profile?.earliest_start ?? "").trim() || "not stated")
-          .replace("{POSTING}", String(job?.description ?? "No posting text available.").slice(0, 3000))
+          .replace("{POSTING}", () => `${FENCE_RULE}\n${fenced("POSTING", job?.description ?? "No posting text available.", 3000)}`)
           .replace("{RESUME}", String(resume).slice(0, 4500)),
         apiKey,
         900,

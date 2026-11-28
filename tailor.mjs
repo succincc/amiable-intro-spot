@@ -19,6 +19,7 @@
 // is removed. A school that is not in the source is removed. The page can
 // lose a line that way; it cannot gain a claim.
 
+import { fenced, asInformation, ordersIn, soundAnswer, FENCE_RULE } from "./untrusted.mjs";
 import { geminiForTitles } from "./answers.mjs";
 import { requirementTerms, NAMED_TERMS } from "./ats.mjs";
 
@@ -523,7 +524,7 @@ export async function tailorResume({ job, profile, roles = "", apiKey }) {
   let raw = "";
   try {
     raw = await geminiForTitles(
-      `${TAILOR_PROMPT}\n\nJOB: ${job.title} at ${job.company ?? ""}\nPOSTING:\n${String(job.description).slice(0, 4000)}\n\nCANDIDATE RESUME:\n${source}`,
+      `${TAILOR_PROMPT}\n\n${FENCE_RULE}\n\nJOB: ${asInformation(job.title, 120)} at ${asInformation(job.company ?? "", 80)}\nPOSTING:\n${fenced("POSTING", job.description, 4000)}\n\nCANDIDATE RESUME:\n${source}`,
       apiKey,
       // Generous: the newer models spend part of this thinking before they
       // write, and a page cut off mid-way cannot be used at all.
