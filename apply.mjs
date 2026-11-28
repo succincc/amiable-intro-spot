@@ -91,6 +91,12 @@ export function originOf(outcome) {
   if (/linkedin url|portfolio url|website url|cover letter/.test(note) && /\*/.test(note)) return "a fact only the owner has";
   if (why === "error" && /please select an option|\* \||\*$/.test(note)) return "a required answer nothing on file gives";
   if (why === "dry_run") return "a rehearsal";
+  // A form that stopped on a required box left empty: sometimes a question
+  // nothing on file answers (the person's to give), sometimes an answer
+  // that was on file and that the form would not take (this program's).
+  // The note does not say which, so it is not counted as either.
+  if (why === "incomplete") return "a required answer missing or not taken";
+  if (why === "interrupted") return "a run that stopped mid-way";
   if (outcome?.status === "skipped") return "passed over by a rule";
   return "this program's to fix";
 }
@@ -196,6 +202,8 @@ const patchJob = (id, patch) =>
 // portal's own password reset. One attempt per portal per run, so a wall that
 // still will not open costs one visit, not one per posting.
 const RETRYABLE_PARKED = ["incomplete", "error", "no_form", "login"];
+// The files whose change is a reason to offer a parked posting again.
+const APPLYING_CODE = ["apply.mjs", "answers.mjs", "normalize.mjs", "tailor.mjs", "ats.mjs", "quality.mjs", "candidate.mjs", "fromprofile.mjs", "untrusted.mjs", "geo.mjs", "gone.mjs", "samejob.mjs", "school.mjs", "coverletter.mjs", "major-boards-engine.mjs", "major-boards-selectors.mjs"];
 
 /**
  * What shape each location field is in — never what it says.
@@ -232,7 +240,13 @@ function profileShape(p) {
 async function requeueStaleParked() {
   let since = null;
   try {
-    since = execSync("git log -1 --format=%cI", { encoding: "utf8", timeout: 10_000 }).trim();
+    // The last change to what fills in and sends an application — not the
+    // last change to anything. A commit to a report, a workflow or a note
+    // was putting every parked posting back in the queue to stop at the
+    // same place again. (The checkout keeps enough history to tell; with
+    // none, this is the time of the checkout's only commit, as before.)
+    since = execSync(`git log -1 --format=%cI -- ${APPLYING_CODE.join(" ")}`, { encoding: "utf8", timeout: 10_000 }).trim()
+      || execSync("git log -1 --format=%cI", { encoding: "utf8", timeout: 10_000 }).trim();
   } catch {
     /* a checkout without history; fall through and leave the backlog alone */
   }

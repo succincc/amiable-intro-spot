@@ -107,6 +107,9 @@ jobs:
       lanes: ${{ steps.lanes.outputs.lanes }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Enough history to say when the applying code last changed.
+          fetch-depth: 40
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
@@ -196,6 +199,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Enough history to say when the applying code last changed.
+          fetch-depth: 40
 
       - uses: actions/setup-node@v4
         with:
@@ -331,6 +337,11 @@ jobs:
         if: always()
         run: |
           grep -hE "^(what this run spent|parts of the engine reached|why each one did not go|last look at|applied [0-9]+, need you|  - |rehearsed, never sent|review: |verdict: |set out to be applied to by hand|set to be tried again|employers whose )|^.{0,24}(note: |skipped as invisible|missing \"|the PDF does not read back)" "$RUNNER_TEMP/apply.txt" | cut -c1-700 | tail -60 || true
+          # Where a posting never reached a form, or a picker would not
+          # take its answer: what the page looked like, each different
+          # shape once with how often it was met. The end of the log is
+          # what gets read; the cause should be there, not 500 lines up.
+          grep -hE "no form here, by shape|no form; buttons on page|source trace:|left in hand by a run|the form's own verdict|what the form shows now" "$RUNNER_TEMP/apply.txt" | sed -E 's/^\[[0-9]+\] *//' | cut -c1-900 | sort | uniq -c | sort -rn | head -14 || true
           # On the run's own page too: a green tick says the program ran,
           # this says what it sent.
           { echo "### ${{ matrix.lane || 'apply' }}"; grep -hE "^verdict: " "$RUNNER_TEMP/apply.txt" | sed 's/^/- /' || echo "- no verdict was written"; } >> "$GITHUB_STEP_SUMMARY"
